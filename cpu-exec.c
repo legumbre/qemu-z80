@@ -263,6 +263,10 @@ static inline TranslationBlock *tb_find_fast(void)
     flags = env->pregs[PR_CCS] & U_FLAG;
     cs_base = 0;
     pc = env->pc;
+#elif defined(TARGET_Z80)
+    flags = env->hflags;
+    cs_base = 0;
+    pc = env->pc;
 #else
 #error unsupported CPU
 #endif
@@ -330,6 +334,15 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_SH4)
 #elif defined(TARGET_CRIS)
     /* XXXXX */
+#elif defined(TARGET_Z80)
+    env_to_regs();
+    /* put eflags in CPU temporary format */
+    CC_SRC = env->eflags & (CC_S | CC_Z | CC_P | CC_C);
+    CC_OP = CC_OP_EFLAGS;
+    env->eflags &= ~(CC_S | CC_Z | CC_P | CC_C);
+#elif defined(TARGET_Z80)
+    /* restore flags in standard format */
+//    env->eflags = env->eflags | cc_table[CC_OP].compute_all();
 #else
 #error unsupported target CPU
 #endif
@@ -577,6 +590,13 @@ int cpu_exec(CPUState *env1)
                         do_interrupt(1);
                         next_tb = 0;
                     }
+#elif defined(TARGET_Z80)
+                    if (interrupt_request & CPU_INTERRUPT_HARD) {
+			env->interrupt_request &= ~CPU_INTERRUPT_HARD;
+//                      Z80 FIXME Z80
+//                        env->exception_index = EXCP_IRQ;
+                        do_interrupt(env);
+                    }
 #endif
                    /* Don't use the cached interupt_request value,
                       do_interrupt may have updated the EXITTB flag. */
@@ -621,6 +641,8 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_ALPHA)
                     cpu_dump_state(env, logfile, fprintf, 0);
 #elif defined(TARGET_CRIS)
+                    cpu_dump_state(env, logfile, fprintf, 0);
+#elif defined(TARGET_Z80)
                     cpu_dump_state(env, logfile, fprintf, 0);
 #else
 #error unsupported target CPU
@@ -698,6 +720,9 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_ALPHA)
 #elif defined(TARGET_CRIS)
     /* XXXXX */
+#elif defined(TARGET_Z80)
+    /* restore flags in standard format */
+//    env->eflags = env->eflags | cc_table[CC_OP].compute_all();
 #else
 #error unsupported target CPU
 #endif

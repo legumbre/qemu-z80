@@ -95,6 +95,7 @@ dsound="no"
 coreaudio="no"
 alsa="no"
 esd="no"
+libspectrum="no"
 fmod="no"
 fmod_lib=""
 fmod_inc=""
@@ -275,6 +276,8 @@ for opt do
   ;;
   --fmod-inc=*) fmod_inc="$optarg"
   ;;
+  --enable-libspectrum) libspectrum="yes"
+  ;;
   --disable-vnc-tls) vnc_tls="no"
   ;;
   --enable-mingw32) mingw32="yes" ; cross_prefix="i386-mingw32-" ; linux_user="no"
@@ -421,6 +424,7 @@ echo "  --enable-alsa            enable ALSA audio driver"
 echo "  --enable-esd             enable EsoundD audio driver"
 echo "  --enable-fmod            enable FMOD audio driver"
 echo "  --enable-dsound          enable DirectSound audio driver"
+echo "  --enable-libspectrum     enable ZX Spectrum snapshot loading"
 echo "  --disable-brlapi         disable BrlAPI"
 echo "  --disable-vnc-tls        disable TLS encryption for VNC server"
 echo "  --disable-curses         disable curses output"
@@ -555,6 +559,7 @@ ppc64-softmmu \
 sh4-softmmu \
 sh4eb-softmmu \
 sparc-softmmu \
+z80-softmmu \
 "
     fi
 # the following are Linux specific
@@ -834,6 +839,7 @@ fi
 if test -n "$sparc_cpu"; then
     echo "Target Sparc Arch $sparc_cpu"
 fi
+echo "libspec. support  $libspectrum"
 echo "kqemu support     $kqemu"
 echo "brlapi support    $brlapi"
 echo "Documentation     $build_docs"
@@ -1040,6 +1046,10 @@ if test "$fmod" = "yes" ; then
   echo "CONFIG_FMOD_LIB=$fmod_lib" >> $config_mak
   echo "CONFIG_FMOD_INC=$fmod_inc" >> $config_mak
   echo "#define CONFIG_FMOD 1" >> $config_h
+fi
+if test "$libspectrum" = "yes" ; then
+  echo "CONFIG_LIBSPECTRUM=yes" >> $config_mak
+  echo "#define CONFIG_LIBSPECTRUM 1" >> $config_h
 fi
 if test "$vnc_tls" = "yes" ; then
   echo "CONFIG_VNC_TLS=yes" >> $config_mak
@@ -1336,6 +1346,13 @@ case "$target_cpu" in
     echo "#define TARGET_SPARC 1" >> $config_h
     echo "#define TARGET_SPARC64 1" >> $config_h
     echo "#define TARGET_ABI32 1" >> $config_h
+  ;;
+  z80)
+    echo "TARGET_ARCH=z80" >> $config_mak
+    echo "CONFIG_DYNGEN_OP=yes" >> $config_mak
+    echo "#define TARGET_ARCH \"z80\"" >> $config_h
+    echo "#define TARGET_Z80 1" >> $config_h
+    echo "#define CONFIG_DYNGEN_OP 1" >> $config_h
   ;;
   *)
     echo "Unsupported target CPU"

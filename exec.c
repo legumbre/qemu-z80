@@ -756,6 +756,9 @@ void tb_invalidate_phys_page_range(target_phys_addr_t start, target_phys_addr_t 
                 current_flags |= (env->eflags & (IOPL_MASK | TF_MASK | VM_MASK));
                 current_cs_base = (target_ulong)env->segs[R_CS].base;
                 current_pc = current_cs_base + env->eip;
+#elif defined(TARGET_Z80)
+                current_flags = env->hflags;
+                current_pc = env->pc;
 #else
 #error unsupported CPU
 #endif

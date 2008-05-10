@@ -56,7 +56,7 @@ typedef void (GenOpFunc1)(long);
 typedef void (GenOpFunc2)(long, long);
 typedef void (GenOpFunc3)(long, long, long);
 
-#if defined(TARGET_I386)
+#if defined(TARGET_I386) | defined(TARGET_Z80)
 
 void optimize_flags_init(void);
 

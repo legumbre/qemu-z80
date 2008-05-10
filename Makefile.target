@@ -246,6 +246,13 @@ LIBOBJS+= mmu.o
 endif
 endif
 
+ifeq ($(TARGET_BASE_ARCH), z80)
+LIBOBJS+=helper.o helper2.o
+ifdef CONFIG_LIBSPECTRUM
+LIBS+=-lspectrum
+endif
+endif
+
 # NOTE: the disassembler code is only needed for debugging
 LIBOBJS+=disas.o
 ifeq ($(findstring i386, $(TARGET_ARCH) $(ARCH)),i386)
@@ -283,6 +290,9 @@ LIBOBJS+=hppa-dis.o
 endif
 ifeq ($(findstring s390, $(TARGET_ARCH) $(ARCH)),s390)
 LIBOBJS+=s390-dis.o
+endif
+ifeq ($(findstring z80, $(TARGET_ARCH) $(ARCH)),z80)
+LIBOBJS+=z80-dis.o
 endif
 
 # libqemu
@@ -634,6 +644,10 @@ endif
 ifeq ($(TARGET_BASE_ARCH), m68k)
 OBJS+= an5206.o mcf5206.o ptimer.o mcf_uart.o mcf_intc.o mcf5208.o mcf_fec.o
 OBJS+= m68k-semi.o dummy_m68k.o
+endif
+ifeq ($(TARGET_BASE_ARCH), z80)
+OBJS+= zx_spectrum.o zx_ula.o dma.o $(AUDIODRV)
+OBJS+= serial.o i8259.o
 endif
 ifdef CONFIG_GDBSTUB
 OBJS+=gdbstub.o

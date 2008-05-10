@@ -931,6 +931,34 @@ static void cpu_gdb_write_registers(CPUState *env, uint8_t *mem_buf, int size)
   for (i = 0; i < 16; i++) LOAD(env->regs[i]);
   LOAD (env->pc);
 }
+#elif defined(TARGET_Z80)
+/* Z80 FIXME Z80 TODO Z80 */
+/* GDB doesn't define this yet */
+static int cpu_gdb_read_registers(CPUState *env, uint8_t *mem_buf)
+{
+    uint32_t *registers = (uint32_t *)mem_buf;
+    int i, fpus;
+
+    for(i = 0; i < 8; i++) {
+        registers[i] = env->regs[i];
+    }
+    registers[8] = env->pc;
+    registers[9] = env->imode;
+    
+    return 10 * 4;
+}
+
+static void cpu_gdb_write_registers(CPUState *env, uint8_t *mem_buf, int size)
+{
+    uint32_t *registers = (uint32_t *)mem_buf;
+    int i;
+
+    for(i = 0; i < 8; i++) {
+        env->regs[i] = tswapl(registers[i]);
+    }
+    env->pc = tswapl(registers[8]);
+    env->imode = tswapl(registers[9]);
+}
 #else
 static int cpu_gdb_read_registers(CPUState *env, uint8_t *mem_buf)
 {
