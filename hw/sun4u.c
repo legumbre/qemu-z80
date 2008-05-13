@@ -72,7 +72,8 @@ extern int nographic;
 
 static int sun4u_NVRAM_set_params (m48t59_t *nvram, uint16_t NVRAM_size,
                                    const unsigned char *arch,
-                                   ram_addr_t RAM_size, const char *boot_devices,
+                                   ram_addr_t RAM_size,
+                                   const char *boot_devices,
                                    uint32_t kernel_image, uint32_t kernel_size,
                                    const char *cmdline,
                                    uint32_t initrd_image, uint32_t initrd_size,
@@ -104,7 +105,7 @@ static int sun4u_NVRAM_set_params (m48t59_t *nvram, uint16_t NVRAM_size,
     header->kernel_image = cpu_to_be64((uint64_t)kernel_image);
     header->kernel_size = cpu_to_be64((uint64_t)kernel_size);
     if (cmdline) {
-        strcpy(phys_ram_base + CMDLINE_ADDR, cmdline);
+        pstrcpy_targphys(CMDLINE_ADDR, TARGET_PAGE_SIZE, cmdline);
         header->cmdline = cpu_to_be64((uint64_t)CMDLINE_ADDR);
         header->cmdline_size = cpu_to_be64((uint64_t)strlen(cmdline));
     }
@@ -268,7 +269,8 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
 
     prom_offset = RAM_size + vga_ram_size;
     cpu_register_physical_memory(PROM_ADDR,
-                                 (PROM_SIZE_MAX + TARGET_PAGE_SIZE) & TARGET_PAGE_MASK,
+                                 (PROM_SIZE_MAX + TARGET_PAGE_SIZE) &
+                                 TARGET_PAGE_MASK,
                                  prom_offset | IO_MEM_ROM);
 
     if (bios_name == NULL)
@@ -287,9 +289,12 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
         /* XXX: put correct offset */
         kernel_size = load_elf(kernel_filename, 0, NULL, NULL, NULL);
         if (kernel_size < 0)
-            kernel_size = load_aout(kernel_filename, phys_ram_base + KERNEL_LOAD_ADDR);
+            kernel_size = load_aout(kernel_filename, KERNEL_LOAD_ADDR,
+                                    ram_size - KERNEL_LOAD_ADDR);
         if (kernel_size < 0)
-            kernel_size = load_image(kernel_filename, phys_ram_base + KERNEL_LOAD_ADDR);
+            kernel_size = load_image_targphys(kernel_filename,
+                                              KERNEL_LOAD_ADDR,
+                                              ram_size - KERNEL_LOAD_ADDR);
         if (kernel_size < 0) {
             fprintf(stderr, "qemu: could not load kernel '%s'\n",
                     kernel_filename);
@@ -298,7 +303,9 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
 
         /* load initrd */
         if (initrd_filename) {
-            initrd_size = load_image(initrd_filename, phys_ram_base + INITRD_LOAD_ADDR);
+            initrd_size = load_image_targphys(initrd_filename,
+                                              INITRD_LOAD_ADDR,
+                                              ram_size - INITRD_LOAD_ADDR);
             if (initrd_size < 0) {
                 fprintf(stderr, "qemu: could not load initial ram disk '%s'\n",
                         initrd_filename);
@@ -307,10 +314,9 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
         }
         if (initrd_size > 0) {
             for (i = 0; i < 64 * TARGET_PAGE_SIZE; i += TARGET_PAGE_SIZE) {
-                if (ldl_raw(phys_ram_base + KERNEL_LOAD_ADDR + i)
-                    == 0x48647253) { // HdrS
-                    stl_raw(phys_ram_base + KERNEL_LOAD_ADDR + i + 16, INITRD_LOAD_ADDR);
-                    stl_raw(phys_ram_base + KERNEL_LOAD_ADDR + i + 20, initrd_size);
+                if (ldl_phys(KERNEL_LOAD_ADDR + i) == 0x48647253) { // HdrS
+                    stl_phys(KERNEL_LOAD_ADDR + i + 16, INITRD_LOAD_ADDR);
+                    stl_phys(KERNEL_LOAD_ADDR + i + 20, initrd_size);
                     break;
                 }
             }
@@ -318,7 +324,8 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
     }
     pci_bus = pci_apb_init(APB_SPECIAL_BASE, APB_MEM_BASE, NULL);
     isa_mem_base = VGA_BASE;
-    pci_cirrus_vga_init(pci_bus, ds, phys_ram_base + RAM_size, RAM_size, vga_ram_size);
+    pci_cirrus_vga_init(pci_bus, ds, phys_ram_base + RAM_size, RAM_size,
+                        vga_ram_size);
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
         if (serial_hds[i]) {
@@ -329,7 +336,8 @@ static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
 
     for(i = 0; i < MAX_PARALLEL_PORTS; i++) {
         if (parallel_hds[i]) {
-            parallel_init(parallel_io[i], NULL/*parallel_irq[i]*/, parallel_hds[i]);
+            parallel_init(parallel_io[i], NULL/*parallel_irq[i]*/,
+                          parallel_hds[i]);
         }
     }
 

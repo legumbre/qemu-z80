@@ -261,6 +261,7 @@ static inline TranslationBlock *tb_find_fast(void)
     pc = env->pc;
 #elif defined(TARGET_CRIS)
     flags = env->pregs[PR_CCS] & U_FLAG;
+    flags |= env->dslot;
     cs_base = 0;
     pc = env->pc;
 #elif defined(TARGET_Z80)
@@ -367,6 +368,8 @@ int cpu_exec(CPUState *env1)
                                       env->exception_is_int,
                                       env->error_code,
                                       env->exception_next_eip);
+                    /* successfully delivered */
+                    env->old_exception = -1;
 #endif
                     ret = env->exception_index;
                     break;
@@ -762,7 +765,7 @@ void cpu_x86_load_seg(CPUX86State *s, int seg_reg, int selector)
         cpu_x86_load_seg_cache(env, seg_reg, selector,
                                (selector << 4), 0xffff, 0);
     } else {
-        load_seg(seg_reg, selector);
+        helper_load_seg(seg_reg, selector);
     }
     env = saved_env;
 }

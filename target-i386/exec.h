@@ -95,10 +95,6 @@ extern int loglevel;
 #define ST(n)  (env->fpregs[(env->fpstt + (n)) & 7].d)
 #define ST1    ST(1)
 
-#ifdef USE_FP_CONVERT
-#define FP_CONVERT  (env->fp_convert)
-#endif
-
 #include "cpu.h"
 #include "exec-all.h"
 
@@ -109,15 +105,13 @@ typedef struct CCTable {
 
 extern CCTable cc_table[];
 
-void load_seg(int seg_reg, int selector);
+void helper_load_seg(int seg_reg, int selector);
 void helper_ljmp_protected_T0_T1(int next_eip);
 void helper_lcall_real_T0_T1(int shift, int next_eip);
 void helper_lcall_protected_T0_T1(int shift, int next_eip);
 void helper_iret_real(int shift);
 void helper_iret_protected(int shift, int next_eip);
 void helper_lret_protected(int shift, int addend);
-void helper_lldt_T0(void);
-void helper_ltr_T0(void);
 void helper_movl_crN_T0(int reg);
 void helper_movl_drN_T0(int reg);
 void helper_invlpg(target_ulong addr);
@@ -150,27 +144,7 @@ void OPPROTO op_movl_T0_eflags(void);
 void helper_mulq_EAX_T0(void);
 void helper_imulq_EAX_T0(void);
 void helper_imulq_T0_T1(void);
-void helper_divq_EAX_T0(void);
-void helper_idivq_EAX_T0(void);
-void helper_bswapq_T0(void);
 void helper_cmpxchg8b(void);
-void helper_single_step(void);
-void helper_cpuid(void);
-void helper_enter_level(int level, int data32);
-void helper_enter64_level(int level, int data64);
-void helper_sysenter(void);
-void helper_sysexit(void);
-void helper_syscall(int next_eip_addend);
-void helper_sysret(int dflag);
-void helper_rdtsc(void);
-void helper_rdpmc(void);
-void helper_rdmsr(void);
-void helper_wrmsr(void);
-void helper_lsl(void);
-void helper_lar(void);
-void helper_verr(void);
-void helper_verw(void);
-void helper_rsm(void);
 
 void check_iob_T0(void);
 void check_iow_T0(void);
@@ -183,46 +157,6 @@ void check_iol_DX(void);
 
 #include "softmmu_exec.h"
 
-static inline double ldfq(target_ulong ptr)
-{
-    union {
-        double d;
-        uint64_t i;
-    } u;
-    u.i = ldq(ptr);
-    return u.d;
-}
-
-static inline void stfq(target_ulong ptr, double v)
-{
-    union {
-        double d;
-        uint64_t i;
-    } u;
-    u.d = v;
-    stq(ptr, u.i);
-}
-
-static inline float ldfl(target_ulong ptr)
-{
-    union {
-        float f;
-        uint32_t i;
-    } u;
-    u.i = ldl(ptr);
-    return u.f;
-}
-
-static inline void stfl(target_ulong ptr, float v)
-{
-    union {
-        float f;
-        uint32_t i;
-    } u;
-    u.f = v;
-    stl(ptr, u.i);
-}
-
 #endif /* !defined(CONFIG_USER_ONLY) */
 
 #ifdef USE_X86LDOUBLE
@@ -231,6 +165,12 @@ static inline void stfl(target_ulong ptr, float v)
 #define floatx_to_int64 floatx80_to_int64
 #define floatx_to_int32_round_to_zero floatx80_to_int32_round_to_zero
 #define floatx_to_int64_round_to_zero floatx80_to_int64_round_to_zero
+#define int32_to_floatx int32_to_floatx80
+#define int64_to_floatx int64_to_floatx80
+#define float32_to_floatx float32_to_floatx80
+#define float64_to_floatx float64_to_floatx80
+#define floatx_to_float32 floatx80_to_float32
+#define floatx_to_float64 floatx80_to_float64
 #define floatx_abs floatx80_abs
 #define floatx_chs floatx80_chs
 #define floatx_round_to_int floatx80_round_to_int
@@ -251,6 +191,12 @@ static inline void stfl(target_ulong ptr, float v)
 #define floatx_to_int64 float64_to_int64
 #define floatx_to_int32_round_to_zero float64_to_int32_round_to_zero
 #define floatx_to_int64_round_to_zero float64_to_int64_round_to_zero
+#define int32_to_floatx int32_to_float64
+#define int64_to_floatx int64_to_float64
+#define float32_to_floatx float32_to_float64
+#define float64_to_floatx(x, e) (x)
+#define floatx_to_float32 float64_to_float32
+#define floatx_to_float64(x, e) (x)
 #define floatx_abs float64_abs
 #define floatx_chs float64_chs
 #define floatx_round_to_int float64_round_to_int
@@ -378,22 +324,6 @@ static inline void helper_fstt(CPU86_LDouble f, target_ulong ptr)
 }
 #else
 
-/* XXX: same endianness assumed */
-
-#ifdef CONFIG_USER_ONLY
-
-static inline CPU86_LDouble helper_fldt(target_ulong ptr)
-{
-    return *(CPU86_LDouble *)(unsigned long)ptr;
-}
-
-static inline void helper_fstt(CPU86_LDouble f, target_ulong ptr)
-{
-    *(CPU86_LDouble *)(unsigned long)ptr = f;
-}
-
-#else
-
 /* we use memory access macros */
 
 static inline CPU86_LDouble helper_fldt(target_ulong ptr)
@@ -414,8 +344,6 @@ static inline void helper_fstt(CPU86_LDouble f, target_ulong ptr)
     stw(ptr + 8, temp.l.upper);
 }
 
-#endif /* !CONFIG_USER_ONLY */
-
 #endif /* USE_X86LDOUBLE */
 
 #define FPUS_IE (1 << 0)
@@ -432,49 +360,9 @@ static inline void helper_fstt(CPU86_LDouble f, target_ulong ptr)
 
 extern const CPU86_LDouble f15rk[7];
 
-void helper_fldt_ST0_A0(void);
-void helper_fstt_ST0_A0(void);
 void fpu_raise_exception(void);
-CPU86_LDouble helper_fdiv(CPU86_LDouble a, CPU86_LDouble b);
-void helper_fbld_ST0_A0(void);
-void helper_fbst_ST0_A0(void);
-void helper_f2xm1(void);
-void helper_fyl2x(void);
-void helper_fptan(void);
-void helper_fpatan(void);
-void helper_fxtract(void);
-void helper_fprem1(void);
-void helper_fprem(void);
-void helper_fyl2xp1(void);
-void helper_fsqrt(void);
-void helper_fsincos(void);
-void helper_frndint(void);
-void helper_fscale(void);
-void helper_fsin(void);
-void helper_fcos(void);
-void helper_fxam_ST0(void);
-void helper_fstenv(target_ulong ptr, int data32);
-void helper_fldenv(target_ulong ptr, int data32);
-void helper_fsave(target_ulong ptr, int data32);
-void helper_frstor(target_ulong ptr, int data32);
-void helper_fxsave(target_ulong ptr, int data64);
-void helper_fxrstor(target_ulong ptr, int data64);
 void restore_native_fp_state(CPUState *env);
 void save_native_fp_state(CPUState *env);
-float approx_rsqrt(float a);
-float approx_rcp(float a);
-void update_fp_status(void);
-void helper_hlt(void);
-void helper_monitor(void);
-void helper_mwait(void);
-void helper_vmrun(target_ulong addr);
-void helper_vmmcall(void);
-void helper_vmload(target_ulong addr);
-void helper_vmsave(target_ulong addr);
-void helper_stgi(void);
-void helper_clgi(void);
-void helper_skinit(void);
-void helper_invlpga(void);
 void vmexit(uint64_t exit_code, uint64_t exit_info_1);
 
 extern const uint8_t parity_table[256];
