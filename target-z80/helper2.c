@@ -31,25 +31,67 @@
 
 //#define DEBUG_MMU
 
+static int cpu_z80_find_by_name(const char *name);
+
 CPUZ80State *cpu_z80_init(const char *model)
 {
     CPUZ80State *env;
     static int inited;
+    int id;
 
+    id = cpu_z80_find_by_name(model);
+    if (id == 0)
+        return NULL;
     env = qemu_mallocz(sizeof(CPUZ80State));
     if (!env)
         return NULL;
     cpu_exec_init(env);
-
-    /* TODO: R800 support */
 
     /* init various static tables */
     if (!inited) {
         inited = 1;
         optimize_flags_init();
     }
+    env->model = model;
     cpu_reset(env);
     return env;
+}
+
+struct z80_cpu_t {
+    int id;
+    const char *name;
+};
+
+static const struct z80_cpu_t z80_cpu_names[] = {
+    { Z80_CPU_Z80,  "z80" },
+    { Z80_CPU_R800, "r800" },
+    { 0, NULL }
+};
+
+void z80_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
+{
+    int i;
+
+    (*cpu_fprintf)(f, "Available CPUs:\n");
+    for (i = 0; z80_cpu_names[i].name; i++) {
+        (*cpu_fprintf)(f, "  %s\n", z80_cpu_names[i].name);
+    }
+}
+
+/* return 0 if not found */
+static int cpu_z80_find_by_name(const char *name)
+{
+    int i;
+    int id;
+
+    id = 0;
+    for (i = 0; z80_cpu_names[i].name; i++) {
+        if (strcmp(name, z80_cpu_names[i].name) == 0) {
+            id = z80_cpu_names[i].id;
+            break;
+        }
+    }
+    return id;
 }
 
 /* NOTE: must be called outside the CPU execute loop */

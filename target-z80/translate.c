@@ -46,6 +46,7 @@ typedef struct DisasContext {
     uint16_t pc; /* pc = pc + cs_base */
     int is_jmp; /* 1 = means jump (stop translation), 2 means CPU
                    static state change (stop translation) */
+    int model;
     /* current block context */
     target_ulong cs_base; /* base of CS segment */
     int cc_op;  /* current CC operation */
@@ -1094,6 +1095,7 @@ next_byte:
 
         switch (x) {
         case 0:
+            /* TODO: TST instead of SLL for R800 */
             gen_op_rot_T0[y]();
             if (m) {
                 gen_op_movb_idx_T0[r1](d);
@@ -1150,8 +1152,37 @@ next_byte:
 
         switch (x) {
         case 0:
-        case 3:
             zprintf("nop\n");
+            break;
+        case 3:
+            if (s->model == Z80_CPU_R800) {
+                switch (z) {
+                case 1:
+                    /* does mulub work with r1 == h, l, (hl) or a? */
+                    r1 = regmap(reg[y], m);
+                    gen_op_movb_T0_reg[r1]();
+                    gen_op_mulub_cc();
+                    zprintf("mulub a,%s\n", regnames[r1]);
+                    break;
+                case 3:
+                    if (q == 0) {
+                        /* does muluw work with r1 == de or hl? */
+                        /* what is the effect of DD/FD prefixes here? */
+                        r1 = regpairmap(regpair[p], m);
+                        gen_op_movw_T0_reg[r1]();
+                        gen_op_muluw_cc();
+                        zprintf("muluw hl,%s\n", regpairnames[r1]);
+                    } else {
+                        zprintf("nop\n");
+                    }
+                    break;
+                default:
+                    zprintf("nop\n");
+                    break;
+                }
+            } else {
+                zprintf("nop\n");
+            }
             break;
       
         case 1:
@@ -1457,6 +1488,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     dc->is_jmp = DISAS_NEXT;
     pc_ptr = pc_start;
     lj = -1;
+    dc->model = env->model;
 
     for(;;) {
         if (env->nb_breakpoints > 0) {

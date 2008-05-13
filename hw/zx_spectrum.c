@@ -162,6 +162,8 @@ static void zx_init1(int ram_size, int vga_ram_size,
     CPUState *env;
 
     /* init CPUs */
+    if (!cpu_model)
+        cpu_model = "z80";
     env = cpu_init(cpu_model);
     zx_env = env; // XXX
     register_savevm("cpu", 0, 4, cpu_save, cpu_load, env);

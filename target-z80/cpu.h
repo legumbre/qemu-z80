@@ -195,6 +195,8 @@ typedef struct CPUZ80State {
 
     CPU_COMMON
 
+    int model;
+
     /* in order to simplify APIC support, we leave this pointer to the
        user */
     struct APICState *apic_state;
@@ -232,6 +234,11 @@ uint8_t cpu_get_apic_tpr(CPUZ80State *env);
 #endif
 void cpu_smm_update(CPUZ80State *env);
 
+void z80_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
+
+#define Z80_CPU_Z80  1
+#define Z80_CPU_R800 2
+
 #define TARGET_PAGE_BITS 12
 
 #define CPUState CPUZ80State
@@ -239,6 +246,7 @@ void cpu_smm_update(CPUZ80State *env);
 #define cpu_exec cpu_z80_exec
 #define cpu_gen_code cpu_z80_gen_code
 #define cpu_signal_handler cpu_z80_signal_handler
+#define cpu_list z80_cpu_list
 
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _kernel

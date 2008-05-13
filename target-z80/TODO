@@ -1,0 +1,13 @@
+TODO
+----
+
+- remove unused x86 code
+- allow execution from video RAM
+- don't accept interrupts immediately after EI
+- emulate I and R registers
+- GDB support
+- CP/M emulation
+- R800 emulation:
+  - TST instruction
+  - MULUB/MULUW flags
+  - flags 3 and 5
