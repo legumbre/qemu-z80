@@ -1142,6 +1142,16 @@ int cpu_watchpoint_remove(CPUState *env, target_ulong addr)
     return -1;
 }
 
+/* Remove all watchpoints. */
+void cpu_watchpoint_remove_all(CPUState *env) {
+    int i;
+
+    for (i = 0; i < env->nb_watchpoints; i++) {
+        tlb_flush_page(env, env->watchpoint[i].vaddr);
+    }
+    env->nb_watchpoints = 0;
+}
+
 /* add a breakpoint. EXCP_DEBUG is returned by the CPU loop if a
    breakpoint is reached */
 int cpu_breakpoint_insert(CPUState *env, target_ulong pc)
@@ -1162,6 +1172,17 @@ int cpu_breakpoint_insert(CPUState *env, target_ulong pc)
     return 0;
 #else
     return -1;
+#endif
+}
+
+/* remove all breakpoints */
+void cpu_breakpoint_remove_all(CPUState *env) {
+#if defined(TARGET_HAS_ICE)
+    int i;
+    for(i = 0; i < env->nb_breakpoints; i++) {
+        breakpoint_invalidate(env, env->breakpoints[i]);
+    }
+    env->nb_breakpoints = 0;
 #endif
 }
 
@@ -1341,11 +1362,6 @@ void cpu_abort(CPUState *env, const char *fmt, ...)
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
 #ifdef TARGET_I386
-    if(env->intercept & INTERCEPT_SVM_MASK) {
-	/* most probably the virtual machine should not
-	   be shut down but rather caught by the VMM */
-        vmexit(SVM_EXIT_SHUTDOWN, 0);
-    }
     cpu_dump_state(env, stderr, fprintf, X86_DUMP_FPU | X86_DUMP_CCOP);
 #else
     cpu_dump_state(env, stderr, fprintf, 0);

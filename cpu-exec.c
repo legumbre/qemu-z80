@@ -37,57 +37,17 @@
 #include <sys/ucontext.h>
 #endif
 
+#if defined(__sparc__) && !defined(HOST_SOLARIS)
+// Work around ugly bugs in glibc that mangle global register contents
+#undef env
+#define env cpu_single_env
+#endif
+
 int tb_invalidated_flag;
 static unsigned long next_tb;
 
 //#define DEBUG_EXEC
 //#define DEBUG_SIGNAL
-
-#define SAVE_GLOBALS()
-#define RESTORE_GLOBALS()
-
-#if defined(__sparc__) && !defined(HOST_SOLARIS)
-#include <features.h>
-#if defined(__GLIBC__) && ((__GLIBC__ < 2) || \
-                           ((__GLIBC__ == 2) && (__GLIBC_MINOR__ <= 90)))
-// Work around ugly bugs in glibc that mangle global register contents
-
-static volatile void *saved_env;
-static volatile unsigned long saved_t0, saved_i7;
-#undef SAVE_GLOBALS
-#define SAVE_GLOBALS() do {                                     \
-        saved_env = env;                                        \
-        saved_t0 = T0;                                          \
-        asm volatile ("st %%i7, [%0]" : : "r" (&saved_i7));     \
-    } while(0)
-
-#undef RESTORE_GLOBALS
-#define RESTORE_GLOBALS() do {                                  \
-        env = (void *)saved_env;                                \
-        T0 = saved_t0;                                          \
-        asm volatile ("ld [%0], %%i7" : : "r" (&saved_i7));     \
-    } while(0)
-
-static int sparc_setjmp(jmp_buf buf)
-{
-    int ret;
-
-    SAVE_GLOBALS();
-    ret = setjmp(buf);
-    RESTORE_GLOBALS();
-    return ret;
-}
-#undef setjmp
-#define setjmp(jmp_buf) sparc_setjmp(jmp_buf)
-
-static void sparc_longjmp(jmp_buf buf, int val)
-{
-    SAVE_GLOBALS();
-    longjmp(buf, val);
-}
-#define longjmp(jmp_buf, val) sparc_longjmp(jmp_buf, val)
-#endif
-#endif
 
 void cpu_loop_exit(void)
 {
@@ -181,9 +141,7 @@ static TranslationBlock *tb_find_slow(target_ulong pc,
     tb->tc_ptr = tc_ptr;
     tb->cs_base = cs_base;
     tb->flags = flags;
-    SAVE_GLOBALS();
     cpu_gen_code(env, tb, &code_gen_size);
-    RESTORE_GLOBALS();
     code_gen_ptr = (void *)(((unsigned long)code_gen_ptr + code_gen_size + CODE_GEN_ALIGN - 1) & ~(CODE_GEN_ALIGN - 1));
 
     /* check next page if needed */
@@ -311,7 +269,6 @@ int cpu_exec(CPUState *env1)
 #define SAVE_HOST_REGS 1
 #include "hostregs_helper.h"
     env = env1;
-    SAVE_GLOBALS();
 
     env_to_regs();
 #if defined(TARGET_I386)
@@ -432,13 +389,12 @@ int cpu_exec(CPUState *env1)
 
             next_tb = 0; /* force lookup of first TB */
             for(;;) {
-                SAVE_GLOBALS();
                 interrupt_request = env->interrupt_request;
                 if (__builtin_expect(interrupt_request, 0)
 #if defined(TARGET_I386)
 			&& env->hflags & HF_GIF_MASK
 #endif
-            && !(env->singlestep_enabled & SSTEP_NOIRQ)) {
+            && likely(!(env->singlestep_enabled & SSTEP_NOIRQ))) {
                     if (interrupt_request & CPU_INTERRUPT_DEBUG) {
                         env->interrupt_request &= ~CPU_INTERRUPT_DEBUG;
                         env->exception_index = EXCP_DEBUG;
@@ -660,7 +616,6 @@ int cpu_exec(CPUState *env1)
                             lookup_symbol(tb->pc));
                 }
 #endif
-                RESTORE_GLOBALS();
                 /* see if we can patch the calling TB. When the TB
                    spans two pages, we cannot safely do a direct
                    jump. */
@@ -678,6 +633,11 @@ int cpu_exec(CPUState *env1)
                 tc_ptr = tb->tc_ptr;
                 env->current_tb = tb;
                 /* execute the generated code */
+#if defined(__sparc__) && !defined(HOST_SOLARIS)
+#undef env
+                env = cpu_single_env;
+#define env cpu_single_env
+#endif
                 next_tb = tcg_qemu_tb_exec(tc_ptr);
                 env->current_tb = NULL;
                 /* reset soft MMU for next block (it can currently
@@ -731,7 +691,6 @@ int cpu_exec(CPUState *env1)
 #endif
 
     /* restore global registers */
-    RESTORE_GLOBALS();
 #include "hostregs_helper.h"
 
     /* fail safe : never use cpu_single_env outside cpu_exec() */
@@ -1363,14 +1322,19 @@ int cpu_signal_handler(int host_signum, void *pinfo,
                        void *puc)
 {
     siginfo_t *info = pinfo;
-    uint32_t *regs = (uint32_t *)(info + 1);
-    void *sigmask = (regs + 20);
-    unsigned long pc;
     int is_write;
     uint32_t insn;
-
+#if !defined(__sparc_v9__) || defined(HOST_SOLARIS)
+    uint32_t *regs = (uint32_t *)(info + 1);
+    void *sigmask = (regs + 20);
     /* XXX: is there a standard glibc define ? */
-    pc = regs[1];
+    unsigned long pc = regs[1];
+#else
+    struct sigcontext *sc = puc;
+    unsigned long pc = sc->sigc_regs.tpc;
+    void *sigmask = (void *)sc->sigc_mask;
+#endif
+
     /* XXX: need kernel patch to get write flag faster */
     is_write = 0;
     insn = *(uint32_t *)pc;

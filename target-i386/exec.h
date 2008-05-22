@@ -98,23 +98,6 @@ extern int loglevel;
 #include "cpu.h"
 #include "exec-all.h"
 
-typedef struct CCTable {
-    int (*compute_all)(void); /* return all the flags */
-    int (*compute_c)(void);  /* return the C flag */
-} CCTable;
-
-extern CCTable cc_table[];
-
-void helper_load_seg(int seg_reg, int selector);
-void helper_ljmp_protected_T0_T1(int next_eip);
-void helper_lcall_real_T0_T1(int shift, int next_eip);
-void helper_lcall_protected_T0_T1(int shift, int next_eip);
-void helper_iret_real(int shift);
-void helper_iret_protected(int shift, int next_eip);
-void helper_lret_protected(int shift, int addend);
-void helper_movl_crN_T0(int reg);
-void helper_movl_drN_T0(int reg);
-void helper_invlpg(target_ulong addr);
 void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
 void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3);
 void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4);
@@ -139,19 +122,21 @@ void __hidden cpu_loop_exit(void);
 void OPPROTO op_movl_eflags_T0(void);
 void OPPROTO op_movl_T0_eflags(void);
 
+/* n must be a constant to be efficient */
+static inline target_long lshift(target_long x, int n)
+{
+    if (n >= 0)
+        return x << n;
+    else
+        return x >> (-n);
+}
+
 #include "helper.h"
 
-void helper_mulq_EAX_T0(void);
-void helper_imulq_EAX_T0(void);
-void helper_imulq_T0_T1(void);
-void helper_cmpxchg8b(void);
-
-void check_iob_T0(void);
-void check_iow_T0(void);
-void check_iol_T0(void);
-void check_iob_DX(void);
-void check_iow_DX(void);
-void check_iol_DX(void);
+static inline void svm_check_intercept(uint32_t type)
+{
+    helper_svm_check_intercept_param(type, 0);
+}
 
 #if !defined(CONFIG_USER_ONLY)
 
@@ -363,7 +348,6 @@ extern const CPU86_LDouble f15rk[7];
 void fpu_raise_exception(void);
 void restore_native_fp_state(CPUState *env);
 void save_native_fp_state(CPUState *env);
-void vmexit(uint64_t exit_code, uint64_t exit_info_1);
 
 extern const uint8_t parity_table[256];
 extern const uint8_t rclw_table[32];

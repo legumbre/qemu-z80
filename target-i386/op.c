@@ -21,15 +21,6 @@
 #define ASM_SOFTMMU
 #include "exec.h"
 
-/* n must be a constant to be efficient */
-static inline target_long lshift(target_long x, int n)
-{
-    if (n >= 0)
-        return x << n;
-    else
-        return x >> (-n);
-}
-
 /* we define the various pieces of code used by the JIT */
 
 #define REG EAX
@@ -132,66 +123,6 @@ static inline target_long lshift(target_long x, int n)
 
 #endif
 
-/* operations with flags */
-
-/* update flags with T0 and T1 (add/sub case) */
-void OPPROTO op_update2_cc(void)
-{
-    CC_SRC = T1;
-    CC_DST = T0;
-}
-
-/* update flags with T0 (logic operation case) */
-void OPPROTO op_update1_cc(void)
-{
-    CC_DST = T0;
-}
-
-void OPPROTO op_update_neg_cc(void)
-{
-    CC_SRC = -T0;
-    CC_DST = T0;
-}
-
-void OPPROTO op_cmpl_T0_T1_cc(void)
-{
-    CC_SRC = T1;
-    CC_DST = T0 - T1;
-}
-
-void OPPROTO op_update_inc_cc(void)
-{
-    CC_SRC = cc_table[CC_OP].compute_c();
-    CC_DST = T0;
-}
-
-void OPPROTO op_testl_T0_T1_cc(void)
-{
-    CC_DST = T0 & T1;
-}
-
-/* operations without flags */
-
-void OPPROTO op_negl_T0(void)
-{
-    T0 = -T0;
-}
-
-void OPPROTO op_incl_T0(void)
-{
-    T0++;
-}
-
-void OPPROTO op_decl_T0(void)
-{
-    T0--;
-}
-
-void OPPROTO op_notl_T0(void)
-{
-    T0 = ~T0;
-}
-
 /* multiply/divide */
 
 /* XXX: add eflags optimizations */
@@ -276,69 +207,23 @@ void OPPROTO op_imull_T0_T1(void)
 #ifdef TARGET_X86_64
 void OPPROTO op_mulq_EAX_T0(void)
 {
-    helper_mulq_EAX_T0();
+    helper_mulq_EAX_T0(T0);
 }
 
 void OPPROTO op_imulq_EAX_T0(void)
 {
-    helper_imulq_EAX_T0();
+    helper_imulq_EAX_T0(T0);
 }
 
 void OPPROTO op_imulq_T0_T1(void)
 {
-    helper_imulq_T0_T1();
+    T0 = helper_imulq_T0_T1(T0, T1);
 }
 #endif
 
 /* constant load & misc op */
 
 /* XXX: consistent names */
-void OPPROTO op_addl_T1_im(void)
-{
-    T1 += PARAM1;
-}
-
-void OPPROTO op_movl_T1_A0(void)
-{
-    T1 = A0;
-}
-
-void OPPROTO op_addl_A0_AL(void)
-{
-    A0 = (uint32_t)(A0 + (EAX & 0xff));
-}
-
-#ifdef WORDS_BIGENDIAN
-typedef union UREG64 {
-    struct { uint16_t v3, v2, v1, v0; } w;
-    struct { uint32_t v1, v0; } l;
-    uint64_t q;
-} UREG64;
-#else
-typedef union UREG64 {
-    struct { uint16_t v0, v1, v2, v3; } w;
-    struct { uint32_t v0, v1; } l;
-    uint64_t q;
-} UREG64;
-#endif
-
-#define PARAMQ1 \
-({\
-    UREG64 __p;\
-    __p.l.v1 = PARAM1;\
-    __p.l.v0 = PARAM2;\
-    __p.q;\
-})
-
-#ifdef TARGET_X86_64
-
-void OPPROTO op_addq_A0_AL(void)
-{
-    A0 = (A0 + (EAX & 0xff));
-}
-
-#endif
-
 void OPPROTO op_into(void)
 {
     int eflags;
@@ -351,7 +236,7 @@ void OPPROTO op_into(void)
 
 void OPPROTO op_cmpxchg8b(void)
 {
-    helper_cmpxchg8b();
+    helper_cmpxchg8b(A0);
 }
 
 /* multiple size ops */
@@ -376,116 +261,6 @@ void OPPROTO op_cmpxchg8b(void)
 #include "ops_template.h"
 #undef SHIFT
 
-#endif
-
-/* sign extend */
-
-void OPPROTO op_movsbl_T0_T0(void)
-{
-    T0 = (int8_t)T0;
-}
-
-void OPPROTO op_movzbl_T0_T0(void)
-{
-    T0 = (uint8_t)T0;
-}
-
-void OPPROTO op_movswl_T0_T0(void)
-{
-    T0 = (int16_t)T0;
-}
-
-void OPPROTO op_movzwl_T0_T0(void)
-{
-    T0 = (uint16_t)T0;
-}
-
-void OPPROTO op_movswl_EAX_AX(void)
-{
-    EAX = (uint32_t)((int16_t)EAX);
-}
-
-#ifdef TARGET_X86_64
-void OPPROTO op_movslq_T0_T0(void)
-{
-    T0 = (int32_t)T0;
-}
-
-void OPPROTO op_movslq_RAX_EAX(void)
-{
-    EAX = (int32_t)EAX;
-}
-#endif
-
-void OPPROTO op_movsbw_AX_AL(void)
-{
-    EAX = (EAX & ~0xffff) | ((int8_t)EAX & 0xffff);
-}
-
-void OPPROTO op_movslq_EDX_EAX(void)
-{
-    EDX = (uint32_t)((int32_t)EAX >> 31);
-}
-
-void OPPROTO op_movswl_DX_AX(void)
-{
-    EDX = (EDX & ~0xffff) | (((int16_t)EAX >> 15) & 0xffff);
-}
-
-#ifdef TARGET_X86_64
-void OPPROTO op_movsqo_RDX_RAX(void)
-{
-    EDX = (int64_t)EAX >> 63;
-}
-#endif
-
-/* string ops helpers */
-
-void OPPROTO op_addl_ESI_T0(void)
-{
-    ESI = (uint32_t)(ESI + T0);
-}
-
-void OPPROTO op_addw_ESI_T0(void)
-{
-    ESI = (ESI & ~0xffff) | ((ESI + T0) & 0xffff);
-}
-
-void OPPROTO op_addl_EDI_T0(void)
-{
-    EDI = (uint32_t)(EDI + T0);
-}
-
-void OPPROTO op_addw_EDI_T0(void)
-{
-    EDI = (EDI & ~0xffff) | ((EDI + T0) & 0xffff);
-}
-
-void OPPROTO op_decl_ECX(void)
-{
-    ECX = (uint32_t)(ECX - 1);
-}
-
-void OPPROTO op_decw_ECX(void)
-{
-    ECX = (ECX & ~0xffff) | ((ECX - 1) & 0xffff);
-}
-
-#ifdef TARGET_X86_64
-void OPPROTO op_addq_ESI_T0(void)
-{
-    ESI = (ESI + T0);
-}
-
-void OPPROTO op_addq_EDI_T0(void)
-{
-    EDI = (EDI + T0);
-}
-
-void OPPROTO op_decq_ECX(void)
-{
-    ECX--;
-}
 #endif
 
 /* bcd */
@@ -522,12 +297,6 @@ void OPPROTO op_das(void)
 
 /* segment handling */
 
-/* never use it with R_CS */
-void OPPROTO op_movl_seg_T0(void)
-{
-    helper_load_seg(PARAM1, T0);
-}
-
 /* faster VM86 version */
 void OPPROTO op_movl_seg_T0_vm(void)
 {
@@ -548,12 +317,20 @@ void OPPROTO op_movl_T0_seg(void)
 
 void OPPROTO op_lsl(void)
 {
-    helper_lsl(T0);
+    uint32_t val;
+    val = helper_lsl(T0);
+    if (CC_SRC & CC_Z)
+        T1 = val;
+    FORCE_RET();
 }
 
 void OPPROTO op_lar(void)
 {
-    helper_lar(T0);
+    uint32_t val;
+    val = helper_lar(T0);
+    if (CC_SRC & CC_Z)
+        T1 = val;
+    FORCE_RET();
 }
 
 void OPPROTO op_verr(void)
@@ -583,104 +360,6 @@ void OPPROTO op_arpl_update(void)
     int eflags;
     eflags = cc_table[CC_OP].compute_all();
     CC_SRC = (eflags & ~CC_Z) | T1;
-}
-
-/* T0: segment, T1:eip */
-void OPPROTO op_ljmp_protected_T0_T1(void)
-{
-    helper_ljmp_protected_T0_T1(PARAM1);
-}
-
-void OPPROTO op_lcall_real_T0_T1(void)
-{
-    helper_lcall_real_T0_T1(PARAM1, PARAM2);
-}
-
-void OPPROTO op_lcall_protected_T0_T1(void)
-{
-    helper_lcall_protected_T0_T1(PARAM1, PARAM2);
-}
-
-void OPPROTO op_iret_real(void)
-{
-    helper_iret_real(PARAM1);
-}
-
-void OPPROTO op_iret_protected(void)
-{
-    helper_iret_protected(PARAM1, PARAM2);
-}
-
-void OPPROTO op_lret_protected(void)
-{
-    helper_lret_protected(PARAM1, PARAM2);
-}
-
-/* CR registers access. */
-void OPPROTO op_movl_crN_T0(void)
-{
-    helper_movl_crN_T0(PARAM1);
-}
-
-/* These pseudo-opcodes check for SVM intercepts. */
-void OPPROTO op_svm_check_intercept(void)
-{
-    A0 = PARAM1 & PARAM2;
-    svm_check_intercept(PARAMQ1);
-}
-
-void OPPROTO op_svm_check_intercept_param(void)
-{
-    A0 = PARAM1 & PARAM2;
-    svm_check_intercept_param(PARAMQ1, T1);
-}
-
-void OPPROTO op_svm_vmexit(void)
-{
-    A0 = PARAM1 & PARAM2;
-    vmexit(PARAMQ1, T1);
-}
-
-void OPPROTO op_geneflags(void)
-{
-    CC_SRC = cc_table[CC_OP].compute_all();
-}
-
-/* This pseudo-opcode checks for IO intercepts. */
-#if !defined(CONFIG_USER_ONLY)
-void OPPROTO op_svm_check_intercept_io(void)
-{
-    A0 = PARAM1 & PARAM2;
-    /* PARAMQ1 = TYPE (0 = OUT, 1 = IN; 4 = STRING; 8 = REP)
-       T0      = PORT
-       T1      = next eip */
-    stq_phys(env->vm_vmcb + offsetof(struct vmcb, control.exit_info_2), T1);
-    /* ASIZE does not appear on real hw */
-    svm_check_intercept_param(SVM_EXIT_IOIO,
-                              (PARAMQ1 & ~SVM_IOIO_ASIZE_MASK) |
-                              ((T0 & 0xffff) << 16));
-}
-#endif
-
-#if !defined(CONFIG_USER_ONLY)
-void OPPROTO op_movtl_T0_cr8(void)
-{
-    T0 = cpu_get_apic_tpr(env);
-}
-#endif
-
-/* DR registers access */
-void OPPROTO op_movl_drN_T0(void)
-{
-    helper_movl_drN_T0(PARAM1);
-}
-
-void OPPROTO op_lmsw_T0(void)
-{
-    /* only 4 lower bits of CR0 are modified. PE cannot be set to zero
-       if already set to one. */
-    T0 = (env->cr[0] & ~0xe) | (T0 & 0xf);
-    helper_movl_crN_T0(0);
 }
 
 void OPPROTO op_movl_T0_env(void)
@@ -718,12 +397,6 @@ void OPPROTO op_movtl_env_T1(void)
     *(target_ulong *)((char *)env + PARAM1) = T1;
 }
 
-void OPPROTO op_clts(void)
-{
-    env->cr[0] &= ~CR0_TS_MASK;
-    env->hflags &= ~HF_TS_MASK;
-}
-
 /* flags handling */
 
 void OPPROTO op_jmp_label(void)
@@ -734,13 +407,6 @@ void OPPROTO op_jmp_label(void)
 void OPPROTO op_jnz_T0_label(void)
 {
     if (T0)
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jz_T0_label(void)
-{
-    if (!T0)
         GOTO_LABEL_PARAM(1);
     FORCE_RET();
 }
@@ -803,11 +469,6 @@ void OPPROTO op_setle_T0_cc(void)
 void OPPROTO op_xor_T0_1(void)
 {
     T0 ^= 1;
-}
-
-void OPPROTO op_mov_T0_cc(void)
-{
-    T0 = cc_table[CC_OP].compute_all();
 }
 
 /* XXX: clear VIF/VIP in all ops ? */
@@ -945,98 +606,9 @@ void OPPROTO op_salc(void)
     EAX = (EAX & ~0xff) | ((-cf) & 0xff);
 }
 
-static int compute_all_eflags(void)
-{
-    return CC_SRC;
-}
-
-static int compute_c_eflags(void)
-{
-    return CC_SRC & CC_C;
-}
-
-CCTable cc_table[CC_OP_NB] = {
-    [CC_OP_DYNAMIC] = { /* should never happen */ },
-
-    [CC_OP_EFLAGS] = { compute_all_eflags, compute_c_eflags },
-
-    [CC_OP_MULB] = { compute_all_mulb, compute_c_mull },
-    [CC_OP_MULW] = { compute_all_mulw, compute_c_mull },
-    [CC_OP_MULL] = { compute_all_mull, compute_c_mull },
-
-    [CC_OP_ADDB] = { compute_all_addb, compute_c_addb },
-    [CC_OP_ADDW] = { compute_all_addw, compute_c_addw  },
-    [CC_OP_ADDL] = { compute_all_addl, compute_c_addl  },
-
-    [CC_OP_ADCB] = { compute_all_adcb, compute_c_adcb },
-    [CC_OP_ADCW] = { compute_all_adcw, compute_c_adcw  },
-    [CC_OP_ADCL] = { compute_all_adcl, compute_c_adcl  },
-
-    [CC_OP_SUBB] = { compute_all_subb, compute_c_subb  },
-    [CC_OP_SUBW] = { compute_all_subw, compute_c_subw  },
-    [CC_OP_SUBL] = { compute_all_subl, compute_c_subl  },
-
-    [CC_OP_SBBB] = { compute_all_sbbb, compute_c_sbbb  },
-    [CC_OP_SBBW] = { compute_all_sbbw, compute_c_sbbw  },
-    [CC_OP_SBBL] = { compute_all_sbbl, compute_c_sbbl  },
-
-    [CC_OP_LOGICB] = { compute_all_logicb, compute_c_logicb },
-    [CC_OP_LOGICW] = { compute_all_logicw, compute_c_logicw },
-    [CC_OP_LOGICL] = { compute_all_logicl, compute_c_logicl },
-
-    [CC_OP_INCB] = { compute_all_incb, compute_c_incl },
-    [CC_OP_INCW] = { compute_all_incw, compute_c_incl },
-    [CC_OP_INCL] = { compute_all_incl, compute_c_incl },
-
-    [CC_OP_DECB] = { compute_all_decb, compute_c_incl },
-    [CC_OP_DECW] = { compute_all_decw, compute_c_incl },
-    [CC_OP_DECL] = { compute_all_decl, compute_c_incl },
-
-    [CC_OP_SHLB] = { compute_all_shlb, compute_c_shlb },
-    [CC_OP_SHLW] = { compute_all_shlw, compute_c_shlw },
-    [CC_OP_SHLL] = { compute_all_shll, compute_c_shll },
-
-    [CC_OP_SARB] = { compute_all_sarb, compute_c_sarl },
-    [CC_OP_SARW] = { compute_all_sarw, compute_c_sarl },
-    [CC_OP_SARL] = { compute_all_sarl, compute_c_sarl },
-
-#ifdef TARGET_X86_64
-    [CC_OP_MULQ] = { compute_all_mulq, compute_c_mull },
-
-    [CC_OP_ADDQ] = { compute_all_addq, compute_c_addq  },
-
-    [CC_OP_ADCQ] = { compute_all_adcq, compute_c_adcq  },
-
-    [CC_OP_SUBQ] = { compute_all_subq, compute_c_subq  },
-
-    [CC_OP_SBBQ] = { compute_all_sbbq, compute_c_sbbq  },
-
-    [CC_OP_LOGICQ] = { compute_all_logicq, compute_c_logicq },
-
-    [CC_OP_INCQ] = { compute_all_incq, compute_c_incl },
-
-    [CC_OP_DECQ] = { compute_all_decq, compute_c_incl },
-
-    [CC_OP_SHLQ] = { compute_all_shlq, compute_c_shlq },
-
-    [CC_OP_SARQ] = { compute_all_sarq, compute_c_sarl },
-#endif
-};
-
 void OPPROTO op_fcomi_dummy(void)
 {
     T0 = 0;
-}
-
-/* threading support */
-void OPPROTO op_lock(void)
-{
-    cpu_lock();
-}
-
-void OPPROTO op_unlock(void)
-{
-    cpu_unlock();
 }
 
 /* SSE support */
