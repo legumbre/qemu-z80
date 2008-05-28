@@ -108,6 +108,20 @@ void helper_unlock(void)
     spin_unlock(&global_cpu_lock);
 }
 
+void helper_write_eflags(target_ulong t0, uint32_t update_mask)
+{
+    load_eflags(t0, update_mask);
+}
+
+target_ulong helper_read_eflags(void)
+{
+    uint32_t eflags;
+    eflags = cc_table[CC_OP].compute_all();
+    eflags |= (DF & DF_MASK);
+    eflags |= env->eflags & ~(VM_MASK | RF_MASK);
+    return eflags;
+}
+
 /* return non zero if error */
 static inline int load_segment(uint32_t *e1_ptr, uint32_t *e2_ptr,
                                int selector)
@@ -1609,22 +1623,6 @@ void helper_rsm(void)
 #endif /* !CONFIG_USER_ONLY */
 
 
-#ifdef BUGGY_GCC_DIV64
-/* gcc 2.95.4 on PowerPC does not seem to like using __udivdi3, so we
-   call it from another function */
-uint32_t div32(uint64_t *q_ptr, uint64_t num, uint32_t den)
-{
-    *q_ptr = num / den;
-    return num % den;
-}
-
-int32_t idiv32(int64_t *q_ptr, int64_t num, int32_t den)
-{
-    *q_ptr = num / den;
-    return num % den;
-}
-#endif
-
 /* division, flags are undefined */
 
 void helper_divb_AL(target_ulong t0)
@@ -1707,12 +1705,8 @@ void helper_divl_EAX(target_ulong t0)
     if (den == 0) {
         raise_exception(EXCP00_DIVZ);
     }
-#ifdef BUGGY_GCC_DIV64
-    r = div32(&q, num, den);
-#else
     q = (num / den);
     r = (num % den);
-#endif
     if (q > 0xffffffff)
         raise_exception(EXCP00_DIVZ);
     EAX = (uint32_t)q;
@@ -1729,12 +1723,8 @@ void helper_idivl_EAX(target_ulong t0)
     if (den == 0) {
         raise_exception(EXCP00_DIVZ);
     }
-#ifdef BUGGY_GCC_DIV64
-    r = idiv32(&q, num, den);
-#else
     q = (num / den);
     r = (num % den);
-#endif
     if (q != (int32_t)q)
         raise_exception(EXCP00_DIVZ);
     EAX = (uint32_t)q;
@@ -1873,6 +1863,15 @@ void helper_das(void)
     FORCE_RET();
 }
 
+void helper_into(int next_eip_addend)
+{
+    int eflags;
+    eflags = cc_table[CC_OP].compute_all();
+    if (eflags & CC_O) {
+        raise_interrupt(EXCP04_INTO, 1, 0, next_eip_addend);
+    }
+}
+
 void helper_cmpxchg8b(target_ulong a0)
 {
     uint64_t d;
@@ -1880,8 +1879,8 @@ void helper_cmpxchg8b(target_ulong a0)
 
     eflags = cc_table[CC_OP].compute_all();
     d = ldq(a0);
-    if (d == (((uint64_t)EDX << 32) | EAX)) {
-        stq(a0, ((uint64_t)ECX << 32) | EBX);
+    if (d == (((uint64_t)EDX << 32) | (uint32_t)EAX)) {
+        stq(a0, ((uint64_t)ECX << 32) | (uint32_t)EBX);
         eflags |= CC_Z;
     } else {
         EDX = (uint32_t)(d >> 32);
@@ -1890,6 +1889,28 @@ void helper_cmpxchg8b(target_ulong a0)
     }
     CC_SRC = eflags;
 }
+
+#ifdef TARGET_X86_64
+void helper_cmpxchg16b(target_ulong a0)
+{
+    uint64_t d0, d1;
+    int eflags;
+
+    eflags = cc_table[CC_OP].compute_all();
+    d0 = ldq(a0);
+    d1 = ldq(a0 + 8);
+    if (d0 == EAX && d1 == EDX) {
+        stq(a0, EBX);
+        stq(a0 + 8, ECX);
+        eflags |= CC_Z;
+    } else {
+        EDX = d1;
+        EAX = d0;
+        eflags &= ~CC_Z;
+    }
+    CC_SRC = eflags;
+}
+#endif
 
 void helper_single_step(void)
 {
@@ -3153,13 +3174,13 @@ void helper_rdmsr(void)
 }
 #endif
 
-uint32_t helper_lsl(uint32_t selector)
+target_ulong helper_lsl(target_ulong selector1)
 {
     unsigned int limit;
-    uint32_t e1, e2, eflags;
+    uint32_t e1, e2, eflags, selector;
     int rpl, dpl, cpl, type;
 
-    selector &= 0xffff;
+    selector = selector1 & 0xffff;
     eflags = cc_table[CC_OP].compute_all();
     if (load_segment(&e1, &e2, selector) != 0)
         goto fail;
@@ -3196,12 +3217,12 @@ uint32_t helper_lsl(uint32_t selector)
     return limit;
 }
 
-uint32_t helper_lar(uint32_t selector)
+target_ulong helper_lar(target_ulong selector1)
 {
-    uint32_t e1, e2, eflags;
+    uint32_t e1, e2, eflags, selector;
     int rpl, dpl, cpl, type;
 
-    selector &= 0xffff;
+    selector = selector1 & 0xffff;
     eflags = cc_table[CC_OP].compute_all();
     if ((selector & 0xfffc) == 0)
         goto fail;
@@ -3242,12 +3263,12 @@ uint32_t helper_lar(uint32_t selector)
     return e2 & 0x00f0ff00;
 }
 
-void helper_verr(uint32_t selector)
+void helper_verr(target_ulong selector1)
 {
-    uint32_t e1, e2, eflags;
+    uint32_t e1, e2, eflags, selector;
     int rpl, dpl, cpl;
 
-    selector &= 0xffff;
+    selector = selector1 & 0xffff;
     eflags = cc_table[CC_OP].compute_all();
     if ((selector & 0xfffc) == 0)
         goto fail;
@@ -3275,12 +3296,12 @@ void helper_verr(uint32_t selector)
     CC_SRC = eflags | CC_Z;
 }
 
-void helper_verw(uint32_t selector)
+void helper_verw(target_ulong selector1)
 {
-    uint32_t e1, e2, eflags;
+    uint32_t e1, e2, eflags, selector;
     int rpl, dpl, cpl;
 
-    selector &= 0xffff;
+    selector = selector1 & 0xffff;
     eflags = cc_table[CC_OP].compute_all();
     if ((selector & 0xfffc) == 0)
         goto fail;
@@ -4249,6 +4270,18 @@ void helper_fxsave(target_ulong ptr, int data64)
     stw(ptr, env->fpuc);
     stw(ptr + 2, fpus);
     stw(ptr + 4, fptag ^ 0xff);
+#ifdef TARGET_X86_64
+    if (data64) {
+        stq(ptr + 0x08, 0); /* rip */
+        stq(ptr + 0x10, 0); /* rdp */
+    } else 
+#endif
+    {
+        stl(ptr + 0x08, 0); /* eip */
+        stl(ptr + 0x0c, 0); /* sel  */
+        stl(ptr + 0x10, 0); /* dp */
+        stl(ptr + 0x14, 0); /* sel  */
+    }
 
     addr = ptr + 0x20;
     for(i = 0;i < 8; i++) {
@@ -4261,7 +4294,10 @@ void helper_fxsave(target_ulong ptr, int data64)
         /* XXX: finish it */
         stl(ptr + 0x18, env->mxcsr); /* mxcsr */
         stl(ptr + 0x1c, 0x0000ffff); /* mxcsr_mask */
-        nb_xmm_regs = 8 << data64;
+        if (env->hflags & HF_CS64_MASK)
+            nb_xmm_regs = 16;
+        else
+            nb_xmm_regs = 8;
         addr = ptr + 0xa0;
         for(i = 0; i < nb_xmm_regs; i++) {
             stq(addr, env->xmm_regs[i].XMM_Q(0));
@@ -4298,7 +4334,10 @@ void helper_fxrstor(target_ulong ptr, int data64)
         /* XXX: finish it */
         env->mxcsr = ldl(ptr + 0x18);
         //ldl(ptr + 0x1c);
-        nb_xmm_regs = 8 << data64;
+        if (env->hflags & HF_CS64_MASK)
+            nb_xmm_regs = 16;
+        else
+            nb_xmm_regs = 8;
         addr = ptr + 0xa0;
         for(i = 0; i < nb_xmm_regs; i++) {
             env->xmm_regs[i].XMM_Q(0) = ldq(addr);
@@ -4624,11 +4663,6 @@ static float approx_rcp(float a)
 #if !defined(CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
-#ifdef __s390__
-# define GETPC() ((void*)((unsigned long)__builtin_return_address(0) & 0x7fffffffUL))
-#else
-# define GETPC() (__builtin_return_address(0))
-#endif
 
 #define SHIFT 0
 #include "softmmu_template.h"

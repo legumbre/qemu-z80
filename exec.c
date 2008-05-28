@@ -36,6 +36,7 @@
 #include "cpu.h"
 #include "exec-all.h"
 #include "qemu-common.h"
+#include "tcg.h"
 #if defined(CONFIG_USER_ONLY)
 #include <qemu.h>
 #endif
@@ -83,7 +84,7 @@
 #define TARGET_PHYS_ADDR_SPACE_BITS 32
 #endif
 
-TranslationBlock tbs[CODE_GEN_MAX_BLOCKS];
+TranslationBlock *tbs;
 TranslationBlock *tb_phys_hash[CODE_GEN_PHYS_HASH_SIZE];
 int nb_tbs;
 /* any access to the tbs or the page table must use this lock */
@@ -334,6 +335,7 @@ void cpu_exec_init(CPUState *env)
 
     if (!code_gen_ptr) {
         cpu_gen_init();
+        tbs = qemu_malloc(CODE_GEN_MAX_BLOCKS * sizeof(TranslationBlock));
         code_gen_ptr = code_gen_buffer;
         page_init();
         io_mem_init();
@@ -1746,9 +1748,6 @@ int tlb_set_page_exec(CPUState *env, target_ulong vaddr,
             te->addr_read = -1;
         }
 
-        if (te->addr_code != -1) {
-            tlb_flush_jmp_cache(env, te->addr_code);
-        }
         if (prot & PAGE_EXEC) {
             te->addr_code = address;
         } else {
@@ -2145,8 +2144,8 @@ ram_addr_t qemu_ram_alloc(ram_addr_t size)
 {
     ram_addr_t addr;
     if ((phys_ram_alloc_offset + size) > phys_ram_size) {
-        fprintf(stderr, "Not enough memory (requested_size = %lu, max memory = %ld)\n",
-                size, phys_ram_size);
+        fprintf(stderr, "Not enough memory (requested_size = %" PRIu64 ", max memory = %" PRIu64 "\n",
+                (uint64_t)size, (uint64_t)phys_ram_size);
         abort();
     }
     addr = phys_ram_alloc_offset;
@@ -3013,45 +3012,7 @@ void dump_exec_info(FILE *f,
     cpu_fprintf(f, "TB flush count      %d\n", tb_flush_count);
     cpu_fprintf(f, "TB invalidate count %d\n", tb_phys_invalidate_count);
     cpu_fprintf(f, "TLB flush count     %d\n", tlb_flush_count);
-#ifdef CONFIG_PROFILER
-    {
-        int64_t tot;
-        tot = dyngen_interm_time + dyngen_code_time;
-        cpu_fprintf(f, "JIT cycles          %" PRId64 " (%0.3f s at 2.4 GHz)\n",
-                    tot, tot / 2.4e9);
-        cpu_fprintf(f, "translated TBs      %" PRId64 " (aborted=%" PRId64 " %0.1f%%)\n", 
-                    dyngen_tb_count, 
-                    dyngen_tb_count1 - dyngen_tb_count,
-                    dyngen_tb_count1 ? (double)(dyngen_tb_count1 - dyngen_tb_count) / dyngen_tb_count1 * 100.0 : 0);
-        cpu_fprintf(f, "avg ops/TB          %0.1f max=%d\n", 
-                    dyngen_tb_count ? (double)dyngen_op_count / dyngen_tb_count : 0, dyngen_op_count_max);
-        cpu_fprintf(f, "old ops/total ops   %0.1f%%\n", 
-                    dyngen_op_count ? (double)dyngen_old_op_count / dyngen_op_count * 100.0 : 0);
-        cpu_fprintf(f, "deleted ops/TB      %0.2f\n",
-                    dyngen_tb_count ? 
-                    (double)dyngen_tcg_del_op_count / dyngen_tb_count : 0);
-        cpu_fprintf(f, "cycles/op           %0.1f\n", 
-                    dyngen_op_count ? (double)tot / dyngen_op_count : 0);
-        cpu_fprintf(f, "cycles/in byte     %0.1f\n", 
-                    dyngen_code_in_len ? (double)tot / dyngen_code_in_len : 0);
-        cpu_fprintf(f, "cycles/out byte     %0.1f\n", 
-                    dyngen_code_out_len ? (double)tot / dyngen_code_out_len : 0);
-        if (tot == 0)
-            tot = 1;
-        cpu_fprintf(f, "  gen_interm time   %0.1f%%\n", 
-                    (double)dyngen_interm_time / tot * 100.0);
-        cpu_fprintf(f, "  gen_code time     %0.1f%%\n", 
-                    (double)dyngen_code_time / tot * 100.0);
-        cpu_fprintf(f, "cpu_restore count   %" PRId64 "\n",
-                    dyngen_restore_count);
-        cpu_fprintf(f, "  avg cycles        %0.1f\n",
-                    dyngen_restore_count ? (double)dyngen_restore_time / dyngen_restore_count : 0);
-        {
-            extern void dump_op_count(void);
-            dump_op_count();
-        }
-    }
-#endif
+    tcg_dump_info(f, cpu_fprintf);
 }
 
 #if !defined(CONFIG_USER_ONLY)
