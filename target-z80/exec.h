@@ -366,7 +366,6 @@ static inline int cpu_halted(CPUState* env) {
     //printf("%s: at PC 0x%x halted == %d, irq %d\n",__FUNCTION__, env->pc, env->halted,env->interrupt_request);
     if (env->interrupt_request & CPU_INTERRUPT_HARD) {
         env->halted = 0;
-        env->hflags &= ~HF_HALTED_MASK;
         return 0;
     }
     return EXCP_HALTED;

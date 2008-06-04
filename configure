@@ -113,6 +113,7 @@ darwin_user="no"
 build_docs="no"
 uname_release=""
 curses="yes"
+nptl="yes"
 
 # OS specific
 targetos=`uname -s`
@@ -334,6 +335,8 @@ for opt do
   ;;
   --disable-curses) curses="no"
   ;;
+  --disable-nptl) nptl="no"
+  ;;
   *) echo "ERROR: unknown option $opt"; show_help="yes"
   ;;
   esac
@@ -428,6 +431,7 @@ echo "  --enable-libspectrum     enable ZX Spectrum snapshot loading"
 echo "  --disable-brlapi         disable BrlAPI"
 echo "  --disable-vnc-tls        disable TLS encryption for VNC server"
 echo "  --disable-curses         disable curses output"
+echo "  --disable-nptl           disable usermode NPTL support"
 echo "  --enable-system          enable all system emulation targets"
 echo "  --disable-system         disable all system emulation targets"
 echo "  --enable-linux-user      enable all linux usermode emulation targets"
@@ -646,6 +650,24 @@ int main(void) {
 }
 EOF
 
+# Check host NPTL support
+cat > $TMPC <<EOF
+#include <sched.h>
+#include <linux/futex.h>
+void foo()
+{
+#if !defined(CLONE_SETTLS) || !defined(FUTEX_WAIT)
+#error bork
+#endif
+}
+EOF
+
+if $cc $ARCH_CFLAGS -c -o $TMPO $TMPC 2> /dev/null ; then
+  :
+else
+   nptl="no"
+fi
+
 ##########################################
 # SDL probe
 
@@ -845,6 +867,7 @@ echo "brlapi support    $brlapi"
 echo "Documentation     $build_docs"
 [ ! -z "$uname_release" ] && \
 echo "uname -r          $uname_release"
+echo "NPTL support      $nptl"
 
 if test $sdl_too_old = "yes"; then
 echo "-> Your SDL version is too old - please upgrade to have SDL support"
@@ -1115,6 +1138,9 @@ echo "#define CONFIG_UNAME_RELEASE \"$uname_release\"" >> $config_h
 tools=
 if test `expr "$target_list" : ".*softmmu.*"` != 0 ; then
   tools="qemu-img\$(EXESUF) $tools"
+  if [ "$linux" = "yes" ] ; then
+      tools="qemu-nbd\$(EXESUF) $tools"
+  fi
 fi
 echo "TOOLS=$tools" >> $config_mak
 
@@ -1197,6 +1223,7 @@ echo "#include \"../config-host.h\"" >> $config_h
 
 bflt="no"
 elfload32="no"
+target_nptl="no"
 interp_prefix1=`echo "$interp_prefix" | sed "s/%M/$target_cpu/g"`
 echo "#define CONFIG_QEMU_PREFIX \"$interp_prefix1\"" >> $config_h
 
@@ -1205,7 +1232,7 @@ case "$target_cpu" in
     echo "TARGET_ARCH=i386" >> $config_mak
     echo "#define TARGET_ARCH \"i386\"" >> $config_h
     echo "#define TARGET_I386 1" >> $config_h
-    if test $kqemu = "yes" -a "$target_softmmu" = "yes" -a $cpu = "i386"
+    if test $kqemu = "yes" -a "$target_softmmu" = "yes"
     then
       echo "#define USE_KQEMU 1" >> $config_h
     fi
@@ -1239,6 +1266,7 @@ case "$target_cpu" in
     echo "#define TARGET_ARCH \"arm\"" >> $config_h
     echo "#define TARGET_ARM 1" >> $config_h
     bflt="yes"
+    target_nptl="yes"
   ;;
   cris)
     echo "TARGET_ARCH=cris" >> $config_mak
@@ -1392,6 +1420,10 @@ fi
 if test "$target_user_only" = "yes" -a "$bflt" = "yes"; then
   echo "TARGET_HAS_BFLT=yes" >> $config_mak
   echo "#define TARGET_HAS_BFLT 1" >> $config_h
+fi
+if test "$target_user_only" = "yes" \
+        -a "$nptl" = "yes" -a "$target_nptl" = "yes"; then
+  echo "#define USE_NPTL 1" >> $config_h
 fi
 # 32 bit ELF loader in addition to native 64 bit loader?
 if test "$target_user_only" = "yes" -a "$elfload32" = "yes"; then

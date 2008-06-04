@@ -172,7 +172,6 @@ void helper_hlt(void)
     //printf("halting at PC 0x%x\n",env->pc);
     env->halted = 1;
     env->hflags &= ~HF_INHIBIT_IRQ_MASK; /* needed if sti is just before */
-    env->hflags |= HF_HALTED_MASK;
     env->exception_index = EXCP_HLT;
     cpu_loop_exit();
 }

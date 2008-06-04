@@ -70,7 +70,7 @@
 #define CC_S    0x0080
 
 /* hidden flags - used internally by qemu to represent additionnal cpu
-   states. Only the CPL, INHIBIT_IRQ and HALTED are not redundant. We avoid
+   states. Only the CPL and INHIBIT_IRQ are not redundant. We avoid
    using the IOPL_MASK, TF_MASK and VM_MASK bit position to ease oring
    with eflags. */
 /* current cpl */
@@ -95,7 +95,6 @@
 #define HF_CS64_SHIFT       15 /* only used on x86_64: 64 bit code segment  */
 #define HF_OSFXSR_SHIFT     16 /* CR4.OSFXSR */
 #define HF_VM_SHIFT         17 /* must be same as eflags */
-#define HF_HALTED_SHIFT     18 /* CPU halted */
 #define HF_SMM_SHIFT        19 /* CPU in SMM mode */
 
 #define HF_CPL_MASK          (3 << HF_CPL_SHIFT)
@@ -112,7 +111,6 @@
 #define HF_LMA_MASK          (1 << HF_LMA_SHIFT)
 #define HF_CS64_MASK         (1 << HF_CS64_SHIFT)
 #define HF_OSFXSR_MASK       (1 << HF_OSFXSR_SHIFT)
-#define HF_HALTED_MASK       (1 << HF_HALTED_SHIFT)
 #define HF_SMM_MASK          (1 << HF_SMM_SHIFT)
 
 #define EXCP00_DIVZ	0
@@ -182,8 +180,6 @@ typedef struct CPUZ80State {
     uint64_t pat;
 
     /* exception/interrupt handling */
-    jmp_buf jmp_env;
-    int exception_index;
     int error_code;
     int exception_is_int;
     target_ulong exception_next_pc;
@@ -191,7 +187,6 @@ typedef struct CPUZ80State {
     uint32_t smbase;
     int interrupt_request; 
     int user_mode_only; /* user mode only simulation */
-    int halted;
 
     CPU_COMMON
 
@@ -257,6 +252,8 @@ static inline int cpu_mmu_index (CPUState *env)
     /* return (env->hflags & HF_CPL_MASK) == 3 ? 1 : 0; */
     return 0;
 }
+
+void optimize_flags_init(void);
 
 #include "cpu-all.h"
 

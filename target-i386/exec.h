@@ -61,7 +61,6 @@ extern int loglevel;
 void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
 void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3);
 void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4);
-void cpu_x86_flush_tlb(CPUX86State *env, target_ulong addr);
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
                              int is_write, int mmu_idx, int is_softmmu);
 void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
@@ -324,7 +323,7 @@ static inline void load_eflags(int eflags, int update_mask)
     CC_SRC = eflags & (CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
     DF = 1 - (2 * ((eflags >> 10) & 1));
     env->eflags = (env->eflags & ~update_mask) |
-        (eflags & update_mask);
+        (eflags & update_mask) | 0x2;
 }
 
 static inline void env_to_regs(void)
@@ -385,15 +384,26 @@ static inline void regs_to_env(void)
 
 static inline int cpu_halted(CPUState *env) {
     /* handle exit of HALTED state */
-    if (!(env->hflags & HF_HALTED_MASK))
+    if (!env->halted)
         return 0;
     /* disable halt condition */
     if (((env->interrupt_request & CPU_INTERRUPT_HARD) &&
          (env->eflags & IF_MASK)) ||
         (env->interrupt_request & CPU_INTERRUPT_NMI)) {
-        env->hflags &= ~HF_HALTED_MASK;
+        env->halted = 0;
         return 0;
     }
     return EXCP_HALTED;
 }
 
+/* load efer and update the corresponding hflags. XXX: do consistency
+   checks with cpuid bits ? */
+static inline void cpu_load_efer(CPUState *env, uint64_t val)
+{
+    env->efer = val;
+    env->hflags &= ~(HF_LMA_MASK | HF_SVME_MASK);
+    if (env->efer & MSR_EFER_LMA)
+        env->hflags |= HF_LMA_MASK;
+    if (env->efer & MSR_EFER_SVME)
+        env->hflags |= HF_SVME_MASK;
+}

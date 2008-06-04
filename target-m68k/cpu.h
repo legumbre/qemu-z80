@@ -104,11 +104,8 @@ typedef struct CPUM68KState {
     uint32_t t1;
 
     /* exception/interrupt handling */
-    jmp_buf jmp_env;
-    int exception_index;
     int interrupt_request;
     int user_mode_only;
-    uint32_t halted;
 
     int pending_vector;
     int pending_level;
@@ -228,6 +225,15 @@ static inline int cpu_mmu_index (CPUState *env)
 {
     return (env->sr & SR_S) == 0 ? 1 : 0;
 }
+
+#if defined(CONFIG_USER_ONLY)
+static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
+{
+    if (newsp)
+        env->aregs[7] = newsp;
+    env->dregs[0] = 0;
+}
+#endif
 
 #include "cpu-all.h"
 
