@@ -220,7 +220,6 @@ endif
 endif
 
 ifeq ($(TARGET_BASE_ARCH), z80)
-LIBOBJS+=helper.o helper2.o
 ifdef CONFIG_LIBSPECTRUM
 LIBS+=-lspectrum
 endif

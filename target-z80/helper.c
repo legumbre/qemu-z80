@@ -1,5 +1,5 @@
 /*
- * Z80 helpers
+ * Z80 helpers (without register variable usage)
  *
  *  Copyright (c) 2007 Stuart Brady <stuart.brady@gmail.com>
  *
@@ -17,261 +17,197 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
-#include "exec.h"
+#include <stdarg.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
+#include <signal.h>
+#include <assert.h>
 
-//#define DEBUG_PCALL
+#include "cpu.h"
+#include "exec-all.h"
 
-const uint8_t parity_table[256] = {
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
-    0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
-};
+//#define DEBUG_MMU
 
-/* modulo 17 table */
-const uint8_t rclw_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 
-    8, 9,10,11,12,13,14,15,
-   16, 0, 1, 2, 3, 4, 5, 6,
-    7, 8, 9,10,11,12,13,14,
-};
+static int cpu_z80_find_by_name(const char *name);
 
-/* modulo 9 table */
-const uint8_t rclb_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 
-    8, 0, 1, 2, 3, 4, 5, 6,
-    7, 8, 0, 1, 2, 3, 4, 5, 
-    6, 7, 8, 0, 1, 2, 3, 4,
-};
-
-    
-/* thread support */
-
-spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
-
-void cpu_lock(void)
+CPUZ80State *cpu_z80_init(const char *model)
 {
-    spin_lock(&global_cpu_lock);
-}
+    CPUZ80State *env;
+    static int inited;
+    int id;
 
-void cpu_unlock(void)
-{
-    spin_unlock(&global_cpu_lock);
-}
+    id = cpu_z80_find_by_name(model);
+    if (id == 0)
+        return NULL;
+    env = qemu_mallocz(sizeof(CPUZ80State));
+    if (!env)
+        return NULL;
+    cpu_exec_init(env);
 
-void do_interrupt(CPUZ80State *env)
-{
-// printf("z80: do_interrupt()\n");
-
-    if (!env->iff1)
-        return;
-
-    env->iff1 = 0;
-    env->iff2 = 0; /* XXX: Unchanged for NMI */
-
-    {
-        target_ulong sp;
-        sp = (uint16_t)(env->regs[R_SP] - 2);
-        env->regs[R_SP] = sp;
-        stw_kernel(sp, env->pc);
+    /* init various static tables */
+    if (!inited) {
+        inited = 1;
+        optimize_flags_init();
     }
+    env->model = model;
+    cpu_reset(env);
+    return env;
+}
 
-    /* IM0 = execute data on bus (0xff == rst $38) */
-    /* IM1 = execute rst $38 (ROM uses this)*/
-    /* IM2 = indirect jump -- address is held at (I << 8) | DATA */
+struct z80_cpu_t {
+    int id;
+    const char *name;
+};
 
-    /* value on data bus is 0xff for the zx spectrum */
+static const struct z80_cpu_t z80_cpu_names[] = {
+    { Z80_CPU_Z80,  "z80" },
+    { Z80_CPU_R800, "r800" },
+    { 0, NULL }
+};
 
-    /* when an interrupt occurs, iff1 and iff2 are reset, disabling interrupts */
-    /* when an NMI occurs, iff1 is reset. iff2 is left unchanged */
+void z80_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
+{
+    int i;
 
-    uint8_t d;
-    switch (env->imode) {
-        case 0:
-            /* XXX: assuming 0xff on data bus */
-        case 1:
-            env->pc = 0x0038;
-            break;
-        case 2:
-            /* XXX: assuming 0xff on data bus */
-            d = 0xff; 
-            env->pc = lduw_kernel((env->regs[R_I] << 8) | d);
-            break;
+    (*cpu_fprintf)(f, "Available CPUs:\n");
+    for (i = 0; z80_cpu_names[i].name; i++) {
+        (*cpu_fprintf)(f, "  %s\n", z80_cpu_names[i].name);
     }
 }
 
-/*
- * Signal an interruption. It is executed in the main CPU loop.
- * is_int is TRUE if coming from the int instruction. next_eip is the
- * EIP value AFTER the interrupt instruction. It is only relevant if
- * is_int is TRUE.  
- */
-void raise_interrupt(int intno, int is_int, int error_code, 
-                     int next_eip_addend)
+/* return 0 if not found */
+static int cpu_z80_find_by_name(const char *name)
 {
-    env->exception_index = intno;
-    env->error_code = error_code;
-    env->exception_is_int = is_int;
-    env->exception_next_pc = env->pc + next_eip_addend;
-    cpu_loop_exit();
+    int i;
+    int id;
+
+    id = 0;
+    for (i = 0; z80_cpu_names[i].name; i++) {
+        if (strcmp(name, z80_cpu_names[i].name) == 0) {
+            id = z80_cpu_names[i].id;
+            break;
+        }
+    }
+    return id;
 }
 
-/* same as raise_exception_err, but do not restore global registers */
-static void raise_exception_err_norestore(int exception_index, int error_code)
+/* NOTE: must be called outside the CPU execute loop */
+void cpu_reset(CPUZ80State *env)
 {
-    env->exception_index = exception_index;
-    env->error_code = error_code;
-    env->exception_is_int = 0;
-    env->exception_next_pc = 0;
-    longjmp(env->jmp_env, 1);
-}
+    memset(env, 0, offsetof(CPUZ80State, breakpoints));
 
-/* shortcuts to generate exceptions */
+    tlb_flush(env, 1);
 
-void (raise_exception_err)(int exception_index, int error_code)
-{
-    raise_interrupt(exception_index, 0, error_code, 0);
-}
+    /* init to reset state */
 
-void raise_exception(int exception_index)
-{
-    raise_interrupt(exception_index, 0, 0, 0);
-}
-
-void helper_hlt(void)
-{
-    //printf("halting at PC 0x%x\n",env->pc);
-    env->halted = 1;
-    env->hflags &= ~HF_INHIBIT_IRQ_MASK; /* needed if sti is just before */
-    env->exception_index = EXCP_HLT;
-    cpu_loop_exit();
-}
-
-void helper_monitor(void)
-{
-}
-
-void helper_mwait(void)
-{
-}
-
-#if !defined(CONFIG_USER_ONLY) 
-
-#define MMUSUFFIX _mmu
-#define GETPC() (__builtin_return_address(0))
-
-#define SHIFT 0
-#include "softmmu_template.h"
-
-#define SHIFT 1
-#include "softmmu_template.h"
-
-#define SHIFT 2
-#include "softmmu_template.h"
-
-#define SHIFT 3
-#include "softmmu_template.h"
-
+#ifdef CONFIG_SOFTMMU
+    env->hflags |= HF_SOFTMMU_MASK;
 #endif
 
-/* try to fill the TLB and return an exception if error. If retaddr is
-   NULL, it means that the function was called in C code (i.e. not
-   from generated code or from helper.c) */
-/* XXX: fix it to restore all registers */
-void tlb_fill(target_ulong addr, int is_write, int is_user, void *retaddr)
-{
-    TranslationBlock *tb;
-    int ret;
-    unsigned long pc;
-    CPUZ80State *saved_env;
-
-    /* XXX: hack to restore env in all cases, even if not called from
-       generated code */
-    saved_env = env;
-    env = cpu_single_env;
-
-    ret = cpu_z80_handle_mmu_fault(env, addr, is_write, is_user, 1);
-    if (ret) {
-        if (retaddr) {
-            /* now we have a real cpu fault */
-            pc = (unsigned long)retaddr;
-            tb = tb_find_pc(pc);
-            if (tb) {
-                /* the PC is inside the translated code. It means that we have
-                   a virtual CPU fault */
-                cpu_restore_state(tb, env, pc, NULL);
-            }
-        }
-        if (retaddr)
-            raise_exception_err(env->exception_index, env->error_code);
-        else
-            raise_exception_err_norestore(env->exception_index, env->error_code);
-    }
-    env = saved_env;
+    env->pc = 0x0000;
+    env->iff1 = 0;
+    env->iff2 = 0;
+    env->imode = 0;
+    env->regs[R_A] = 0xff;
+    env->regs[R_F] = 0xff;
+    env->regs[R_SP] = 0xffff;
 }
 
-void helper_in_debug(int port)
+void cpu_z80_close(CPUZ80State *env)
 {
-//    printf("IN with port %02x\n", port);
+    free(env);
 }
 
-void helper_dump_registers(int pc)
+/***********************************************************/
+/* x86 debug */
+
+static const char *cc_op_str[] = {
+    "DYNAMIC",
+    "EFLAGS",
+};
+
+void cpu_dump_state(CPUState *env, FILE *f, 
+                    int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
+                    int flags)
 {
     int fl = env->regs[R_F];
-#if 0
-    printf("--------------\n"
-           "AF =%04x BC =%04x DE =%04x HL =%04x IX=%04x\n"
-           "AF'=%04x BC'=%04x DE'=%04x HL'=%04x IY=%04x\n"
-           "PC =%04x SP =%04x F=[%c%c%c%c%c%c%c%c]\n"
-           "IM=%i IFF1=%i IFF2=%i I=%02x R=%02x\n",
-           (env->regs[R_A] << 8) | env->regs[R_F],
-           env->regs[R_BC],
-           env->regs[R_DE],
-           env->regs[R_HL],
-           env->regs[R_IX],
-           env->regs[R_AFX],
-           env->regs[R_BCX],
-           env->regs[R_DEX],
-           env->regs[R_HLX],
-           env->regs[R_IY],
-           pc == -1 ? env->pc : pc,
-           env->regs[R_SP],
-           fl & 0x80 ? 'S' : '-',
-           fl & 0x40 ? 'Z' : '-',
-           fl & 0x20 ? '5' : '-',
-           fl & 0x10 ? 'H' : '-',
-           fl & 0x08 ? '3' : '-',
-           fl & 0x04 ? 'P' : '-',
-           fl & 0x02 ? 'N' : '-',
-           fl & 0x01 ? 'C' : '-',
-           env->imode, env->iff1, env->iff2, env->regs[R_I], env->regs[R_R]);
+
+    cpu_fprintf(f, "AF =%04x BC =%04x DE =%04x HL =%04x IX=%04x\n"
+                   "AF'=%04x BC'=%04x DE'=%04x HL'=%04x IY=%04x\n"
+                   "PC =%04x SP =%04x F=[%c%c%c%c%c%c%c%c]\n"
+                   "IM=%i IFF1=%i IFF2=%i I=%02x R=%02x\n",
+                   (env->regs[R_A] << 8) | env->regs[R_F],
+                   env->regs[R_BC],
+                   env->regs[R_DE],
+                   env->regs[R_HL],
+                   env->regs[R_IX],
+                   env->regs[R_AFX],
+                   env->regs[R_BCX],
+                   env->regs[R_DEX],
+                   env->regs[R_HLX],
+                   env->regs[R_IY],
+                   env->pc,
+                   env->regs[R_SP],
+                   fl & 0x80 ? 'S' : '-',
+                   fl & 0x40 ? 'Z' : '-',
+                   fl & 0x20 ? 'Y' : '-',
+                   fl & 0x10 ? 'H' : '-',
+                   fl & 0x08 ? 'X' : '-',
+                   fl & 0x04 ? 'P' : '-',
+                   fl & 0x02 ? 'N' : '-',
+                   fl & 0x01 ? 'C' : '-',
+                   env->imode, env->iff1, env->iff2, env->regs[R_I], env->regs[R_R]);
+}
+
+/***********************************************************/
+void cpu_z80_flush_tlb(CPUZ80State *env, target_ulong addr)
+{
+    tlb_flush_page(env, addr);
+}
+
+/* return value:
+   -1 = cannot handle fault 
+   0  = nothing more to do 
+   1  = generate PF fault
+   2  = soft MMU activation required for this block
+*/
+int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr, 
+                             int is_write1, int is_user, int is_softmmu)
+{
+    int prot, page_size, ret, is_write;
+    unsigned long paddr, page_offset;
+    target_ulong vaddr, virt_addr;
+    
+#if defined(DEBUG_MMU)
+    printf("MMU fault: addr=" TARGET_FMT_lx " w=%d u=%d pc=" TARGET_FMT_lx "\n", 
+           addr, is_write1, is_user, env->pc);
 #endif
+    is_write = is_write1 & 1;
+    
+    virt_addr = addr & TARGET_PAGE_MASK;
+    prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+    page_size = 4096;
+
+    /* Even if 4MB pages, we map only one 4KB page in the cache to
+       avoid filling it too fast */
+    page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
+    paddr = (addr & TARGET_PAGE_MASK) + page_offset;
+    vaddr = virt_addr + page_offset;
+    
+    ret = tlb_set_page_exec(env, vaddr, paddr, prot, is_user, is_softmmu);
+    return ret;
+}
+
+target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
+{
+    uint32_t pte, paddr, page_offset, page_size;
+
+    pte = addr;
+    page_size = 4096;
+
+    page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
+    paddr = (pte & TARGET_PAGE_MASK) + page_offset;
+    return paddr;
 }
