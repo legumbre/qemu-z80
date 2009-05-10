@@ -42,47 +42,6 @@ register target_ulong T0 asm(AREG1);
 register target_ulong T1 asm(AREG2);
 register target_ulong T2 asm(AREG3);
 
-/* if more registers are available, we define some registers too */
-#ifdef AREG4
-register target_ulong A asm(AREG4);
-#define reg_A
-#endif
-
-#ifdef AREG5
-register target_ulong F asm(AREG5);
-#define reg_F
-#endif
-
-#ifdef AREG6
-register target_ulong BC asm(AREG6);
-#define reg_BC
-#endif
-
-#ifdef AREG7
-register target_ulong DE asm(AREG7);
-#define reg_DE
-#endif
-
-#ifdef AREG8
-register target_ulong HL asm(AREG8);
-#define reg_HL
-#endif
-
-#ifdef AREG9
-register target_ulong IX asm(AREG9);
-#define reg_IX
-#endif
-
-#ifdef AREG10
-register target_ulong IY asm(AREG10);
-#define reg_IY
-#endif
-
-#ifdef AREG11
-register target_ulong R asm(AREG11);
-#define reg_R
-#endif
-
 #endif /* ! (TARGET_LONG_BITS > HOST_LONG_BITS) */
 
 #define A0 T2
@@ -90,48 +49,20 @@ register target_ulong R asm(AREG11);
 extern FILE *logfile;
 extern int loglevel;
 
-#ifndef reg_A
-#define A (env->regs[R_A])
-#endif
-#ifndef reg_F
-#define F (env->regs[R_F])
-#endif
-#ifndef reg_BC
-#define BC (env->regs[R_BC])
-#endif
-#ifndef reg_DE
-#define DE (env->regs[R_DE])
-#endif
-#ifndef reg_HL
-#define HL (env->regs[R_HL])
-#endif
-#ifndef reg_IX
-#define IX (env->regs[R_IX])
-#endif
-#ifndef reg_IY
-#define IY (env->regs[R_IY])
-#endif
-#ifndef reg_SP
-#define SP (env->regs[R_SP])
-#endif
-#ifndef reg_I
-#define I (env->regs[R_I])
-#endif
-#ifndef reg_R
-#define R (env->regs[R_R])
-#endif
-#ifndef reg_AFX
+#define A   (env->regs[R_A])
+#define F   (env->regs[R_F])
+#define BC  (env->regs[R_BC])
+#define DE  (env->regs[R_DE])
+#define HL  (env->regs[R_HL])
+#define IX  (env->regs[R_IX])
+#define IY  (env->regs[R_IY])
+#define SP  (env->regs[R_SP])
+#define I   (env->regs[R_I])
+#define R   (env->regs[R_R])
 #define AFX (env->regs[R_AFX])
-#endif
-#ifndef reg_BCX
 #define BCX (env->regs[R_BCX])
-#endif
-#ifndef reg_DEX
 #define DEX (env->regs[R_DEX])
-#endif
-#ifndef reg_HLX
 #define HLX (env->regs[R_HLX])
-#endif
 
 #define PC  (env->pc)
 
@@ -246,7 +177,7 @@ static inline void stfl(target_ulong ptr, float v)
 #define RC_UP		0x800
 #define RC_CHOP		0xc00
 
-void helper_hlt(void);
+void helper_halt(void);
 void helper_monitor(void);
 void helper_mwait(void);
 

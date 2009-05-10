@@ -197,6 +197,7 @@ typedef struct CPUZ80State {
 } CPUZ80State;
 
 CPUZ80State *cpu_z80_init(const char *cpu_model);
+void z80_translate_init(void);
 int cpu_z80_exec(CPUZ80State *s);
 void cpu_z80_close(CPUZ80State *s);
 int cpu_get_pic_interrupt(CPUZ80State *s);

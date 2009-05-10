@@ -166,7 +166,7 @@ void raise_exception(int exception_index)
     raise_interrupt(exception_index, 0, 0, 0);
 }
 
-void helper_hlt(void)
+void helper_halt(void)
 {
     //printf("halting at PC 0x%x\n",env->pc);
     env->halted = 1;

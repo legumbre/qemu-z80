@@ -28,6 +28,7 @@
 #include "cpu.h"
 #include "exec-all.h"
 #include "disas.h"
+#include "helper.h"
 #include "tcg-op.h"
 
 #define PREFIX_CB  0x01
@@ -37,6 +38,9 @@
 
 #define zprintf(...)
 //#define zprintf printf
+
+/* global register indexes */
+static TCGv cpu_env, cpu_T[3];
 
 typedef struct DisasContext {
     /* current insn context */
@@ -835,7 +839,7 @@ next_byte:
         case 1:
             if (z == 6 && y == 6) {
                 gen_jmp_im(s->pc);
-                gen_op_halt();
+                tcg_gen_helper_0_0(helper_halt);
                 zprintf("halt\n");
             } else {
                 if (z == 6) {
@@ -1430,6 +1434,29 @@ static uint16_t opc_simpler[NB_OPS] = {
 //...
 #endif
 };
+
+void z80_translate_init(void)
+{
+    cpu_env = tcg_global_reg_new(TCG_TYPE_PTR, TCG_AREG0, "env");
+
+#if TARGET_LONG_BITS > HOST_LONG_BITS
+    cpu_T[0] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
+                                  offsetof(CPUState, t0), "T0");
+    cpu_T[1] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
+                                  offsetof(CPUState, t1), "T1");
+    cpu_T[2] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
+                                  offsetof(CPUState, t2), "T2");
+#else
+    cpu_T[0] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG1, "T0");
+    cpu_T[1] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG2, "T1");
+    cpu_T[2] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG3, "T2");
+#endif
+
+    /* register helpers */
+#undef DEF_HELPER
+#define DEF_HELPER(ret, name, params) tcg_register_helper(name, #name);
+#include "helper.h"
+}
 
 void optimize_flags_init(void)
 {

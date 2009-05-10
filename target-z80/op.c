@@ -1084,11 +1084,6 @@ void OPPROTO op_ri(void)
     env->iff1 = env->iff2;
 }
 
-void OPPROTO op_halt(void)
-{
-    helper_hlt();
-}
-
 void OPPROTO op_ld_R_A(void)
 {
     R = A;

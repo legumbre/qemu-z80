@@ -49,6 +49,7 @@ CPUZ80State *cpu_z80_init(const char *model)
     /* init various static tables */
     if (!inited) {
         inited = 1;
+        z80_translate_init();
         optimize_flags_init();
     }
     env->model = model;
