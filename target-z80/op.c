@@ -196,26 +196,6 @@ void OPPROTO op_movb_IYmem_T0(void)
     stb_kernel(A0, T0);
 }
 
-void OPPROTO op_ldb_T0_A0(void)
-{
-    T0 = ldub_kernel(A0);
-}
-
-void OPPROTO op_ldw_T0_A0(void)
-{
-    T0 = lduw_kernel(A0);
-}
-
-void OPPROTO op_stb_T0_A0(void)
-{
-    stb_kernel(A0, T0);
-}
-
-void OPPROTO op_stw_T0_A0(void)
-{
-    stw_kernel(A0, T0);
-}
-
 /* Stack operations */
 
 void OPPROTO op_pushw_T0(void)
