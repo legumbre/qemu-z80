@@ -41,6 +41,9 @@
 
 /* global register indexes */
 static TCGv cpu_env, cpu_T[3];
+#define cpu_A0 cpu_T[2]
+
+#define MEM_INDEX 0
 
 typedef struct DisasContext {
     /* current insn context */
@@ -112,7 +115,7 @@ char *idxnames[] = {
 /* signed hex byte value for printf */
 #define shexb(val) (val < 0 ? '-' : '+'), (abs(val))
 
-static GenOpFunc *gen_op_movb_T0_reg[] = {
+static GenOpFunc *gen_op_movb_T0_reg_tbl[] = {
     [OR_B]     = gen_op_movb_T0_B,
     [OR_C]     = gen_op_movb_T0_C,
     [OR_D]     = gen_op_movb_T0_D,
@@ -127,14 +130,18 @@ static GenOpFunc *gen_op_movb_T0_reg[] = {
                  
     [OR_IYh]   = gen_op_movb_T0_IYh,
     [OR_IYl]   = gen_op_movb_T0_IYl,
-};               
-    
+};
+
+static void gen_op_movb_T0_reg(int reg) {
+    gen_op_movb_T0_reg_tbl[reg]();
+}
+
 static GenOpFunc1 *gen_op_movb_T0_idx[] = {
     [OR_IXmem] = gen_op_movb_T0_IXmem,
     [OR_IYmem] = gen_op_movb_T0_IYmem,
 };
 
-static GenOpFunc *gen_op_movb_reg_T0[] = {
+static GenOpFunc *gen_op_movb_reg_T0_tbl[] = {
     [OR_B]     = gen_op_movb_B_T0,
     [OR_C]     = gen_op_movb_C_T0,
     [OR_D]     = gen_op_movb_D_T0,
@@ -151,6 +158,10 @@ static GenOpFunc *gen_op_movb_reg_T0[] = {
     [OR_IYl]   = gen_op_movb_IYl_T0,
 };            
     
+static void gen_op_movb_reg_T0(int reg) {
+    gen_op_movb_reg_T0_tbl[reg]();
+}
+
 static GenOpFunc1 *gen_op_movb_idx_T0[] = {
     [OR_IXmem] = gen_op_movb_IXmem_T0,
     [OR_IYmem] = gen_op_movb_IYmem_T0,
@@ -655,15 +666,15 @@ next_byte:
                 case 0:
                     switch (p) {
                     case 0:
-                        gen_op_movb_T0_reg[OR_A]();
+                        gen_op_movb_T0_reg(OR_A);
                         gen_op_movw_A0_BC();
-                        gen_op_stb_T0_A0();
+                        tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld (bc),a\n");
                         break;
                     case 1:
-                        gen_op_movb_T0_reg[OR_A]();
+                        gen_op_movb_T0_reg(OR_A);
                         gen_op_movw_A0_DE();
-                        gen_op_stb_T0_A0();
+                        tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld (de),a\n");
                         break;
                     case 2:
@@ -672,15 +683,15 @@ next_byte:
                         r1 = regpairmap(OR2_HL, m);
                         gen_op_movw_T0_reg[r1]();
                         gen_op_mov_A0_im(n);
-                        gen_op_stw_T0_A0();
+                        tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),%s\n", n, regpairnames[r1]);
                         break;
                     case 3:
                         n = lduw_code(s->pc);
                         s->pc += 2;
-                        gen_op_movb_T0_reg[OR_A]();
+                        gen_op_movb_T0_reg(OR_A);
                         gen_op_mov_A0_im(n);
-                        gen_op_stb_T0_A0();
+                        tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),a\n", n);
                         break;
                     }
@@ -689,14 +700,14 @@ next_byte:
                     switch (p) {
                     case 0:
                         gen_op_movw_A0_BC();
-                        gen_op_ldb_T0_A0();
-                        gen_op_movb_reg_T0[OR_A]();
+                        tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
+                        gen_op_movb_reg_T0(OR_A);
                         zprintf("ld a,(bc)\n");
                         break;
                     case 1:
                         gen_op_movw_A0_DE();
-                        gen_op_ldb_T0_A0();
-                        gen_op_movb_reg_T0[OR_A]();
+                        tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
+                        gen_op_movb_reg_T0(OR_A);
                         zprintf("ld a,(de)\n");
                         break;
                     case 2:
@@ -704,7 +715,7 @@ next_byte:
                         s->pc += 2;
                         r1 = regpairmap(OR2_HL, m);
                         gen_op_mov_A0_im(n);
-                        gen_op_ldw_T0_A0();
+                        tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
                         gen_op_movw_reg_T0[r1]();
                         zprintf("ld %s,($%04x)\n", regpairnames[r1], n);
                         break;
@@ -712,8 +723,8 @@ next_byte:
                         n = lduw_code(s->pc);
                         s->pc += 2;
                         gen_op_mov_A0_im(n);
-                        gen_op_ldb_T0_A0();
-                        gen_op_movb_reg_T0[OR_A]();
+                        tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
+                        gen_op_movb_reg_T0(OR_A);
                         zprintf("ld a,($%04x)\n", n);
                         break;
                     }
@@ -747,12 +758,12 @@ next_byte:
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
                 } else
-                    gen_op_movb_T0_reg[r1]();
+                    gen_op_movb_T0_reg(r1);
                 gen_op_incb_T0_cc();
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0[r1]();
+                    gen_op_movb_reg_T0(r1);
                 if (is_indexed(r1))
                     zprintf("inc (%s%c$%02x)\n", idxnames[r1], shexb(d));
                 else
@@ -766,12 +777,12 @@ next_byte:
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
                 } else
-                    gen_op_movb_T0_reg[r1]();
+                    gen_op_movb_T0_reg(r1);
                 gen_op_decb_T0_cc();
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0[r1]();
+                    gen_op_movb_reg_T0(r1);
                 if (is_indexed(r1))
                     zprintf("dec (%s%c$%02x)\n", idxnames[r1], shexb(d));
                 else
@@ -790,7 +801,7 @@ next_byte:
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0[r1]();
+                    gen_op_movb_reg_T0(r1);
                 if (is_indexed(r1))
                     zprintf("ld (%s%c$%02x),$%02x\n", idxnames[r1], shexb(d), n);
                 else
@@ -859,11 +870,11 @@ next_byte:
                 if (is_indexed(r1))
                     gen_op_movb_T0_idx[r1](d);
                 else
-                    gen_op_movb_T0_reg[r1]();
+                    gen_op_movb_T0_reg(r1);
                 if (is_indexed(r2))
                     gen_op_movb_idx_T0[r2](d);
                 else
-                    gen_op_movb_reg_T0[r2]();
+                    gen_op_movb_reg_T0(r2);
                 if (is_indexed(r1))
                     zprintf("ld %s,(%s%c$%02x)\n", regnames[r2], idxnames[r1], shexb(d));
                 else if (is_indexed(r2))
@@ -880,7 +891,7 @@ next_byte:
                 s->pc++;
                 gen_op_movb_T0_idx[r1](d);
             } else
-                gen_op_movb_T0_reg[r1]();
+                gen_op_movb_T0_reg(r1);
             gen_op_alu[y](); /* places output in A */
             if (is_indexed(r1))
                 zprintf("%s(%s%c$%02x)\n", alu[y], idxnames[r1], shexb(d));
@@ -962,7 +973,7 @@ next_byte:
                 case 2:
                     n = ldub_code(s->pc);
                     s->pc++;
-                    gen_op_movb_T0_reg[OR_A]();
+                    gen_op_movb_T0_reg(OR_A);
                     gen_op_out_T0_im(n);
                     zprintf("out ($%02x),a\n", n);
                     break;
@@ -970,7 +981,7 @@ next_byte:
                     n = ldub_code(s->pc);
                     s->pc++;
                     gen_op_in_T0_im(n);
-                    gen_op_movb_reg_T0[OR_A]();
+                    gen_op_movb_reg_T0(OR_A);
                     zprintf("in a,($%02x)\n", n);
                     break;
                 case 4:
@@ -1093,7 +1104,7 @@ next_byte:
                 r2 = regmap(reg[z], 0);
         } else {
             r1 = regmap(reg[z], m);
-            gen_op_movb_T0_reg[r1]();
+            gen_op_movb_T0_reg(r1);
         }
 
         switch (x) {
@@ -1103,9 +1114,9 @@ next_byte:
             if (m) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0[r2]();
+                    gen_op_movb_reg_T0(r2);
             } else {
-                gen_op_movb_reg_T0[r1]();
+                gen_op_movb_reg_T0(r1);
             }
             zprintf("%s %s\n", rot[y], regnames[r1]);
             break;
@@ -1118,9 +1129,9 @@ next_byte:
             if (m) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0[r2]();
+                    gen_op_movb_reg_T0(r2);
             } else {
-                gen_op_movb_reg_T0[r1]();
+                gen_op_movb_reg_T0(r1);
             }
             zprintf("res %i,%s\n", y, regnames[r1]);
             break;
@@ -1129,9 +1140,9 @@ next_byte:
             if (m) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0[r2]();
+                    gen_op_movb_reg_T0(r2);
             } else {
-                gen_op_movb_reg_T0[r1]();
+                gen_op_movb_reg_T0(r1);
             }
             zprintf("set %i,%s\n", y, regnames[r1]);
             break;
@@ -1163,7 +1174,7 @@ next_byte:
                 case 1:
                     /* does mulub work with r1 == h, l, (hl) or a? */
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_T0_reg[r1]();
+                    gen_op_movb_T0_reg(r1);
                     gen_op_mulub_cc();
                     zprintf("mulub a,%s\n", regnames[r1]);
                     break;
@@ -1194,7 +1205,7 @@ next_byte:
                 gen_op_in_T0_bc_cc();
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_reg_T0[r1]();
+                    gen_op_movb_reg_T0(r1);
                     zprintf("in %s,(c)\n", regnames[r1]);
                 } else {
                     zprintf("in (c)\n");
@@ -1203,7 +1214,7 @@ next_byte:
             case 1:
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_T0_reg[r1]();
+                    gen_op_movb_T0_reg(r1);
                     zprintf("out (c),%s\n", regnames[r1]);
                 } else {
                     gen_op_mov_T0_im(0);
@@ -1232,11 +1243,11 @@ next_byte:
                 if (q == 0) {
                     gen_op_movw_T0_reg[r1]();
                     gen_op_mov_A0_im(n);
-                    gen_op_stw_T0_A0();
+                    tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                     zprintf("ld ($%02x),%s\n", n, regpairnames[r1]);
                 } else {
                     gen_op_mov_A0_im(n);
-                    gen_op_ldw_T0_A0();
+                    tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_movw_reg_T0[r1]();
                     zprintf("ld %s,($%02x)\n", regpairnames[r1], n);
                 }
@@ -1284,15 +1295,15 @@ next_byte:
                     zprintf("ld a,r\n");
                     break;
                 case 4:
-                    gen_op_movb_T0_reg[OR_HLmem]();
+                    gen_op_movb_T0_reg(OR_HLmem);
                     gen_op_rrd_cc();
-                    gen_op_movb_reg_T0[OR_HLmem]();
+                    gen_op_movb_reg_T0(OR_HLmem);
                     zprintf("rrd\n");
                     break;
                 case 5:
-                    gen_op_movb_T0_reg[OR_HLmem]();
+                    gen_op_movb_T0_reg(OR_HLmem);
                     gen_op_rld_cc();
-                    gen_op_movb_reg_T0[OR_HLmem]();
+                    gen_op_movb_reg_T0(OR_HLmem);
                     zprintf("rld\n");
                     break;
                 case 6:
@@ -1311,9 +1322,9 @@ next_byte:
                 switch (z) {
                 case 0: /* ldi/ldd/ldir/lddr */
                     gen_op_movw_A0_HL();
-                    gen_op_ldb_T0_A0();
+                    tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_movw_A0_DE();
-                    gen_op_stb_T0_A0();
+                    tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
 
                     if (!(y & 1))
                         gen_op_bli_ld_inc_cc();
@@ -1328,7 +1339,7 @@ next_byte:
 
                 case 1: /* cpi/cpd/cpir/cpdr */
                     gen_op_movw_A0_HL();
-                    gen_op_ldb_T0_A0();
+                    tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_bli_cp_cc();
 
                     if (!(y & 1))
@@ -1345,7 +1356,7 @@ next_byte:
                 case 2: /* ini/ind/inir/indr */
                     gen_op_in_T0_bc_cc();
                     gen_op_movw_A0_HL();
-                    gen_op_stb_T0_A0();
+                    tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1))
                         gen_op_bli_io_inc();
                     else
@@ -1359,7 +1370,7 @@ next_byte:
 
                 case 3: /* outi/outd/otir/otdr */
                     gen_op_movw_A0_HL();
-                    gen_op_ldb_T0_A0();
+                    tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_out_T0_bc();
                     if (!(y & 1))
                         gen_op_bli_io_inc();
