@@ -1,8 +1,10 @@
 /*
- * QEMU ZX Spectrum Video Emulation.
+ * ZX Spectrum Video Emulation
  * 
- * Copyright (c) 2007 Stuart Brady
- * Copyright (c) 2003 Fabrice Bellard
+ * Copyright (c) 2007-2009 Stuart Brady <stuart.brady@gmail.com>
+ *
+ * Uses code from VGA emulation
+ *   Copyright (c) 2003 Fabrice Bellard
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

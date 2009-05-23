@@ -1,8 +1,8 @@
 /*
  * QEMU ZX Spectrum Emulator
  * 
- * Copyright (c) 2007 Stuart Brady
- * Copyright (c) 2003-2004 Fabrice Bellard
+ * Copyright (c) 2007-2009 Stuart Brady <stuart.brady@gmail.com>
+ * Copyright (c) 2007 Ulrich Hecht
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
