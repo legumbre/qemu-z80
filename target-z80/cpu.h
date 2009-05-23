@@ -59,6 +59,8 @@
 #define R_DEX   13
 #define R_HLX   14
 
+#define CPU_NB_REGS 15
+
 /* flags masks */
 #define CC_C   	0x0001
 #define CC_N    0x0002
@@ -138,8 +140,6 @@ enum {
 
     CC_OP_NB,
 };
-
-#define CPU_NB_REGS 14
 
 #define NB_MMU_MODES 2
 
