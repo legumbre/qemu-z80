@@ -185,7 +185,7 @@ typedef struct CPUZ80State {
     target_ulong exception_next_pc;
     target_ulong dr[8]; /* debug registers */
     uint32_t smbase;
-    int interrupt_request; 
+    int interrupt_request;
     int user_mode_only; /* user mode only simulation */
 
     CPU_COMMON
@@ -217,7 +217,7 @@ static inline void cpu_z80_set_cpl(CPUZ80State *s, int cpl)
    signal handlers to inform the virtual CPU of exceptions. non zero
    is returned if the signal was handled by the virtual CPU.  */
 struct siginfo;
-int cpu_z80_signal_handler(int host_signum, struct siginfo *info, 
+int cpu_z80_signal_handler(int host_signum, struct siginfo *info,
                            void *puc);
 
 uint64_t cpu_get_tsc(CPUZ80State *env);

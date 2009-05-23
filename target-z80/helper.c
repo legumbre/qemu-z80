@@ -124,7 +124,7 @@ void cpu_z80_close(CPUZ80State *env)
 /***********************************************************/
 /* x86 debug */
 
-void cpu_dump_state(CPUState *env, FILE *f, 
+void cpu_dump_state(CPUState *env, FILE *f,
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
                     int flags)
 {
@@ -164,24 +164,24 @@ void cpu_z80_flush_tlb(CPUZ80State *env, target_ulong addr)
 }
 
 /* return value:
-   -1 = cannot handle fault 
-   0  = nothing more to do 
+   -1 = cannot handle fault
+   0  = nothing more to do
    1  = generate PF fault
    2  = soft MMU activation required for this block
 */
-int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr, 
+int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
                              int is_write1, int is_user, int is_softmmu)
 {
     int prot, page_size, ret, is_write;
     unsigned long paddr, page_offset;
     target_ulong vaddr, virt_addr;
-    
+
 #if defined(DEBUG_MMU)
-    printf("MMU fault: addr=" TARGET_FMT_lx " w=%d u=%d pc=" TARGET_FMT_lx "\n", 
+    printf("MMU fault: addr=" TARGET_FMT_lx " w=%d u=%d pc=" TARGET_FMT_lx "\n",
            addr, is_write1, is_user, env->pc);
 #endif
     is_write = is_write1 & 1;
-    
+
     virt_addr = addr & TARGET_PAGE_MASK;
     prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
     page_size = 4096;
@@ -191,7 +191,7 @@ int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
     paddr = (addr & TARGET_PAGE_MASK) + page_offset;
     vaddr = virt_addr + page_offset;
-    
+
     ret = tlb_set_page_exec(env, vaddr, paddr, prot, is_user, is_softmmu);
     return ret;
 }

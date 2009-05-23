@@ -58,7 +58,7 @@ const uint8_t parity_table[256] = {
 
 /* modulo 17 table */
 const uint8_t rclw_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 
+    0, 1, 2, 3, 4, 5, 6, 7,
     8, 9,10,11,12,13,14,15,
    16, 0, 1, 2, 3, 4, 5, 6,
     7, 8, 9,10,11,12,13,14,
@@ -66,13 +66,13 @@ const uint8_t rclw_table[32] = {
 
 /* modulo 9 table */
 const uint8_t rclb_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 
+    0, 1, 2, 3, 4, 5, 6, 7,
     8, 0, 1, 2, 3, 4, 5, 6,
-    7, 8, 0, 1, 2, 3, 4, 5, 
+    7, 8, 0, 1, 2, 3, 4, 5,
     6, 7, 8, 0, 1, 2, 3, 4,
 };
 
-    
+
 /* thread support */
 
 spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
@@ -122,7 +122,7 @@ void do_interrupt(CPUZ80State *env)
             break;
         case 2:
             /* XXX: assuming 0xff on data bus */
-            d = 0xff; 
+            d = 0xff;
             env->pc = lduw_kernel((env->regs[R_I] << 8) | d);
             break;
     }
@@ -132,9 +132,9 @@ void do_interrupt(CPUZ80State *env)
  * Signal an interruption. It is executed in the main CPU loop.
  * is_int is TRUE if coming from the int instruction. next_eip is the
  * EIP value AFTER the interrupt instruction. It is only relevant if
- * is_int is TRUE.  
+ * is_int is TRUE.
  */
-void raise_interrupt(int intno, int is_int, int error_code, 
+void raise_interrupt(int intno, int is_int, int error_code,
                      int next_eip_addend)
 {
     env->exception_index = intno;
@@ -183,7 +183,7 @@ void helper_mwait(void)
 {
 }
 
-#if !defined(CONFIG_USER_ONLY) 
+#if !defined(CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
 #define GETPC() (__builtin_return_address(0))

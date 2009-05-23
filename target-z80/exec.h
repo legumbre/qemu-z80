@@ -1,5 +1,5 @@
 /*
- * Z80 execution defines 
+ * Z80 execution defines
  *
  *  Copyright (c) 2007 Stuart Brady <stuart.brady@gmail.com>
  *
@@ -106,14 +106,14 @@ void helper_movl_crN_T0(int reg);
 void helper_movl_drN_T0(int reg);
 void helper_invlpg(target_ulong addr);
 
-int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr, 
+int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
                              int is_write, int is_user, int is_softmmu);
-void tlb_fill(target_ulong addr, int is_write, int is_user, 
+void tlb_fill(target_ulong addr, int is_write, int is_user,
               void *retaddr);
 void __hidden cpu_lock(void);
 void __hidden cpu_unlock(void);
 void do_interrupt(CPUZ80State *env);
-void raise_interrupt(int intno, int is_int, int error_code, 
+void raise_interrupt(int intno, int is_int, int error_code,
                      int next_eip_addend);
 void raise_exception_err(int exception_index, int error_code);
 void raise_exception(int exception_index);
@@ -195,7 +195,7 @@ static inline uint32_t compute_eflags(void)
 static inline void load_eflags(int eflags, int update_mask)
 {
     CC_SRC = eflags & (CC_S | CC_Z | CC_P | CC_C);
-    env->eflags = (env->eflags & ~update_mask) | 
+    env->eflags = (env->eflags & ~update_mask) |
         (eflags & update_mask);
 }
 
