@@ -17,6 +17,7 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -270,8 +271,8 @@ static gen_mov_func *gen_movb_reg_v_tbl[] = {
 
     [OR_IYh]   = gen_movb_IYh_v,
     [OR_IYl]   = gen_movb_IYl_v,
-};            
-    
+};
+
 static inline void gen_movb_reg_v(int reg, TCGv v) {
     gen_movb_reg_v_tbl[reg](v);
 }
@@ -351,11 +352,11 @@ char *regpairnames[] = {
     [OR2_BC]  = "bc",
     [OR2_DE]  = "de",
     [OR2_HL]  = "hl",
-           
+
     [OR2_IX]  = "ix",
     [OR2_IY]  = "iy",
     [OR2_SP]  = "sp",
-            
+
     [OR2_AFX] = "afx",
     [OR2_BCX] = "bcx",
     [OR2_DEX] = "dex",
@@ -367,11 +368,11 @@ static gen_mov_func *gen_movw_v_reg_tbl[] = {
     [OR2_BC]  = gen_movw_v_BC,
     [OR2_DE]  = gen_movw_v_DE,
     [OR2_HL]  = gen_movw_v_HL,
-                
+
     [OR2_IX]  = gen_movw_v_IX,
     [OR2_IY]  = gen_movw_v_IY,
     [OR2_SP]  = gen_movw_v_SP,
-                
+
     [OR2_AFX] = gen_movw_v_AFX,
     [OR2_BCX] = gen_movw_v_BCX,
     [OR2_DEX] = gen_movw_v_DEX,
@@ -387,11 +388,11 @@ static gen_mov_func *gen_movw_reg_v_tbl[] = {
     [OR2_BC]  = gen_movw_BC_v,
     [OR2_DE]  = gen_movw_DE_v,
     [OR2_HL]  = gen_movw_HL_v,
-                
+
     [OR2_IX]  = gen_movw_IX_v,
     [OR2_IY]  = gen_movw_IY_v,
     [OR2_SP]  = gen_movw_SP_v,
-                
+
     [OR2_AFX] = gen_movw_AFX_v,
     [OR2_BCX] = gen_movw_BCX_v,
     [OR2_DEX] = gen_movw_DEX_v,
@@ -1290,7 +1291,7 @@ next_byte:
                 zprintf("nop\n");
             }
             break;
-      
+
         case 1:
             switch (z) {
             case 0:
@@ -1582,7 +1583,7 @@ static void optimize_flags(uint16_t *opc_buf, int opc_buf_len)
    basic block 'tb'. If search_pc is TRUE, also generate PC
    information for each intermediate instruction. */
 static inline int gen_intermediate_code_internal(CPUState *env,
-                                                 TranslationBlock *tb, 
+                                                 TranslationBlock *tb,
                                                  int search_pc)
 {
     DisasContext dc1, *dc = &dc1;
@@ -1591,7 +1592,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     int flags, j, lj, cflags;
     target_ulong pc_start;
     target_ulong cs_base;
-    
+
     /* generate intermediate code */
     pc_start = tb->pc;
     cs_base = tb->cs_base;
@@ -1648,7 +1649,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
         /* if irq were inhibited with HF_INHIBIT_IRQ_MASK, we clear
            the flag and abort the translation to give the irqs a
            change to be happen */
-        if (dc->singlestep_enabled || 
+        if (dc->singlestep_enabled ||
             (flags & HF_INHIBIT_IRQ_MASK) ||
             (cflags & CF_SINGLE_INSN)) {
             gen_jmp_im(pc_ptr - dc->cs_base);
@@ -1671,7 +1672,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
         while (lj <= j)
             gen_opc_instr_start[lj++] = 0;
     }
-        
+
 #ifdef DEBUG_DISAS
     if (loglevel & CPU_LOG_TB_CPU) {
         cpu_dump_state(env, logfile, fprintf, 0);
@@ -1709,7 +1710,7 @@ int gen_intermediate_code_pc(CPUState *env, TranslationBlock *tb)
 }
 
 void gen_pc_load(CPUState *env, TranslationBlock *tb,
-		 unsigned long searched_pc, int pc_pos, void *puc)
+                 unsigned long searched_pc, int pc_pos, void *puc)
 {
     env->pc = gen_opc_pc[pc_pos];
 }
