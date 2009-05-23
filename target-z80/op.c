@@ -21,104 +21,6 @@
 #define ASM_SOFTMMU
 #include "exec.h"
 
-#define REGHIGH A
-#define REGLOW F
-#define REGPAIRNAME _AF
-#define REGHIGHNAME _A
-#define REGLOWNAME _F
-#include "opreg_template2.h"
-#undef REGHIGH
-#undef REGLOW
-#undef REGPAIRNAME
-#undef REGHIGHNAME
-#undef REGLOWNAME
-
-#define REG BC
-#define REGNAME _BC
-#define REGHIGH _B
-#define REGLOW _C
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-#undef REGHIGH
-#undef REGLOW
-
-#define REG DE
-#define REGNAME _DE
-#define REGHIGH _D
-#define REGLOW _E
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-#undef REGHIGH
-#undef REGLOW
-
-#define REG HL
-#define REGNAME _HL
-#define REGHIGH _H
-#define REGLOW _L
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-#undef REGHIGH
-#undef REGLOW
-
-#define REG IX
-#define REGNAME _IX
-#define REGHIGH _IXh
-#define REGLOW _IXl
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-#undef REGHIGH
-#undef REGLOW
-
-#define REG IY
-#define REGNAME _IY
-#define REGHIGH _IYh
-#define REGLOW _IYl
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-#undef REGHIGH
-#undef REGLOW
-
-#define REG SP
-#define REGNAME _SP
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-
-#define REGHIGH AX
-#define REGLOW FX
-#define REGPAIRNAME _AFX
-#define REGHIGHNAME _AX
-#define REGLOWNAME _FX
-#include "opreg_template2.h"
-#undef REGHIGH
-#undef REGLOW
-#undef REGPAIRNAME
-#undef REGHIGHNAME
-#undef REGLOWNAME
-
-#define REG BCX
-#define REGNAME _BCX
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-
-#define REG DEX
-#define REGNAME _DEX
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-
-#define REG HLX
-#define REGNAME _HLX
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
-
 void OPPROTO op_movl_pc_im(void)
 {
     PC = (uint16_t)PARAM1;
@@ -164,18 +66,6 @@ void OPPROTO op_mov_T1_im(void)
 void OPPROTO op_mov_A0_im(void)
 {
     A0 = (uint16_t)PARAM1;
-}
-
-void OPPROTO op_movb_T0_HLmem(void)
-{
-    A0 = HL;
-    T0 = ldub_kernel(A0);
-}
-
-void OPPROTO op_movb_HLmem_T0(void)
-{
-    A0 = HL;
-    stb_kernel(A0, T0);
 }
 
 void OPPROTO op_movb_T0_IXmem(void)

@@ -1,7 +1,7 @@
 /*
  * Z80 translation
  *
- *  Copyright (c) 2007 Stuart Brady <stuart.brady@gmail.com>
+ *  Copyright (c) 2007-2009 Stuart Brady <stuart.brady@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -119,25 +119,135 @@ char *idxnames[] = {
 /* signed hex byte value for printf */
 #define shexb(val) (val < 0 ? '-' : '+'), (abs(val))
 
-static GenOpFunc *gen_op_movb_T0_reg_tbl[] = {
-    [OR_B]     = gen_op_movb_T0_B,
-    [OR_C]     = gen_op_movb_T0_C,
-    [OR_D]     = gen_op_movb_T0_D,
-    [OR_E]     = gen_op_movb_T0_E,
-    [OR_H]     = gen_op_movb_T0_H,
-    [OR_L]     = gen_op_movb_T0_L,
-    [OR_HLmem] = gen_op_movb_T0_HLmem,
-    [OR_A]     = gen_op_movb_T0_A,
-                 
-    [OR_IXh]   = gen_op_movb_T0_IXh,
-    [OR_IXl]   = gen_op_movb_T0_IXl,
-                 
-    [OR_IYh]   = gen_op_movb_T0_IYh,
-    [OR_IYl]   = gen_op_movb_T0_IYl,
+/* Register accessor functions */
+
+#if defined(WORDS_BIGENDIAN)
+#define BYTE_OFFSET(type, n) (sizeof(type) - 1 - n)
+#define WORD_OFFSET(type, n) (sizeof(type) - 2 - n)
+#else
+#define BYTE_OFFSET(type, n) n
+#define WORD_OFFSET(type, n) n
+#endif
+
+#define REGPAIR AF
+#define REGHIGH A
+#define REGLOW  F
+#include "genreg_template_af.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR BC
+#define REGHIGH B
+#define REGLOW  C
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR DE
+#define REGHIGH D
+#define REGLOW  E
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR HL
+#define REGHIGH H
+#define REGLOW  L
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR IX
+#define REGHIGH IXh
+#define REGLOW  IXl
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR IY
+#define REGHIGH IYh
+#define REGLOW  IYl
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR AFX
+#define REGHIGH AX
+#define REGLOW  FX
+#include "genreg_template_af.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR BCX
+#define REGHIGH BX
+#define REGLOW  CX
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR DEX
+#define REGHIGH DX
+#define REGLOW  EX
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR HLX
+#define REGHIGH HX
+#define REGLOW  LX
+#include "genreg_template.h"
+#undef REGPAIR
+#undef REGHIGH
+#undef REGLOW
+
+#define REGPAIR SP
+#include "genreg_template.h"
+#undef REGPAIR
+
+typedef void (gen_mov_func)(TCGv v);
+
+static inline void gen_movb_v_HLmem(TCGv v) {
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_HL(addr);
+    tcg_gen_qemu_ld8u(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_movb_HLmem_v(TCGv v) {
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_HL(addr);
+    tcg_gen_qemu_st8(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static gen_mov_func *gen_movb_v_reg_tbl[] = {
+    [OR_B]     = gen_movb_v_B,
+    [OR_C]     = gen_movb_v_C,
+    [OR_D]     = gen_movb_v_D,
+    [OR_E]     = gen_movb_v_E,
+    [OR_H]     = gen_movb_v_H,
+    [OR_L]     = gen_movb_v_L,
+    [OR_HLmem] = gen_movb_v_HLmem,
+    [OR_A]     = gen_movb_v_A,
+
+    [OR_IXh]   = gen_movb_v_IXh,
+    [OR_IXl]   = gen_movb_v_IXl,
+
+    [OR_IYh]   = gen_movb_v_IYh,
+    [OR_IYl]   = gen_movb_v_IYl,
 };
 
-static void gen_op_movb_T0_reg(int reg) {
-    gen_op_movb_T0_reg_tbl[reg]();
+static inline void gen_movb_v_reg(TCGv v, int reg) {
+    gen_movb_v_reg_tbl[reg](v);
 }
 
 static GenOpFunc1 *gen_op_movb_T0_idx[] = {
@@ -145,25 +255,25 @@ static GenOpFunc1 *gen_op_movb_T0_idx[] = {
     [OR_IYmem] = gen_op_movb_T0_IYmem,
 };
 
-static GenOpFunc *gen_op_movb_reg_T0_tbl[] = {
-    [OR_B]     = gen_op_movb_B_T0,
-    [OR_C]     = gen_op_movb_C_T0,
-    [OR_D]     = gen_op_movb_D_T0,
-    [OR_E]     = gen_op_movb_E_T0,
-    [OR_H]     = gen_op_movb_H_T0,
-    [OR_L]     = gen_op_movb_L_T0,
-    [OR_HLmem] = gen_op_movb_HLmem_T0,
-    [OR_A]     = gen_op_movb_A_T0,
-              
-    [OR_IXh]   = gen_op_movb_IXh_T0,
-    [OR_IXl]   = gen_op_movb_IXl_T0,
-                                
-    [OR_IYh]   = gen_op_movb_IYh_T0,
-    [OR_IYl]   = gen_op_movb_IYl_T0,
+static gen_mov_func *gen_movb_reg_v_tbl[] = {
+    [OR_B]     = gen_movb_B_v,
+    [OR_C]     = gen_movb_C_v,
+    [OR_D]     = gen_movb_D_v,
+    [OR_E]     = gen_movb_E_v,
+    [OR_H]     = gen_movb_H_v,
+    [OR_L]     = gen_movb_L_v,
+    [OR_HLmem] = gen_movb_HLmem_v,
+    [OR_A]     = gen_movb_A_v,
+
+    [OR_IXh]   = gen_movb_IXh_v,
+    [OR_IXl]   = gen_movb_IXl_v,
+
+    [OR_IYh]   = gen_movb_IYh_v,
+    [OR_IYl]   = gen_movb_IYl_v,
 };            
     
-static void gen_op_movb_reg_T0(int reg) {
-    gen_op_movb_reg_T0_tbl[reg]();
+static inline void gen_movb_reg_v(int reg, TCGv v) {
+    gen_movb_reg_v_tbl[reg](v);
 }
 
 static GenOpFunc1 *gen_op_movb_idx_T0[] = {
@@ -252,69 +362,45 @@ char *regpairnames[] = {
     [OR2_HLX] = "hlx",
 };
 
-static GenOpFunc *gen_op_movw_T0_reg[] = {
-    [OR2_AF]  = gen_op_movw_T0_AF,
-    [OR2_BC]  = gen_op_movw_T0_BC,
-    [OR2_DE]  = gen_op_movw_T0_DE,
-    [OR2_HL]  = gen_op_movw_T0_HL,
+static gen_mov_func *gen_movw_v_reg_tbl[] = {
+    [OR2_AF]  = gen_movw_v_AF,
+    [OR2_BC]  = gen_movw_v_BC,
+    [OR2_DE]  = gen_movw_v_DE,
+    [OR2_HL]  = gen_movw_v_HL,
                 
-    [OR2_IX]  = gen_op_movw_T0_IX,
-    [OR2_IY]  = gen_op_movw_T0_IY,
-    [OR2_SP]  = gen_op_movw_T0_SP,
+    [OR2_IX]  = gen_movw_v_IX,
+    [OR2_IY]  = gen_movw_v_IY,
+    [OR2_SP]  = gen_movw_v_SP,
                 
-    [OR2_AFX] = gen_op_movw_T0_AFX,
-    [OR2_BCX] = gen_op_movw_T0_BCX,
-    [OR2_DEX] = gen_op_movw_T0_DEX,
-    [OR2_HLX] = gen_op_movw_T0_HLX,
+    [OR2_AFX] = gen_movw_v_AFX,
+    [OR2_BCX] = gen_movw_v_BCX,
+    [OR2_DEX] = gen_movw_v_DEX,
+    [OR2_HLX] = gen_movw_v_HLX,
 };
 
-static GenOpFunc *gen_op_movw_T1_reg[] = {
-    [OR2_AF]  = gen_op_movw_T1_AF,
-    [OR2_BC]  = gen_op_movw_T1_BC,
-    [OR2_DE]  = gen_op_movw_T1_DE,
-    [OR2_HL]  = gen_op_movw_T1_HL,
+static inline void gen_movw_v_reg(TCGv v, int reg) {
+    gen_movw_v_reg_tbl[reg](v);
+}
+
+static gen_mov_func *gen_movw_reg_v_tbl[] = {
+    [OR2_AF]  = gen_movw_AF_v,
+    [OR2_BC]  = gen_movw_BC_v,
+    [OR2_DE]  = gen_movw_DE_v,
+    [OR2_HL]  = gen_movw_HL_v,
                 
-    [OR2_IX]  = gen_op_movw_T1_IX,
-    [OR2_IY]  = gen_op_movw_T1_IY,
-    [OR2_SP]  = gen_op_movw_T1_SP,
+    [OR2_IX]  = gen_movw_IX_v,
+    [OR2_IY]  = gen_movw_IY_v,
+    [OR2_SP]  = gen_movw_SP_v,
                 
-    [OR2_AFX] = gen_op_movw_T1_AFX,
-    [OR2_BCX] = gen_op_movw_T1_BCX,
-    [OR2_DEX] = gen_op_movw_T1_DEX,
-    [OR2_HLX] = gen_op_movw_T1_HLX,
+    [OR2_AFX] = gen_movw_AFX_v,
+    [OR2_BCX] = gen_movw_BCX_v,
+    [OR2_DEX] = gen_movw_DEX_v,
+    [OR2_HLX] = gen_movw_HLX_v,
 };
 
-static GenOpFunc *gen_op_movw_reg_T0[] = {
-    [OR2_AF]  = gen_op_movw_AF_T0,
-    [OR2_BC]  = gen_op_movw_BC_T0,
-    [OR2_DE]  = gen_op_movw_DE_T0,
-    [OR2_HL]  = gen_op_movw_HL_T0,
-                
-    [OR2_IX]  = gen_op_movw_IX_T0,
-    [OR2_IY]  = gen_op_movw_IY_T0,
-    [OR2_SP]  = gen_op_movw_SP_T0,
-                
-    [OR2_AFX] = gen_op_movw_AFX_T0,
-    [OR2_BCX] = gen_op_movw_BCX_T0,
-    [OR2_DEX] = gen_op_movw_DEX_T0,
-    [OR2_HLX] = gen_op_movw_HLX_T0,
-};
-
-static GenOpFunc *gen_op_movw_reg_T1[] = {
-    [OR2_AF]  = gen_op_movw_AF_T1,
-    [OR2_BC]  = gen_op_movw_BC_T1,
-    [OR2_DE]  = gen_op_movw_DE_T1,
-    [OR2_HL]  = gen_op_movw_HL_T1,
-                
-    [OR2_IX]  = gen_op_movw_IX_T1,
-    [OR2_IY]  = gen_op_movw_IY_T1,
-    [OR2_SP]  = gen_op_movw_SP_T1,
-                
-    [OR2_AFX] = gen_op_movw_AFX_T1,
-    [OR2_BCX] = gen_op_movw_BCX_T1,
-    [OR2_DEX] = gen_op_movw_DEX_T1,
-    [OR2_HLX] = gen_op_movw_HLX_T1,
-};
+static inline void gen_movw_reg_v(int reg, TCGv v) {
+    gen_movw_reg_v_tbl[reg](v);
+}
 
 static inline int regpairmap(int regpair, int m) {
     switch (regpair) {
@@ -652,16 +738,16 @@ next_byte:
                     s->pc += 2;
                     gen_op_mov_T0_im(n);
                     r1 = regpairmap(regpair[p], m);
-                    gen_op_movw_reg_T0[r1]();
+                    gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("ld %s,$%04x\n", regpairnames[r1], n);
                     break;
                 case 1:
                     r1 = regpairmap(regpair[p], m);
                     r2 = regpairmap(OR2_HL, m);
-                    gen_op_movw_T0_reg[r1]();
-                    gen_op_movw_T1_reg[r2]();
+                    gen_movw_v_reg(cpu_T[0], r1);
+                    gen_movw_v_reg(cpu_T[1], r2);
                     gen_op_addw_T0_T1_cc();
-                    gen_op_movw_reg_T0[r2]();
+                    gen_movw_reg_v(r2, cpu_T[0]);
                     zprintf("add %s,%s\n", regpairnames[r2], regpairnames[r1]);
                     break;
                 }
@@ -672,14 +758,14 @@ next_byte:
                 case 0:
                     switch (p) {
                     case 0:
-                        gen_op_movb_T0_reg(OR_A);
-                        gen_op_movw_A0_BC();
+                        gen_movb_v_A(cpu_T[0]);
+                        gen_movw_v_BC(cpu_A0);
                         tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld (bc),a\n");
                         break;
                     case 1:
-                        gen_op_movb_T0_reg(OR_A);
-                        gen_op_movw_A0_DE();
+                        gen_movb_v_A(cpu_T[0]);
+                        gen_movw_v_DE(cpu_A0);
                         tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld (de),a\n");
                         break;
@@ -687,7 +773,7 @@ next_byte:
                         n = lduw_code(s->pc);
                         s->pc += 2;
                         r1 = regpairmap(OR2_HL, m);
-                        gen_op_movw_T0_reg[r1]();
+                        gen_movw_v_reg(cpu_T[0], r1);
                         gen_op_mov_A0_im(n);
                         tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),%s\n", n, regpairnames[r1]);
@@ -695,7 +781,7 @@ next_byte:
                     case 3:
                         n = lduw_code(s->pc);
                         s->pc += 2;
-                        gen_op_movb_T0_reg(OR_A);
+                        gen_movb_v_A(cpu_T[0]);
                         gen_op_mov_A0_im(n);
                         tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),a\n", n);
@@ -705,15 +791,15 @@ next_byte:
                 case 1:
                     switch (p) {
                     case 0:
-                        gen_op_movw_A0_BC();
+                        gen_movw_v_BC(cpu_A0);
                         tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                        gen_op_movb_reg_T0(OR_A);
+                        gen_movb_A_v(cpu_T[0]);
                         zprintf("ld a,(bc)\n");
                         break;
                     case 1:
-                        gen_op_movw_A0_DE();
+                        gen_movw_v_DE(cpu_A0);
                         tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                        gen_op_movb_reg_T0(OR_A);
+                        gen_movb_A_v(cpu_T[0]);
                         zprintf("ld a,(de)\n");
                         break;
                     case 2:
@@ -722,7 +808,7 @@ next_byte:
                         r1 = regpairmap(OR2_HL, m);
                         gen_op_mov_A0_im(n);
                         tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
-                        gen_op_movw_reg_T0[r1]();
+                        gen_movw_reg_v(r1, cpu_T[0]);
                         zprintf("ld %s,($%04x)\n", regpairnames[r1], n);
                         break;
                     case 3:
@@ -730,7 +816,7 @@ next_byte:
                         s->pc += 2;
                         gen_op_mov_A0_im(n);
                         tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                        gen_op_movb_reg_T0(OR_A);
+                        gen_movb_A_v(cpu_T[0]);
                         zprintf("ld a,($%04x)\n", n);
                         break;
                     }
@@ -742,16 +828,16 @@ next_byte:
                 switch (q) {
                 case 0:
                     r1 = regpairmap(regpair[p], m);
-                    gen_op_movw_T0_reg[r1]();
+                    gen_movw_v_reg(cpu_T[0], r1);
                     gen_op_incw_T0();
-                    gen_op_movw_reg_T0[r1]();
+                    gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("inc %s\n", regpairnames[r1]);
                     break;
                 case 1:
                     r1 = regpairmap(regpair[p], m);
-                    gen_op_movw_T0_reg[r1]();
+                    gen_movw_v_reg(cpu_T[0], r1);
                     gen_op_decw_T0();
-                    gen_op_movw_reg_T0[r1]();
+                    gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("dec %s\n", regpairnames[r1]);
                     break;
                 }
@@ -764,12 +850,12 @@ next_byte:
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
                 } else
-                    gen_op_movb_T0_reg(r1);
+                    gen_movb_v_reg(cpu_T[0], r1);
                 gen_op_incb_T0_cc();
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0(r1);
+                    gen_movb_reg_v(r1, cpu_T[0]);
                 if (is_indexed(r1))
                     zprintf("inc (%s%c$%02x)\n", idxnames[r1], shexb(d));
                 else
@@ -783,12 +869,12 @@ next_byte:
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
                 } else
-                    gen_op_movb_T0_reg(r1);
+                    gen_movb_v_reg(cpu_T[0], r1);
                 gen_op_decb_T0_cc();
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0(r1);
+                    gen_movb_reg_v(r1, cpu_T[0]);
                 if (is_indexed(r1))
                     zprintf("dec (%s%c$%02x)\n", idxnames[r1], shexb(d));
                 else
@@ -807,7 +893,7 @@ next_byte:
                 if (is_indexed(r1))
                     gen_op_movb_idx_T0[r1](d);
                 else
-                    gen_op_movb_reg_T0(r1);
+                    gen_movb_reg_v(r1, cpu_T[0]);
                 if (is_indexed(r1))
                     zprintf("ld (%s%c$%02x),$%02x\n", idxnames[r1], shexb(d), n);
                 else
@@ -876,11 +962,11 @@ next_byte:
                 if (is_indexed(r1))
                     gen_op_movb_T0_idx[r1](d);
                 else
-                    gen_op_movb_T0_reg(r1);
+                    gen_movb_v_reg(cpu_T[0], r1);
                 if (is_indexed(r2))
                     gen_op_movb_idx_T0[r2](d);
                 else
-                    gen_op_movb_reg_T0(r2);
+                    gen_movb_reg_v(r2, cpu_T[0]);
                 if (is_indexed(r1))
                     zprintf("ld %s,(%s%c$%02x)\n", regnames[r2], idxnames[r1], shexb(d));
                 else if (is_indexed(r2))
@@ -897,7 +983,7 @@ next_byte:
                 s->pc++;
                 gen_op_movb_T0_idx[r1](d);
             } else
-                gen_op_movb_T0_reg(r1);
+                gen_movb_v_reg(cpu_T[0], r1);
             gen_op_alu[y](); /* places output in A */
             if (is_indexed(r1))
                 zprintf("%s(%s%c$%02x)\n", alu[y], idxnames[r1], shexb(d));
@@ -917,7 +1003,7 @@ next_byte:
                 case 0:
                     r1 = regpairmap(regpair2[p], m);
                     gen_op_popw_T0();
-                    gen_op_movw_reg_T0[r1]();
+                    gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("pop %s\n", regpairnames[r1]);
                     break;
                 case 1:
@@ -936,7 +1022,7 @@ next_byte:
                         break;
                     case 2:
                         r1 = regpairmap(OR2_HL, m);
-                        gen_op_movw_T0_reg[r1]();
+                        gen_movw_v_reg(cpu_T[0], r1);
                         gen_op_jmp_T0();
                         zprintf("jp %s\n", regpairnames[r1]);
                         gen_eob(s);
@@ -944,8 +1030,8 @@ next_byte:
                         break;
                     case 3:
                         r1 = regpairmap(OR2_HL, m);
-                        gen_op_movw_T0_reg[r1]();
-                        gen_op_movw_reg_T0[OR2_SP]();
+                        gen_movw_v_reg(cpu_T[0], r1);
+                        gen_movw_SP_v(cpu_T[0]);
                         zprintf("ld sp,%s\n", regpairnames[r1]);
                         gen_op_dump_registers(s->pc);
                         break;
@@ -979,7 +1065,7 @@ next_byte:
                 case 2:
                     n = ldub_code(s->pc);
                     s->pc++;
-                    gen_op_movb_T0_reg(OR_A);
+                    gen_movb_v_A(cpu_T[0]);
                     gen_op_out_T0_im(n);
                     zprintf("out ($%02x),a\n", n);
                     break;
@@ -987,15 +1073,15 @@ next_byte:
                     n = ldub_code(s->pc);
                     s->pc++;
                     gen_op_in_T0_im(n);
-                    gen_op_movb_reg_T0(OR_A);
+                    gen_movb_A_v(cpu_T[0]);
                     zprintf("in a,($%02x)\n", n);
                     break;
                 case 4:
                     r1 = regpairmap(OR2_HL, m);
                     gen_op_popw_T1();
-                    gen_op_movw_T0_reg[r1]();
+                    gen_movw_v_reg(cpu_T[0], r1);
                     gen_op_pushw_T0();
-                    gen_op_movw_reg_T1[r1]();
+                    gen_movw_reg_v(r1, cpu_T[1]);
                     zprintf("ex (sp),%s\n", regpairnames[r1]);
                     break;
                 case 5:
@@ -1027,7 +1113,7 @@ next_byte:
                 switch (q) {
                 case 0:
                     r1 = regpairmap(regpair2[p], m);
-                    gen_op_movw_T0_reg[r1]();
+                    gen_movw_v_reg(cpu_T[0], r1);
                     gen_op_pushw_T0();
                     zprintf("push %s\n", regpairnames[r1]);
                     break;
@@ -1110,7 +1196,7 @@ next_byte:
                 r2 = regmap(reg[z], 0);
         } else {
             r1 = regmap(reg[z], m);
-            gen_op_movb_T0_reg(r1);
+            gen_movb_v_reg(cpu_T[0], r1);
         }
 
         switch (x) {
@@ -1120,9 +1206,9 @@ next_byte:
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0(r2);
+                    gen_movb_reg_v(r2, cpu_T[0]);
             } else {
-                gen_op_movb_reg_T0(r1);
+                gen_movb_reg_v(r1, cpu_T[0]);
             }
             zprintf("%s %s\n", rot[y], regnames[r1]);
             break;
@@ -1135,9 +1221,9 @@ next_byte:
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0(r2);
+                    gen_movb_reg_v(r2, cpu_T[0]);
             } else {
-                gen_op_movb_reg_T0(r1);
+                gen_movb_reg_v(r1, cpu_T[0]);
             }
             zprintf("res %i,%s\n", y, regnames[r1]);
             break;
@@ -1146,9 +1232,9 @@ next_byte:
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
-                    gen_op_movb_reg_T0(r2);
+                    gen_movb_reg_v(r2, cpu_T[0]);
             } else {
-                gen_op_movb_reg_T0(r1);
+                gen_movb_reg_v(r1, cpu_T[0]);
             }
             zprintf("set %i,%s\n", y, regnames[r1]);
             break;
@@ -1180,7 +1266,7 @@ next_byte:
                 case 1:
                     /* does mulub work with r1 == h, l, (hl) or a? */
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_T0_reg(r1);
+                    gen_movb_v_reg(cpu_T[0], r1);
                     gen_op_mulub_cc();
                     zprintf("mulub a,%s\n", regnames[r1]);
                     break;
@@ -1189,7 +1275,7 @@ next_byte:
                         /* does muluw work with r1 == de or hl? */
                         /* what is the effect of DD/FD prefixes here? */
                         r1 = regpairmap(regpair[p], m);
-                        gen_op_movw_T0_reg[r1]();
+                        gen_movw_v_reg(cpu_T[0], r1);
                         gen_op_muluw_cc();
                         zprintf("muluw hl,%s\n", regpairnames[r1]);
                     } else {
@@ -1211,7 +1297,7 @@ next_byte:
                 gen_op_in_T0_bc_cc();
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_reg_T0(r1);
+                    gen_movb_reg_v(r1, cpu_T[0]);
                     zprintf("in %s,(c)\n", regnames[r1]);
                 } else {
                     zprintf("in (c)\n");
@@ -1220,7 +1306,7 @@ next_byte:
             case 1:
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
-                    gen_op_movb_T0_reg(r1);
+                    gen_movb_v_reg(cpu_T[0], r1);
                     zprintf("out (c),%s\n", regnames[r1]);
                 } else {
                     gen_op_mov_T0_im(0);
@@ -1231,8 +1317,8 @@ next_byte:
             case 2:
                 r1 = regpairmap(OR2_HL, m);
                 r2 = regpairmap(regpair[p], m);
-                gen_op_movw_T0_reg[r1]();
-                gen_op_movw_T1_reg[r2]();
+                gen_movw_v_reg(cpu_T[0], r1);
+                gen_movw_v_reg(cpu_T[1], r2);
                 if (q == 0) {
                     zprintf("sbc %s,%s\n", regpairnames[r1], regpairnames[r2]);
                     gen_op_sbcw_T0_T1_cc();
@@ -1240,21 +1326,21 @@ next_byte:
                     zprintf("adc %s,%s\n", regpairnames[r1], regpairnames[r2]);
                     gen_op_adcw_T0_T1_cc();
                 }
-                gen_op_movw_reg_T0[r1]();
+                gen_movw_reg_v(r1, cpu_T[0]);
                 break;
             case 3:
                 n = lduw_code(s->pc);
                 s->pc += 2;
                 r1 = regpairmap(regpair[p], m);
                 if (q == 0) {
-                    gen_op_movw_T0_reg[r1]();
+                    gen_movw_v_reg(cpu_T[0], r1);
                     gen_op_mov_A0_im(n);
                     tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                     zprintf("ld ($%02x),%s\n", n, regpairnames[r1]);
                 } else {
                     gen_op_mov_A0_im(n);
                     tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
-                    gen_op_movw_reg_T0[r1]();
+                    gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("ld %s,($%02x)\n", regpairnames[r1], n);
                 }
                 break;
@@ -1301,15 +1387,15 @@ next_byte:
                     zprintf("ld a,r\n");
                     break;
                 case 4:
-                    gen_op_movb_T0_reg(OR_HLmem);
+                    gen_movb_v_HLmem(cpu_T[0]);
                     gen_op_rrd_cc();
-                    gen_op_movb_reg_T0(OR_HLmem);
+                    gen_movb_HLmem_v(cpu_T[0]);
                     zprintf("rrd\n");
                     break;
                 case 5:
-                    gen_op_movb_T0_reg(OR_HLmem);
+                    gen_movb_v_HLmem(cpu_T[0]);
                     gen_op_rld_cc();
-                    gen_op_movb_reg_T0(OR_HLmem);
+                    gen_movb_HLmem_v(cpu_T[0]);
                     zprintf("rld\n");
                     break;
                 case 6:
@@ -1327,9 +1413,9 @@ next_byte:
             if (y >= 4) {
                 switch (z) {
                 case 0: /* ldi/ldd/ldir/lddr */
-                    gen_op_movw_A0_HL();
+                    gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                    gen_op_movw_A0_DE();
+                    gen_movw_v_DE(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
 
                     if (!(y & 1))
@@ -1344,7 +1430,7 @@ next_byte:
                     break;
 
                 case 1: /* cpi/cpd/cpir/cpdr */
-                    gen_op_movw_A0_HL();
+                    gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_bli_cp_cc();
 
@@ -1361,7 +1447,7 @@ next_byte:
 
                 case 2: /* ini/ind/inir/indr */
                     gen_op_in_T0_bc_cc();
-                    gen_op_movw_A0_HL();
+                    gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1))
                         gen_op_bli_io_inc();
@@ -1375,7 +1461,7 @@ next_byte:
                     break;
 
                 case 3: /* outi/outd/otir/otdr */
-                    gen_op_movw_A0_HL();
+                    gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_out_T0_bc();
                     if (!(y & 1))
