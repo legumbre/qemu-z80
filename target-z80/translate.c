@@ -320,10 +320,11 @@ static inline int regpairmap(int regpair, int m) {
     switch (regpair) {
     case OR2_HL:
         switch (m) {
-        case 1:
+        case MODE_DD:
             return OR2_IX;
-        case 2:
+        case MODE_FD:
             return OR2_IY;
+        case MODE_NORMAL:
         default:
             return OR2_HL;
         }
