@@ -485,19 +485,8 @@ char *cc[8] = {
     "m",
 };
 
-static GenOpFunc1 *gen_op_jp_cc[8] = {
-    gen_op_jp_nz,
-    gen_op_jp_z,
-    gen_op_jp_nc,
-    gen_op_jp_c,
-    gen_op_jp_po,
-    gen_op_jp_pe,
-    gen_op_jp_p,
-    gen_op_jp_m,
-};
-
 enum {
-    COND_NZ,
+    COND_NZ = 0,
     COND_Z,
     COND_NC,
     COND_C,
@@ -505,6 +494,13 @@ enum {
     COND_PE,
     COND_P,
     COND_M,
+};
+
+int cc_flags[4] = {
+    CC_Z,
+    CC_C,
+    CC_P,
+    CC_S,
 };
 
 /* Arithmetic/logic operations */
@@ -574,18 +570,25 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num, target_ulong pc)
     gen_eob(s);
 }
 
+static inline void gen_cond_jump(int cc, int l1)
+{
+    gen_movb_v_F(cpu_T[0]);
+
+    tcg_gen_andi_tl(cpu_T[0], cpu_T[0], cc_flags[cc >> 1]);
+
+    tcg_gen_brcondi_tl((cc & 1) ? TCG_COND_NE : TCG_COND_EQ, cpu_T[0], 0, l1);
+}
+
 static inline void gen_jcc(DisasContext *s, int cc,
                            target_ulong val, target_ulong next_pc) {
     TranslationBlock *tb;
-    GenOpFunc1 *func;
     int l1;
-
-    func = gen_op_jp_cc[cc];
 
     tb = s->tb;
 
     l1 = gen_new_label();
-    func(l1);
+
+    gen_cond_jump(cc, l1);
 
     gen_goto_tb(s, 0, next_pc);
 
@@ -598,15 +601,13 @@ static inline void gen_jcc(DisasContext *s, int cc,
 static inline void gen_callcc(DisasContext *s, int cc,
                               target_ulong val, target_ulong next_pc) {
     TranslationBlock *tb;
-    GenOpFunc1 *func;
     int l1;
-
-    func = gen_op_jp_cc[cc];
 
     tb = s->tb;
 
     l1 = gen_new_label();
-    func(l1);
+
+    gen_cond_jump(cc, l1);
 
     gen_goto_tb(s, 0, next_pc);
 
@@ -621,15 +622,13 @@ static inline void gen_callcc(DisasContext *s, int cc,
 static inline void gen_retcc(DisasContext *s, int cc,
                              target_ulong next_pc) {
     TranslationBlock *tb;
-    GenOpFunc1 *func;
     int l1;
-
-    func = gen_op_jp_cc[cc];
 
     tb = s->tb;
 
     l1 = gen_new_label();
-    func(l1);
+
+    gen_cond_jump(cc, l1);
 
     gen_goto_tb(s, 0, next_pc);
 

@@ -184,64 +184,6 @@ void OPPROTO op_djnz(void)
     FORCE_RET();
 }
 
-/* Conditional jumps */
-
-void OPPROTO op_jp_nz(void)
-{
-    if (!(F & CC_Z))
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_z(void)
-{
-    if (F & CC_Z)
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_nc(void)
-{
-    if (!(F & CC_C))
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_c(void)
-{
-    if (F & CC_C)
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_po(void)
-{
-    if (!(F & CC_P))
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_pe(void)
-{
-    if (F & CC_P)
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_p(void)
-{
-    if (!(F & CC_S))
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
-void OPPROTO op_jp_m(void)
-{
-    if (F & CC_S)
-        GOTO_LABEL_PARAM(1);
-    FORCE_RET();
-}
-
 /* Arithmetic/logic operations */
 
 #define signed_overflow_add(op1, op2, res, size) \
