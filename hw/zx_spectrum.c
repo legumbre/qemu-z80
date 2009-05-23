@@ -27,7 +27,7 @@
 #include "console.h"
 #include "isa.h"
 #include "sysemu.h"
-#include "zx_ula.h"
+#include "zx_video.h"
 #include "boards.h"
 
 #ifdef CONFIG_LIBSPECTRUM
@@ -70,7 +70,7 @@ static void main_cpu_reset(void *opaque)
     cpu_reset(env);
 }
 
-QEMUTimer *zx_ulatimer;
+QEMUTimer *zx_ula_timer;
 
 void zx_50hz_timer(void *opaque)
 {
@@ -82,9 +82,9 @@ void zx_50hz_timer(void *opaque)
 
     /* FIXME: 50 Hz */
     next_time = qemu_get_clock(vm_clock) + muldiv64(1, ticks_per_sec, 50);
-    qemu_mod_timer(zx_ulatimer, next_time);
+    qemu_mod_timer(zx_ula_timer, next_time);
 
-    zx_ula_do_retrace();
+    zx_video_do_retrace();
 }
 
 CPUState *zx_env;
@@ -93,8 +93,8 @@ void zx_timer_init(DisplayState *ds) {
     /* FIXME */
 
     int64_t t = qemu_get_clock(vm_clock);
-    zx_ulatimer = qemu_new_timer(vm_clock, zx_50hz_timer, zx_env);
-    qemu_mod_timer(zx_ulatimer, t);
+    zx_ula_timer = qemu_new_timer(vm_clock, zx_50hz_timer, zx_env);
+    qemu_mod_timer(zx_ula_timer, t);
 }
 
 static const uint8_t keycodes[128] = {
@@ -195,7 +195,7 @@ static void zx_init1(int ram_size, int vga_ram_size,
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
 
-    zx_ula_init(ds, phys_ram_base + ram_size, ram_size);
+    zx_video_init(ds, phys_ram_base + ram_size, ram_size);
 
     zx_keyboard_init();
     zx_timer_init(ds);

@@ -28,7 +28,7 @@
 #include "hw.h"
 #include "isa.h"
 #include "console.h"
-#include "zx_ula.h"
+#include "zx_video.h"
 
 typedef struct {
     DisplayState *ds;
@@ -183,7 +183,7 @@ static inline void zx_draw_line_32(uint8_t *d,
 
 static ZXVState *zxvstate;
 
-void zx_ula_do_retrace(void) {
+void zx_video_do_retrace(void) {
     ZXVState *s = zxvstate;
 
     if (++s->flashcount == 16) {
@@ -296,10 +296,12 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
     ZXVState *s = (ZXVState *)opaque;
 
 /* port xxfe */
-    s->border = data & 0x07;
+    if (!(addr & 1)) {
+        s->border = data & 0x07;
+    }
 };
 
-void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
+void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
                  unsigned long ula_ram_offset)
 {
     int zx_io_memory;
