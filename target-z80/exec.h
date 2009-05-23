@@ -59,7 +59,8 @@ extern int loglevel;
 #define SP  (env->regs[R_SP])
 #define I   (env->regs[R_I])
 #define R   (env->regs[R_R])
-#define AFX (env->regs[R_AFX])
+#define AX  (env->regs[R_AX])
+#define FX  (env->regs[R_FX])
 #define BCX (env->regs[R_BCX])
 #define DEX (env->regs[R_DEX])
 #define HLX (env->regs[R_HLX])
@@ -230,8 +231,11 @@ static inline void env_to_regs(void)
 #ifdef reg_R
     R = env->regs[R_R];
 #endif
-#ifdef reg_AFX
-    AFX = env->regs[R_AFX];
+#ifdef reg_AX
+    AX = env->regs[R_AX];
+#endif
+#ifdef reg_FX
+    FX = env->regs[R_FX];
 #endif
 #ifdef reg_BCX
     BCX = env->regs[R_BCX];
@@ -276,8 +280,11 @@ static inline void regs_to_env(void)
 #ifdef reg_R
     env->regs[R_R] = R;
 #endif
-#ifdef reg_AFX
-    env->regs[R_AFX] = AFX;
+#ifdef reg_AX
+    env->regs[R_AX] = AX;
+#endif
+#ifdef reg_FX
+    env->regs[R_FX] = FX;
 #endif
 #ifdef reg_BCX
     env->regs[R_BCX] = BCX;

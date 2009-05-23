@@ -53,10 +53,11 @@
 #define R_I     8
 #define R_R     9
 
-#define R_AFX   10
-#define R_BCX   11
-#define R_DEX   12
-#define R_HLX   13
+#define R_AX    10
+#define R_FX    11
+#define R_BCX   12
+#define R_DEX   13
+#define R_HLX   14
 
 /* flags masks */
 #define CC_C   	0x0001

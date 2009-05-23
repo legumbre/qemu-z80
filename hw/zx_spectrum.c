@@ -255,7 +255,8 @@ static void zx_init1(int ram_size, int vga_ram_size,
         env->regs[R_BC] = libspectrum_snap_bc(snap);
         env->regs[R_DE] = libspectrum_snap_de(snap);
         env->regs[R_HL] = libspectrum_snap_hl(snap);
-        env->regs[R_AFX] = libspectrum_snap_a_(snap) << 8 | libspectrum_snap_f_(snap);
+        env->regs[R_AX] = libspectrum_snap_a_(snap);
+        env->regs[R_FX] = libspectrum_snap_f_(snap);
         env->regs[R_BCX] = libspectrum_snap_bc_(snap);
         env->regs[R_DEX] = libspectrum_snap_de_(snap);
         env->regs[R_HLX] = libspectrum_snap_hl_(snap);

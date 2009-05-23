@@ -257,7 +257,7 @@ void helper_dump_registers(int pc)
            env->regs[R_DE],
            env->regs[R_HL],
            env->regs[R_IX],
-           env->regs[R_AFX],
+           (env->regs[R_AX] << 8), env->regs[R_FX],
            env->regs[R_BCX],
            env->regs[R_DEX],
            env->regs[R_HLX],

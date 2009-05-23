@@ -89,11 +89,17 @@
 #undef REG
 #undef REGNAME
 
-#define REG AFX
-#define REGNAME _AFX
-#include "opreg_template.h"
-#undef REG
-#undef REGNAME
+#define REGHIGH AX
+#define REGLOW FX
+#define REGPAIRNAME _AFX
+#define REGHIGHNAME _AX
+#define REGLOWNAME _FX
+#include "opreg_template2.h"
+#undef REGHIGH
+#undef REGLOW
+#undef REGPAIRNAME
+#undef REGHIGHNAME
+#undef REGLOWNAME
 
 #define REG BCX
 #define REGNAME _BCX
@@ -233,10 +239,13 @@ void OPPROTO op_ex_de_hl(void)
 
 void OPPROTO op_ex_af_afx(void)
 {
-    T0 = AFX;
-    AFX = (A << 8) | F;
-    A = (uint8_t)(T0 >> 8);
-    F = (uint8_t)T0;
+    T0 = AX;
+    AX = A;
+    A = T0;
+
+    T0 = FX;
+    FX = F;
+    F = T0;
 }
 
 void OPPROTO op_exx(void)
