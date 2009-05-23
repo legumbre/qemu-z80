@@ -225,5 +225,3 @@ void helper_in_debug(int port)
 {
 //    printf("IN with port %02x\n", port);
 }
-
-}
