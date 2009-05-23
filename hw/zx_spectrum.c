@@ -145,7 +145,7 @@ static void zx_keyboard_init()
 }
 
 /* ZX Spectrum initialisation */
-static void zx_init1(int ram_size, int vga_ram_size,
+static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
                      const char *boot_device, DisplayState *ds,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename, const char *cpu_model)
@@ -269,7 +269,7 @@ static void zx_init1(int ram_size, int vga_ram_size,
 #endif
 }
 
-static void zx_spectrum_init(int ram_size, int vga_ram_size,
+static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
                              const char *boot_device, DisplayState *ds,
                              const char *kernel_filename,
                              const char *kernel_cmdline,
