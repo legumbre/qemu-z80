@@ -786,18 +786,6 @@ void OPPROTO op_neg_cc(void)
 
 /* word operations -- HL only? */
 
-void OPPROTO op_incw_T0(void)
-{
-    T0++;
-    T0 = (uint16_t)T0;
-}
-
-void OPPROTO op_decw_T0(void)
-{
-    T0--;
-    T0 = (uint16_t)T0;
-}
-
 void OPPROTO op_sbcw_T0_T1_cc(void)
 {
     int sf, zf, hf, pf, cf;

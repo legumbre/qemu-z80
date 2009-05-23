@@ -841,14 +841,14 @@ next_byte:
                 case 0:
                     r1 = regpairmap(regpair[p], m);
                     gen_movw_v_reg(cpu_T[0], r1);
-                    gen_op_incw_T0();
+                    tcg_gen_addi_tl(cpu_T[0], cpu_T[0], 1);
                     gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("inc %s\n", regpairnames[r1]);
                     break;
                 case 1:
                     r1 = regpairmap(regpair[p], m);
                     gen_movw_v_reg(cpu_T[0], r1);
-                    gen_op_decw_T0();
+                    tcg_gen_subi_tl(cpu_T[0], cpu_T[0], 1);
                     gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("dec %s\n", regpairnames[r1]);
                     break;
