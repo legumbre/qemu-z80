@@ -123,12 +123,13 @@ char *idxnames[] = {
 /* Register accessor functions */
 
 #if defined(WORDS_BIGENDIAN)
-#define BYTE_OFFSET(type, n) (sizeof(type) - 1 - n)
-#define WORD_OFFSET(type, n) (sizeof(type) - 2 - n)
+#define UNIT_OFFSET(type, units, num) (sizeof(type) - ((num + 1) * units))
 #else
-#define BYTE_OFFSET(type, n) n
-#define WORD_OFFSET(type, n) n
+#define UNIT_OFFSET(type, units, num) (num * units)
 #endif
+
+#define BYTE_OFFSET(type, num) UNIT_OFFSET(type, 1, num)
+#define WORD_OFFSET(type, num) UNIT_OFFSET(type, 2, num)
 
 #define REGPAIR AF
 #define REGHIGH A
