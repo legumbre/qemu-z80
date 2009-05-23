@@ -71,7 +71,6 @@ static void main_cpu_reset(void *opaque)
 }
 
 QEMUTimer *zx_ulatimer;
-int zx_flash = 0;
 
 void zx_50hz_timer(void *opaque)
 {
@@ -85,11 +84,7 @@ void zx_50hz_timer(void *opaque)
     next_time = qemu_get_clock(vm_clock) + muldiv64(1, ticks_per_sec, 50);
     qemu_mod_timer(zx_ulatimer, next_time);
 
-    zx_flash++;
-    zx_flash %= 32;
-    if ((zx_flash % 16) == 0) {
-        zx_set_flash_dirty();
-    }
+    zx_ula_do_retrace();
 }
 
 CPUState *zx_env;

@@ -6,6 +6,6 @@
 
 void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
 		 unsigned long zx_ram_offset);
-void zx_set_flash_dirty(void);
+void zx_ula_do_retrace(void);
 
 #endif

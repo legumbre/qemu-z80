@@ -45,6 +45,9 @@ typedef struct {
     int border;
     int prevborder;
 
+    int flash;
+    int flashcount;
+
     int invalidate;
 } ZXVState;
 
@@ -178,12 +181,16 @@ static inline void zx_draw_line_32(uint8_t *d,
     ((uint32_t *)d)[7] = (-((font_data >> 0) & 1) & xorcol) ^ bgcol;
 }
 
-extern int zx_flash;
 static ZXVState *zxvstate;
 
-void zx_set_flash_dirty(void) {
+void zx_ula_do_retrace(void) {
     ZXVState *s = zxvstate;
-    s->invalidate = 1;
+
+    if (++s->flashcount == 16) {
+        s->flashcount = 0;
+        s->invalidate = 1;
+        s->flash = !s->flash;
+    }
 }
 
 static void zx_draw_line(ZXVState *s1, uint8_t *d,
@@ -195,7 +202,7 @@ static void zx_draw_line(ZXVState *s1, uint8_t *d,
 
         attrib = *as;
         bright = (attrib & 0x40) >> 4;
-        flash = (attrib & 0x80) && (zx_flash >= 16);
+        flash = (attrib & 0x80) && s1->flash;
         if (flash) {
             fg = (attrib >> 3) & 0x07;
             bg = attrib & 0x07;
@@ -304,6 +311,7 @@ void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
     s->ds = ds;
     s->invalidate = 1;
     s->prevborder = -1;
+    s->flashcount = 0;
 //    s->vram_ptr = zx_screen_base;
 //    s->vram_offset = ula_ram_offset;
 
@@ -317,6 +325,7 @@ void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
     s->twidth = s->swidth + s->bwidth * 2;
     s->theight = s->sheight + s->bheight * 2;
     s->border = 0;
+    s->flash = 0;
     dpy_resize(s->ds, s->twidth, s->theight);
 
     s->vram_ptr = phys_ram_base;//+ zx_io_memory;
