@@ -379,8 +379,8 @@ static gen_mov_func *gen_movw_v_reg_tbl[] = {
     [OR2_HLX] = gen_movw_v_HLX,
 };
 
-static inline void gen_movw_v_reg(TCGv v, int reg) {
-    gen_movw_v_reg_tbl[reg](v);
+static inline void gen_movw_v_reg(TCGv v, int regpair) {
+    gen_movw_v_reg_tbl[regpair](v);
 }
 
 static gen_mov_func *gen_movw_reg_v_tbl[] = {
@@ -399,8 +399,8 @@ static gen_mov_func *gen_movw_reg_v_tbl[] = {
     [OR2_HLX] = gen_movw_HLX_v,
 };
 
-static inline void gen_movw_reg_v(int reg, TCGv v) {
-    gen_movw_reg_v_tbl[reg](v);
+static inline void gen_movw_reg_v(int regpair, TCGv v) {
+    gen_movw_reg_v_tbl[regpair](v);
 }
 
 static inline int regpairmap(int regpair, int m) {
@@ -641,6 +641,17 @@ static inline void gen_retcc(DisasContext *s, int cc,
     s->is_jmp = 3;
 }
 
+static inline void gen_ex(int regpair1, int regpair2) {
+    TCGv tmp1 = tcg_temp_new(TCG_TYPE_TL);
+    TCGv tmp2 = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_reg(tmp1, regpair1);
+    gen_movw_v_reg(tmp2, regpair2);
+    gen_movw_reg_v(regpair2, tmp1);
+    gen_movw_reg_v(regpair1, tmp2);
+    tcg_temp_free(tmp1);
+    tcg_temp_free(tmp2);
+}
+
 /* TODO: do flags properly, using cc_table. */
 /* (search for compute_all in i386 code) */
 /* see also opc_read_flags[], opc_write_flags[] and opc_simpler[] */
@@ -701,7 +712,7 @@ next_byte:
                     zprintf("nop\n");
                     break;
                 case 1:
-                    gen_op_ex_af_afx();
+                    gen_ex(OR2_AF, OR2_AFX);
                     zprintf("ex af,af'\n");
                     break;
                 case 2:
@@ -1018,7 +1029,9 @@ next_byte:
 //                      s->is_ei = 1;
                         break;
                     case 1:
-                        gen_op_exx();
+                        gen_ex(OR2_BC, OR2_BCX);
+                        gen_ex(OR2_DE, OR2_DEX);
+                        gen_ex(OR2_HL, OR2_HLX);
                         zprintf("exx\n");
                         break;
                     case 2:
@@ -1086,7 +1099,7 @@ next_byte:
                     zprintf("ex (sp),%s\n", regpairnames[r1]);
                     break;
                 case 5:
-                    gen_op_ex_de_hl();
+                    gen_ex(OR2_DE, OR2_HL);
                     zprintf("ex de,hl\n");
                     break;
                 case 6:

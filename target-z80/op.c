@@ -118,41 +118,6 @@ void OPPROTO op_popw_T1(void)
     SP = (uint16_t)(SP + 2);
 }
 
-/* Exchange operations */
-
-void OPPROTO op_ex_de_hl(void)
-{
-    T0 = DE;
-    DE = HL;
-    HL = T0;
-}
-
-void OPPROTO op_ex_af_afx(void)
-{
-    T0 = AX;
-    AX = A;
-    A = T0;
-
-    T0 = FX;
-    FX = F;
-    F = T0;
-}
-
-void OPPROTO op_exx(void)
-{
-    T0 = BCX;
-    BCX = BC;
-    BC = T0;
-
-    T0 = DEX;
-    DEX = DE;
-    DE = T0;
-
-    T0 = HLX;
-    HLX = HL;
-    HL = T0;
-}
-
 /* Misc */
 
 void OPPROTO op_in_T0_im(void)
