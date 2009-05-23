@@ -27,6 +27,7 @@
 
 #include "cpu.h"
 #include "exec-all.h"
+#include "qemu-common.h"
 
 //#define DEBUG_MMU
 
@@ -52,7 +53,7 @@ CPUZ80State *cpu_z80_init(const char *model)
         z80_translate_init();
         optimize_flags_init();
     }
-    env->model = model;
+    env->model = id;
     cpu_reset(env);
     return env;
 }
