@@ -41,8 +41,9 @@ typedef struct {
     int theight;
 
     int border;
+    int prevborder;
 
-    int dirty;
+    int invalidate;
 } ZXVState;
 
 char *colnames[8] = {
@@ -180,7 +181,7 @@ static ZXVState *zxvstate;
 
 void zx_set_flash_dirty(void) {
     ZXVState *s = zxvstate;
-    s->dirty = 1;
+    s->invalidate = 1;
 }
 
 static void zx_draw_line(ZXVState *s1, uint8_t *d,
@@ -238,34 +239,47 @@ static void zx_update_display(void *opaque)
     uint8_t *d;
     ZXVState *s = (ZXVState *)opaque;
     uint32_t addr, attrib;
+    int dirty = s->invalidate;
 
-    //if (!s->dirty)
-    //    return;
-
-    d = s->ds->data;
-    d += s->bheight * s->ds->linesize;
-    d += s->bwidth * 4;
-
-    for (y = 0; y < 192; y++) {
-        addr = ((y & 0x07) << 8) | ((y & 0x38) << 2) | ((y & 0xc0) << 5);
-        attrib = 0x1800 | ((y & 0xf8) << 2);
-        zx_draw_line(s, d, s->vram_ptr + addr, s->vram_ptr + attrib);
-        d += s->ds->linesize;
+    if (!dirty) {
+        for (addr = 0; addr < 0x1b00; addr += TARGET_PAGE_SIZE) {
+            if (cpu_physical_memory_get_dirty(addr, VGA_DIRTY_FLAG)) {
+                dirty = 1;
+            }
+        }
     }
 
-    d = s->ds->data;
-    for (y = 0; y < s->bheight; y++) {
-        zx_border_row(s, d + y * s->ds->linesize);
+    if (dirty) {
+        d = s->ds->data;
+        d += s->bheight * s->ds->linesize;
+        d += s->bwidth * 4;
+
+        for (y = 0; y < 192; y++) {
+            addr = ((y & 0x07) << 8) | ((y & 0x38) << 2) | ((y & 0xc0) << 5);
+            attrib = 0x1800 | ((y & 0xf8) << 2);
+            zx_draw_line(s, d, s->vram_ptr + addr, s->vram_ptr + attrib);
+            d += s->ds->linesize;
+        }
+
+        s->invalidate = 0;
+        cpu_physical_memory_reset_dirty(0, 0x1b00, VGA_DIRTY_FLAG);
     }
-    for (y = s->bheight; y < s->theight - s->bheight; y++) {
-        zx_border_sides(s, d + y * s->ds->linesize);
-    }
-    for (y = s->theight - s->bheight; y < s->theight; y++) {
-        zx_border_row(s, d + y * s->ds->linesize);
+
+    if (s->border != s->prevborder) {
+        d = s->ds->data;
+        for (y = 0; y < s->bheight; y++) {
+            zx_border_row(s, d + y * s->ds->linesize);
+        }
+        for (y = s->bheight; y < s->theight - s->bheight; y++) {
+            zx_border_sides(s, d + y * s->ds->linesize);
+        }
+        for (y = s->theight - s->bheight; y < s->theight; y++) {
+            zx_border_row(s, d + y * s->ds->linesize);
+        }
+        s->prevborder = s->border;
     }
 
     dpy_update(s->ds, 0, 0, s->twidth, s->theight);
-    //s->dirty = 0;
 }
 
 static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
@@ -274,7 +288,6 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 
 /* port xxfe */
     s->border = data & 0x07;
-    s->dirty = 1;
 };
 
 void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
@@ -287,7 +300,8 @@ void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
         return;
     zxvstate = s;
     s->ds = ds;
-    s->dirty = 1;
+    s->invalidate = 1;
+    s->prevborder = -1;
 //    s->vram_ptr = zx_screen_base;
 //    s->vram_offset = ula_ram_offset;
 
