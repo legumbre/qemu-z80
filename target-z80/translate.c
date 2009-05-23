@@ -36,6 +36,10 @@
 #define PREFIX_ED  0x04
 #define PREFIX_FD  0x08
 
+#define MODE_NORMAL 0
+#define MODE_DD     1
+#define MODE_FD     2
+
 #define zprintf(...)
 //#define zprintf printf
 
@@ -169,7 +173,7 @@ static GenOpFunc1 *gen_op_movb_idx_T0[] = {
 
 static inline int regmap(int reg, int m) {
     switch (m) {
-    case 1:
+    case MODE_DD:
         switch (reg) {
         case OR_H:
             return OR_IXh;
@@ -180,7 +184,7 @@ static inline int regmap(int reg, int m) {
         default:
             return reg;
         }
-    case 2:
+    case MODE_FD:
         switch (reg) {
         case OR_H:
             return OR_IYh;
@@ -191,6 +195,7 @@ static inline int regmap(int reg, int m) {
         default:
             return reg;
         }
+    case MODE_NORMAL:
     default:
         return reg;
     }
@@ -576,11 +581,11 @@ next_byte:
 /* START */
 
     if (prefixes & PREFIX_DD)
-        m = 1;
+        m = MODE_DD;
     else if (prefixes & PREFIX_FD)
-        m = 2;
+        m = MODE_FD;
     else
-        m = 0;
+        m = MODE_NORMAL;
 
     /* unprefixed opcodes */
 
