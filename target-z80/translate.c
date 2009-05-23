@@ -1088,7 +1088,7 @@ next_byte:
         int d;
         int r1, r2;
 
-        if (m) {
+        if (m != MODE_NORMAL) {
             d = ldsb_code(s->pc);
             s->pc++;
         }
@@ -1102,7 +1102,7 @@ next_byte:
         p = y >> 1;
         q = y & 0x01;
 
-        if (m) {
+        if (m != MODE_NORMAL) {
             r1 = regmap(OR_HLmem, m);
             gen_op_movb_T0_idx[r1](d);
             if (z != 6)
@@ -1116,7 +1116,7 @@ next_byte:
         case 0:
             /* TODO: TST instead of SLL for R800 */
             gen_op_rot_T0[y]();
-            if (m) {
+            if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
                     gen_op_movb_reg_T0(r2);
@@ -1131,7 +1131,7 @@ next_byte:
             break;
         case 2:
             gen_op_res_T0(~(1 << y));
-            if (m) {
+            if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
                     gen_op_movb_reg_T0(r2);
@@ -1142,7 +1142,7 @@ next_byte:
             break;
         case 3:
             gen_op_set_T0(1 << y);
-            if (m) {
+            if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
                 if (z != 6)
                     gen_op_movb_reg_T0(r2);
