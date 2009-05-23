@@ -652,9 +652,7 @@ static inline void gen_ex(int regpair1, int regpair2) {
     tcg_temp_free(tmp2);
 }
 
-/* TODO: do flags properly, using cc_table. */
-/* (search for compute_all in i386 code) */
-/* see also opc_read_flags[], opc_write_flags[] and opc_simpler[] */
+/* TODO: condition code optimisation */
 
 /* micro-ops that modify condition codes should end in _cc */
 
@@ -1514,44 +1512,6 @@ next_byte:
 #define CC_SZHPNC (CC_S | CC_Z | CC_H | CC_P | CC_N | CC_C)
 #define CC_SZHPN (CC_S | CC_Z | CC_H | CC_P | CC_N)
 
-static uint8_t opc_read_flags[NB_OPS] = {
-    [INDEX_op_jp_nz] = CC_SZHPNC,
-    [INDEX_op_jp_z] = CC_SZHPNC,
-    [INDEX_op_jp_nc] = CC_SZHPNC,
-    [INDEX_op_jp_c] = CC_SZHPNC,
-    [INDEX_op_jp_po] = CC_SZHPNC,
-    [INDEX_op_jp_pe] = CC_SZHPNC,
-    [INDEX_op_jp_p] = CC_SZHPNC,
-    [INDEX_op_jp_m] = CC_SZHPNC,
-//...
-};
-
-static uint8_t opc_write_flags[NB_OPS] = {
-    [INDEX_op_add_cc] = CC_SZHPNC,
-    [INDEX_op_adc_cc] = CC_SZHPNC,
-    [INDEX_op_sub_cc] = CC_SZHPNC,
-    [INDEX_op_sbc_cc] = CC_SZHPNC,
-    [INDEX_op_and_cc] = CC_SZHPNC,
-    [INDEX_op_xor_cc] = CC_SZHPNC,
-    [INDEX_op_or_cc] = CC_SZHPNC,
-    [INDEX_op_cp_cc] = CC_SZHPNC,
-//...
-};
-
-static uint16_t opc_simpler[NB_OPS] = {
-#if 0
-    [INDEX_op_add_cc] = INDEX_op_add,
-    [INDEX_op_adc_cc] = INDEX_op_adc,
-    [INDEX_op_sub_cc] = INDEX_op_sub,
-    [INDEX_op_sbc_cc] = INDEX_op_sbc,
-    [INDEX_op_and_cc] = INDEX_op_and,
-    [INDEX_op_xor_cc] = INDEX_op_xor,
-    [INDEX_op_or_cc] = INDEX_op_or,
-    [INDEX_op_cp_cc] = INDEX_op_cp,
-//...
-#endif
-};
-
 void z80_translate_init(void)
 {
     cpu_env = tcg_global_reg_new(TCG_TYPE_PTR, TCG_AREG0, "env");
@@ -1573,16 +1533,6 @@ void z80_translate_init(void)
 #undef DEF_HELPER
 #define DEF_HELPER(ret, name, params) tcg_register_helper(name, #name);
 #include "helper.h"
-}
-
-void optimize_flags_init(void)
-{
-    int i;
-    /* put default values in arrays */
-    for(i = 0; i < NB_OPS; i++) {
-        if (opc_simpler[i] == 0)
-            opc_simpler[i] = i;
-    }
 }
 
 /* CPU flags computation optimization: we move backward thru the

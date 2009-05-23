@@ -51,7 +51,6 @@ CPUZ80State *cpu_z80_init(const char *model)
     if (!inited) {
         inited = 1;
         z80_translate_init();
-        optimize_flags_init();
     }
     env->model = id;
     cpu_reset(env);
@@ -124,11 +123,6 @@ void cpu_z80_close(CPUZ80State *env)
 
 /***********************************************************/
 /* x86 debug */
-
-static const char *cc_op_str[] = {
-    "DYNAMIC",
-    "EFLAGS",
-};
 
 void cpu_dump_state(CPUState *env, FILE *f, 
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
