@@ -56,23 +56,6 @@ const uint8_t parity_table[256] = {
     0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
 };
 
-/* modulo 17 table */
-const uint8_t rclw_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7,
-    8, 9,10,11,12,13,14,15,
-   16, 0, 1, 2, 3, 4, 5, 6,
-    7, 8, 9,10,11,12,13,14,
-};
-
-/* modulo 9 table */
-const uint8_t rclb_table[32] = {
-    0, 1, 2, 3, 4, 5, 6, 7,
-    8, 0, 1, 2, 3, 4, 5, 6,
-    7, 8, 0, 1, 2, 3, 4, 5,
-    6, 7, 8, 0, 1, 2, 3, 4,
-};
-
-
 /* thread support */
 
 spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
@@ -243,35 +226,4 @@ void helper_in_debug(int port)
 //    printf("IN with port %02x\n", port);
 }
 
-void helper_dump_registers(int pc)
-{
-    int fl = env->regs[R_F];
-#if 0
-    printf("--------------\n"
-           "AF =%04x BC =%04x DE =%04x HL =%04x IX=%04x\n"
-           "AF'=%04x BC'=%04x DE'=%04x HL'=%04x IY=%04x\n"
-           "PC =%04x SP =%04x F=[%c%c%c%c%c%c%c%c]\n"
-           "IM=%i IFF1=%i IFF2=%i I=%02x R=%02x\n",
-           (env->regs[R_A] << 8) | env->regs[R_F],
-           env->regs[R_BC],
-           env->regs[R_DE],
-           env->regs[R_HL],
-           env->regs[R_IX],
-           (env->regs[R_AX] << 8), env->regs[R_FX],
-           env->regs[R_BCX],
-           env->regs[R_DEX],
-           env->regs[R_HLX],
-           env->regs[R_IY],
-           pc == -1 ? env->pc : pc,
-           env->regs[R_SP],
-           fl & 0x80 ? 'S' : '-',
-           fl & 0x40 ? 'Z' : '-',
-           fl & 0x20 ? '5' : '-',
-           fl & 0x10 ? 'H' : '-',
-           fl & 0x08 ? '3' : '-',
-           fl & 0x04 ? 'P' : '-',
-           fl & 0x02 ? 'N' : '-',
-           fl & 0x01 ? 'C' : '-',
-           env->imode, env->iff1, env->iff2, env->regs[R_I], env->regs[R_R]);
-#endif
 }

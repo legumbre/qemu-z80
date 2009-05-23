@@ -1,9 +1,9 @@
 /*
  * QEMU ZX Spectrum Emulator
- * 
+ *
  * Copyright (c) 2007-2009 Stuart Brady <stuart.brady@gmail.com>
  * Copyright (c) 2007 Ulrich Hecht
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -175,15 +175,14 @@ static void zx_init1(int ram_size, int vga_ram_size,
     /* ROM load */
     snprintf(buf, sizeof(buf), "%s/%s", bios_dir, ROM_FILENAME);
     rom_size = get_image_size(buf);
-    if (rom_size <= 0 || 
+    if (rom_size <= 0 ||
         (rom_size % 16384) != 0) {
         goto rom_error;
     }
 //    rom_offset = qemu_ram_alloc(rom_size);
     rom_offset = 0x10000;
     ret = load_image(buf, phys_ram_base + rom_offset);
-    
-                                     
+
     if (ret != rom_size) {
     rom_error:
         fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n", buf);
@@ -202,7 +201,7 @@ static void zx_init1(int ram_size, int vga_ram_size,
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
 
     zx_ula_init(ds, phys_ram_base + ram_size, ram_size);
-    
+
     zx_keyboard_init();
     zx_timer_init(ds);
 
@@ -277,7 +276,7 @@ static void zx_init1(int ram_size, int vga_ram_size,
 
 static void zx_spectrum_init(int ram_size, int vga_ram_size,
                              const char *boot_device, DisplayState *ds,
-                             const char *kernel_filename, 
+                             const char *kernel_filename,
                              const char *kernel_cmdline,
                              const char *initrd_filename,
                              const char *cpu_model)

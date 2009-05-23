@@ -1,11 +1,11 @@
 /*
  * ZX Spectrum Video Emulation
- * 
+ *
  * Copyright (c) 2007-2009 Stuart Brady <stuart.brady@gmail.com>
  *
  * Uses code from VGA emulation
  *   Copyright (c) 2003 Fabrice Bellard
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -205,7 +205,7 @@ static void zx_draw_line(ZXVState *s1, uint8_t *d,
         }
         fg |= bright;
         bg |= bright;
-        
+
         zx_draw_line_32(d, *s, cols[fg] ^ cols[bg], cols[bg]);
         d += 8 * 4;
         s++; as++;
@@ -319,10 +319,6 @@ void zx_ula_init(DisplayState *ds, uint8_t *zx_screen_base,
     s->border = 0;
     dpy_resize(s->ds, s->twidth, s->theight);
 
-    //zx_io_memory = cpu_register_io_memory(0, zx_mem_read, zx_mem_write, s);
-    //cpu_register_physical_memory(0x4000, 0x2000, zx_io_memory);
-//    cpu_register_physical_memory(0x4000, 0x2000, zx_io_memory);
-//    cpu_register_physical_memory(0x4000, 0xc000, zx_io_memory);
     s->vram_ptr = phys_ram_base;//+ zx_io_memory;
     s->vram_offset = 0;//zx_io_memory;
 

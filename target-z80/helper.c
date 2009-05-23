@@ -144,7 +144,7 @@ void cpu_dump_state(CPUState *env, FILE *f,
                    env->regs[R_DEX],
                    env->regs[R_HLX],
                    env->regs[R_IY],
-                   env->pc,
+                   env->pc, /* pc == -1 ? env->pc : pc, */
                    env->regs[R_SP],
                    fl & 0x80 ? 'S' : '-',
                    fl & 0x40 ? 'Z' : '-',

@@ -909,11 +909,6 @@ void OPPROTO op_muluw_cc(void)
     HL = tmp & 0xff;
 }
 
-void OPPROTO op_dump_registers(void)
-{
-    helper_dump_registers(PARAM1);
-}
-
 /*********** END OF Z80 OPS ***********/
 
 void OPPROTO op_set_cc_op(void)
