@@ -670,7 +670,6 @@ static target_ulong disas_insn(DisasContext *s, target_ulong pc_start)
     rex_r = 0;
 
     //printf("PC = %04x: ", s->pc);
-//    gen_op_dump_registers(s->pc);
 next_byte:
     s->prefix = prefixes;
 
@@ -1044,7 +1043,6 @@ next_byte:
                         gen_movw_v_reg(cpu_T[0], r1);
                         gen_movw_SP_v(cpu_T[0]);
                         zprintf("ld sp,%s\n", regpairnames[r1]);
-                        gen_op_dump_registers(s->pc);
                         break;
                     }
                     break;
@@ -1105,7 +1103,6 @@ next_byte:
                     break;
                 case 7:
                     gen_op_ei();
-//                  gen_op_dump_registers(s->pc);
                     zprintf("ei\n");
 //                  gen_eob(s);
 //                  s->is_ei = 1;
