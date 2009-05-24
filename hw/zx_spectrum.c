@@ -39,6 +39,14 @@
 
 #define ROM_FILENAME "zx-rom.bin"
 
+//#define DEBUG_ZX_SPECTRUM
+
+#ifdef DEBUG_ZX_SPECTRUM
+#define DPRINTF(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#else
+#define DPRINTF(fmt, ...)
+#endif
+
 int keystate[8];
 
 static uint32_t io_keyboard_read(void *opaque, uint32_t addr)
@@ -97,50 +105,171 @@ void zx_timer_init(DisplayState *ds) {
     qemu_mod_timer(zx_ula_timer, t);
 }
 
-static const uint8_t keycodes[128] = {
-    0x00, 0x00, 0x31, 0x32, 0x33, 0x34, 0x35, 0x45,
-      0x44, 0x43, 0x42, 0x41, 0x00, 0x00, 0x00, 0x00,
-    0x21, 0x22, 0x23, 0x24, 0x25, 0x55, 0x54, 0x53,
-      0x52, 0x51, 0x00, 0x00, 0x61, 0x72, 0x11, 0x12,
-    0x13, 0x14, 0x15, 0x65, 0x64, 0x63, 0x62, 0x00,
-      0x00, 0x00, 0x01, 0x00, 0x02, 0x03, 0x04, 0x05,
-    0x75, 0x74, 0x73, 0x00, 0x00, 0x00, 0x01, 0x00,
-      0x00, 0x71, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+struct keypos {
+    int row;
+    int column;
 };
+
+#define DEF_ZX_KEY(name, row, column) ZX_KEY_ ## name,
+enum zx_keys {
+#include "zx_key_template.h"
+ZX_MAX_KEYS
+};
+
+#define DEF_ZX_KEY(name, row, column) [ZX_KEY_ ## name] = {row, column},
+static const struct keypos keypos[ZX_MAX_KEYS] = {
+#include "zx_key_template.h"
+};
+
+static int zx_keypressed[ZX_MAX_KEYS];
+static int qemu_keypressed[0x100];
+
+static const int map[0x100][2] = {
+    [0 ... 0xff] = {-1, -1}, /* Unmapped by default */
+
+    [0x01] = {ZX_KEY_CAPSSHIFT, ZX_KEY_SPACE}, /* Escape */
+
+    [0x02] = {ZX_KEY_1, -1},
+    [0x03] = {ZX_KEY_2, -1},
+    [0x04] = {ZX_KEY_3, -1},
+    [0x05] = {ZX_KEY_4, -1},
+    [0x06] = {ZX_KEY_5, -1},
+    [0x07] = {ZX_KEY_6, -1},
+    [0x08] = {ZX_KEY_7, -1},
+    [0x09] = {ZX_KEY_8, -1},
+    [0x0a] = {ZX_KEY_9, -1},
+    [0x0b] = {ZX_KEY_0, -1},
+
+    [0x0c] = {ZX_KEY_SYMBSHIFT, ZX_KEY_J}, /* Minus */
+
+    [0x0e] = {ZX_KEY_CAPSSHIFT, ZX_KEY_0}, /* Backspace */
+
+    [0x10] = {ZX_KEY_Q, -1},
+    [0x11] = {ZX_KEY_W, -1},
+    [0x12] = {ZX_KEY_E, -1},
+    [0x13] = {ZX_KEY_R, -1},
+    [0x14] = {ZX_KEY_T, -1},
+    [0x15] = {ZX_KEY_Y, -1},
+    [0x16] = {ZX_KEY_U, -1},
+    [0x17] = {ZX_KEY_I, -1},
+    [0x18] = {ZX_KEY_O, -1},
+    [0x19] = {ZX_KEY_P, -1},
+
+    [0x0d] = {ZX_KEY_SYMBSHIFT, ZX_KEY_L}, /* Equals */
+
+    [0x1c] = {ZX_KEY_ENTER,     -1}, /* Enter */
+    [0x1d] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Control */
+    [0x1e] = {ZX_KEY_A, -1},
+    [0x1f] = {ZX_KEY_S, -1},
+    [0x20] = {ZX_KEY_D, -1},
+    [0x21] = {ZX_KEY_F, -1},
+    [0x22] = {ZX_KEY_G, -1},
+    [0x23] = {ZX_KEY_H, -1},
+    [0x24] = {ZX_KEY_J, -1},
+    [0x25] = {ZX_KEY_K, -1},
+    [0x26] = {ZX_KEY_L, -1},
+
+    [0x27] = {ZX_KEY_SYMBSHIFT, ZX_KEY_O}, /* Semicolon */
+    [0x28] = {ZX_KEY_SYMBSHIFT, ZX_KEY_7}, /* Apostrophe */
+
+    [0x2a] = {ZX_KEY_CAPSSHIFT, -1}, /* Left Shift */
+
+    [0x2b] = {ZX_KEY_SYMBSHIFT, ZX_KEY_3}, /* Hash */
+
+    [0x2c] = {ZX_KEY_Z, -1},
+    [0x2d] = {ZX_KEY_X, -1},
+    [0x2e] = {ZX_KEY_C, -1},
+    [0x2f] = {ZX_KEY_V, -1},
+    [0x30] = {ZX_KEY_B, -1},
+    [0x31] = {ZX_KEY_N, -1},
+    [0x32] = {ZX_KEY_M, -1},
+
+    [0x33] = {ZX_KEY_SYMBSHIFT, ZX_KEY_N}, /* Period */
+    [0x34] = {ZX_KEY_SYMBSHIFT, ZX_KEY_M}, /* Comma */
+    [0x35] = {ZX_KEY_SYMBSHIFT, ZX_KEY_V}, /* Slash */
+
+    [0x36] = {ZX_KEY_CAPSSHIFT, -1}, /* Right Shift */
+    [0x38] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Alt */
+    [0x39] = {ZX_KEY_SPACE,     -1}, /* Space Bar */
+    [0x9c] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Alt -> Symbol Shift */
+
+    [0xb7] = {ZX_KEY_CAPSSHIFT, ZX_KEY_7}, /* Up Arrow */
+    [0xb8] = {ZX_KEY_CAPSSHIFT, ZX_KEY_5}, /* Left Arrow */
+    [0xc6] = {ZX_KEY_CAPSSHIFT, ZX_KEY_8}, /* Right Arrow */
+
+    [0xd1] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Control */
+};
+
+/* FIXME:
+ *   Need to mappings from stepping on each other...
+ *   or at least make them step on one another in a consistent manner?
+ *   Could use separate state arrays for surpressing + adding for these mappings,
+ *   and allow only one fancy key at a time...
+ *
+ * Also need to implement shifted mappings.
+ */
 
 static void zx_put_keycode(void *opaque, int keycode) {
     int release = keycode & 0x80;
-    keycode &= 0x7f;
+    int key, row, col;
+    static int ext_keycode = 0;
+    int i;
+    int valid;
 
-    //printf("Keycode %d (%s)\n", keycode, release? "release" : "press");
-
-    keycode = keycodes[keycode];
-
-    if (keycode) {
-        int row = keycode >> 4;
-        int col = 1 << ((keycode & 0xf) - 1);
-        if (release) {
-            keystate[row] |= col;
+    /* 'fake shift' code */
+    if (keycode == 0xe0) {
+        ext_keycode = 1;
+    } else {
+        if (ext_keycode) {
+            keycode |= 0x80;
         } else {
-            keystate[row] &= ~col;
+            keycode &= 0x7f;
+        }
+        ext_keycode = 0;
+
+        DPRINTF("Keycode 0x%02x (%s)\n", keycode, release ? "release" : "press");
+
+        if (release && qemu_keypressed[keycode]) {
+            valid = 1;
+            qemu_keypressed[keycode] = 0;
+        } else if (!release && !qemu_keypressed[keycode]) {
+            valid = 1;
+            qemu_keypressed[keycode] = 1;
+        } else {
+            valid = 0;
+        }
+
+        if (valid) {
+            for (i = 0; i < 2; i++) {
+                key = map[keycode][i];
+                if (key != -1) {
+                    row = keypos[key].row;
+                    col = keypos[key].column;
+                    if (release) {
+                        if (--zx_keypressed[key] <= 0) {
+                            DPRINTF("Releasing 0x%02x\n", key);
+                            zx_keypressed[key] = 0;
+                            keystate[row] |= 1 << col;
+                        }
+                    } else {
+                        DPRINTF("Pressing 0x%02x\n", key);
+                        zx_keypressed[key]++;
+                        keystate[row] &= ~(1 << col);
+                    }
+                }
+            }
         }
     }
 }
 
-static void zx_keyboard_init()
+static void zx_keyboard_init(void)
 {
     int i;
     for (i=0; i<8; i++) {
         keystate[i] = 0xff;
     }
+    memset(zx_keypressed, 0, sizeof(zx_keypressed));
+    memset(qemu_keypressed, 0, sizeof(qemu_keypressed));
     qemu_add_kbd_event_handler(zx_put_keycode, NULL);
 }
 
