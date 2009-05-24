@@ -51,32 +51,6 @@ void OPPROTO op_reset_inhibit_irq(void)
 
 /************ Z80 MICRO-OPS ***********/
 
-/* Stack operations */
-
-void OPPROTO op_pushw_T0(void)
-{
-    SP = (uint16_t)(SP - 2);
-    A0 = SP;
-    /* high byte pushed first: i.e. little endian */
-    stw_kernel(A0, T0);
-}
-
-void OPPROTO op_popw_T0(void)
-{
-    A0 = SP;
-    /* low byte popped first: i.e. little endian */
-    T0 = lduw_kernel(A0);
-    SP = (uint16_t)(SP + 2);
-}
-
-void OPPROTO op_popw_T1(void)
-{
-    A0 = SP;
-    /* low byte popped first: i.e. little endian */
-    T1 = lduw_kernel(A0);
-    SP = (uint16_t)(SP + 2);
-}
-
 /* Misc */
 
 void OPPROTO op_in_T0_im(void)

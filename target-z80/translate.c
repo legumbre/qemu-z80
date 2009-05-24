@@ -274,6 +274,28 @@ static inline void gen_movb_IYmem_v(TCGv v, uint16_t ofs)
     tcg_temp_free(addr);
 }
 
+static inline void gen_pushw(TCGv v)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_SP(addr);
+    tcg_gen_subi_i32(addr, addr, 2);
+    tcg_gen_ext16u_i32(addr, addr);
+    gen_movw_SP_v(addr);
+    tcg_gen_qemu_st16(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_popw(TCGv v)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_SP(addr);
+    tcg_gen_qemu_ld16u(v, addr, MEM_INDEX);
+    tcg_gen_addi_i32(addr, addr, 2);
+    tcg_gen_ext16u_i32(addr, addr);
+    gen_movw_SP_v(addr);
+    tcg_temp_free(addr);
+}
+
 static gen_mov_func *const gen_movb_v_reg_tbl[] = {
     [OR_B]     = gen_movb_v_B,
     [OR_C]     = gen_movb_v_C,
@@ -680,7 +702,7 @@ static inline void gen_callcc(DisasContext *s, int cc,
 
     gen_set_label(l1);
     tcg_gen_movi_tl(cpu_T[0], next_pc);
-    gen_op_pushw_T0();
+    gen_pushw(cpu_T[0]);
     gen_goto_tb(s, 1, val);
 
     s->is_jmp = 3;
@@ -701,7 +723,7 @@ static inline void gen_retcc(DisasContext *s, int cc,
     gen_goto_tb(s, 0, next_pc);
 
     gen_set_label(l1);
-    gen_op_popw_T0();
+    gen_popw(cpu_T[0]);
     gen_op_jmp_T0();
     gen_eob(s);
 
@@ -1093,14 +1115,14 @@ next_byte:
                 switch (q) {
                 case 0:
                     r1 = regpairmap(regpair2[p], m);
-                    gen_op_popw_T0();
+                    gen_popw(cpu_T[0]);
                     gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("pop %s\n", regpairnames[r1]);
                     break;
                 case 1:
                     switch (p) {
                     case 0:
-                        gen_op_popw_T0();
+                        gen_popw(cpu_T[0]);
                         gen_op_jmp_T0();
                         zprintf("ret\n");
                         gen_eob(s);
@@ -1170,9 +1192,9 @@ next_byte:
                     break;
                 case 4:
                     r1 = regpairmap(OR2_HL, m);
-                    gen_op_popw_T1();
+                    gen_popw(cpu_T[1]);
                     gen_movw_v_reg(cpu_T[0], r1);
-                    gen_op_pushw_T0();
+                    gen_pushw(cpu_T[0]);
                     gen_movw_reg_v(r1, cpu_T[1]);
                     zprintf("ex (sp),%s\n", regpairnames[r1]);
                     break;
@@ -1205,7 +1227,7 @@ next_byte:
                 case 0:
                     r1 = regpairmap(regpair2[p], m);
                     gen_movw_v_reg(cpu_T[0], r1);
-                    gen_op_pushw_T0();
+                    gen_pushw(cpu_T[0]);
                     zprintf("push %s\n", regpairnames[r1]);
                     break;
                 case 1:
@@ -1214,7 +1236,7 @@ next_byte:
                         n = lduw_code(s->pc);
                         s->pc += 2;
                         tcg_gen_movi_tl(cpu_T[0], s->pc);
-                        gen_op_pushw_T0();
+                        gen_pushw(cpu_T[0]);
                         gen_jmp_im(n);
                         zprintf("call $%04x\n", n);
                         gen_eob(s);
@@ -1250,7 +1272,7 @@ next_byte:
 
             case 7:
                 tcg_gen_movi_tl(cpu_T[0], s->pc);
-                gen_op_pushw_T0();
+                gen_pushw(cpu_T[0]);
                 gen_jmp_im(y*8);
                 zprintf("rst $%02x\n", y*8);
                 gen_eob(s);
@@ -1445,7 +1467,7 @@ next_byte:
                 break;
             case 5:
                 /* FIXME */
-                gen_op_popw_T0();
+                gen_popw(cpu_T[0]);
                 gen_op_jmp_T0();
                 gen_op_ri();
                 if (q == 0) {
