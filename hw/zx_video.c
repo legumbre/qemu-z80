@@ -249,6 +249,13 @@ static void zx_update_display(void *opaque)
         }
     }
 
+    if (s->ds->width != s->twidth ||
+        s->ds->height != s->theight) {
+        dpy_resize(s->ds, s->twidth, s->theight);
+        s->invalidate = 1;
+        s->prevborder = -1;
+    }
+
     if (dirty) {
         d = s->ds->data;
         d += s->bheight * s->ds->linesize;
@@ -282,6 +289,13 @@ static void zx_update_display(void *opaque)
     dpy_update(s->ds, 0, 0, s->twidth, s->theight);
 }
 
+static void zx_invalidate_display(void *opaque)
+{
+    ZXVState *s = (ZXVState *)opaque;
+    s->invalidate = 1;
+    s->prevborder = -1;
+}
+
 static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 {
     ZXVState *s = (ZXVState *)opaque;
@@ -310,7 +324,8 @@ void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
 //    s->vram_offset = ula_ram_offset;
 
     graphic_console_init(ds, zx_update_display,
-                         NULL, NULL, NULL, s);
+                         zx_invalidate_display,
+                         NULL, NULL, s);
 
     s->bwidth = 32;
     s->bheight = 24;
