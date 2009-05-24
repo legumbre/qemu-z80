@@ -40,11 +40,13 @@ CPUZ80State *cpu_z80_init(const char *model)
     int id;
 
     id = cpu_z80_find_by_name(model);
-    if (id == 0)
+    if (id == 0) {
         return NULL;
+    }
     env = qemu_mallocz(sizeof(CPUZ80State));
-    if (!env)
+    if (!env) {
         return NULL;
+    }
     cpu_exec_init(env);
 
     /* init various static tables */

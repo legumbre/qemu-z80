@@ -72,8 +72,9 @@ void do_interrupt(CPUZ80State *env)
 {
 // printf("z80: do_interrupt()\n");
 
-    if (!env->iff1)
+    if (!env->iff1) {
         return;
+    }
 
     env->iff1 = 0;
     env->iff2 = 0; /* XXX: Unchanged for NMI */
@@ -96,16 +97,16 @@ void do_interrupt(CPUZ80State *env)
 
     uint8_t d;
     switch (env->imode) {
-        case 0:
-            /* XXX: assuming 0xff on data bus */
-        case 1:
-            env->pc = 0x0038;
-            break;
-        case 2:
-            /* XXX: assuming 0xff on data bus */
-            d = 0xff;
-            env->pc = lduw_kernel((env->regs[R_I] << 8) | d);
-            break;
+    case 0:
+        /* XXX: assuming 0xff on data bus */
+    case 1:
+        env->pc = 0x0038;
+        break;
+    case 2:
+        /* XXX: assuming 0xff on data bus */
+        d = 0xff;
+        env->pc = lduw_kernel((env->regs[R_I] << 8) | d);
+        break;
     }
 }
 
@@ -211,10 +212,11 @@ void tlb_fill(target_ulong addr, int is_write, int is_user, void *retaddr)
                 cpu_restore_state(tb, env, pc, NULL);
             }
         }
-        if (retaddr)
+        if (retaddr) {
             raise_exception_err(env->exception_index, env->error_code);
-        else
+        } else {
             raise_exception_err_norestore(env->exception_index, env->error_code);
+        }
     }
     env = saved_env;
 }

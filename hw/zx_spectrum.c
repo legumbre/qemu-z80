@@ -63,8 +63,9 @@ static uint32_t io_keyboard_read(void *opaque, uint32_t addr)
 
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
-    if (addr & 1)
+    if (addr & 1) {
         return 0xff;
+    }
 
     return io_keyboard_read(opaque, addr);
 }
@@ -206,7 +207,8 @@ static const int map[0x100][2] = {
  * Also need to implement shifted mappings.
  */
 
-static void zx_put_keycode(void *opaque, int keycode) {
+static void zx_put_keycode(void *opaque, int keycode)
+{
     int release = keycode & 0x80;
     int key, row, col;
     static int ext_keycode = 0;
@@ -283,8 +285,9 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
     CPUState *env;
 
     /* init CPUs */
-    if (!cpu_model)
+    if (!cpu_model) {
         cpu_model = "z80";
+    }
     env = cpu_init(cpu_model);
     zx_env = env; // XXX
     register_savevm("cpu", 0, 4, cpu_save, cpu_load, env);
@@ -313,8 +316,9 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
     /* hack from xz80 adding HALT to the keyboard input loop to save CPU */
     static unsigned char oldip[]={253,203,1,110,200,58,8,92,253,203,1,174};
     static unsigned char newip[]={33,59,92,118,203,110,200,58,8,92,203,174};
-    if(!memcmp(phys_ram_base + rom_offset + 0x10b0,oldip,12))
+    if (!memcmp(phys_ram_base + rom_offset + 0x10b0,oldip,12)) {
         memcpy(phys_ram_base + rom_offset + 0x10b0,newip,12);
+    }
 
     cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
 
@@ -328,7 +332,7 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
 
 #ifdef CONFIG_LIBSPECTRUM
     /* load a snapshot */
-    if(kernel_filename) {
+    if (kernel_filename) {
         libspectrum_id_t type;
         libspectrum_class_t cls;
         libspectrum_snap* snap;
@@ -336,21 +340,21 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
         libspectrum_byte* page;
         int length;
         int i;
-        if(libspectrum_init() != LIBSPECTRUM_ERROR_NONE ||
-           libspectrum_identify_file(&type, kernel_filename, NULL, 0) != LIBSPECTRUM_ERROR_NONE ||
-           libspectrum_identify_class(&cls, type) != LIBSPECTRUM_ERROR_NONE ||
-           libspectrum_snap_alloc(&snap) != LIBSPECTRUM_ERROR_NONE) {
+        if (libspectrum_init() != LIBSPECTRUM_ERROR_NONE ||
+            libspectrum_identify_file(&type, kernel_filename, NULL, 0) != LIBSPECTRUM_ERROR_NONE ||
+            libspectrum_identify_class(&cls, type) != LIBSPECTRUM_ERROR_NONE ||
+            libspectrum_snap_alloc(&snap) != LIBSPECTRUM_ERROR_NONE) {
             fprintf(stderr, "%s: libspectrum error\n", __FUNCTION__);
             exit(1);
         }
-        if(cls != LIBSPECTRUM_CLASS_SNAPSHOT) {
+        if (cls != LIBSPECTRUM_CLASS_SNAPSHOT) {
             fprintf(stderr, "%s: %s is not a snapshot\n", __FUNCTION__, kernel_filename);
             exit(1);
         }
         snapmem = malloc(65536);
         length = load_image(kernel_filename, snapmem);
         //printf("loaded %d bytes from %s\n",length, kernel_filename);
-        if(libspectrum_snap_read(snap, snapmem, length, type, NULL) != LIBSPECTRUM_ERROR_NONE) {
+        if (libspectrum_snap_read(snap, snapmem, length, type, NULL) != LIBSPECTRUM_ERROR_NONE) {
             fprintf(stderr, "%s: failed to load snapshot %s\n", __FUNCTION__, kernel_filename);
             exit(1);
         }
@@ -358,16 +362,18 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
 
         /* fill memory */
         page = libspectrum_snap_pages(snap, 5);
-        for(i = 0x4000; i < 0x8000; i++) {
+        for (i = 0x4000; i < 0x8000; i++) {
             //printf("storing 0x%x in 0x%x\n",page[i-0x4000],i);
             stb_phys(i, page[i - 0x4000]);
         }
         page = libspectrum_snap_pages(snap, 2);
-        for(i = 0x8000; i < 0xc000; i++)
+        for (i = 0x8000; i < 0xc000; i++) {
             stb_phys(i, page[i - 0x8000]);
+        }
         page = libspectrum_snap_pages(snap, 0);
-        for(i = 0xc000; i < 0x10000; i++)
+        for (i = 0xc000; i < 0x10000; i++) {
             stb_phys(i, page[i - 0xc000]);
+        }
 
         /* restore registers */
         env->regs[R_A] = libspectrum_snap_a(snap);

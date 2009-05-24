@@ -296,9 +296,11 @@ static inline void regs_to_env(void)
 #endif
 }
 
-static inline int cpu_halted(CPUState* env) {
-    if (!env->halted)
+static inline int cpu_halted(CPUState* env)
+{
+    if (!env->halted) {
         return 0;
+    }
     //printf("%s: at PC 0x%x halted == %d, irq %d\n",__FUNCTION__, env->pc, env->halted,env->interrupt_request);
     if (env->interrupt_request & CPU_INTERRUPT_HARD) {
         env->halted = 0;

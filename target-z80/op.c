@@ -177,10 +177,11 @@ void OPPROTO op_jmp_T0(void)
 void OPPROTO op_djnz(void)
 {
     BC = (uint16_t)(BC - 0x0100);
-    if (BC & 0xff00)
+    if (BC & 0xff00) {
         PC = PARAM1;
-    else
+    } else {
         PC = PARAM2;
+    }
     FORCE_RET();
 }
 
@@ -517,10 +518,11 @@ void OPPROTO op_bli_ld_dec_cc(void)
 
 void OPPROTO op_bli_ld_rep(void)
 {
-    if (BC)
+    if (BC) {
         PC = PARAM1 - 2;
-    else
+    } else {
         PC = PARAM1;
+    }
     FORCE_RET();
 }
 
@@ -569,10 +571,11 @@ void OPPROTO op_bli_cp_dec_cc(void)
 
 void OPPROTO op_bli_cp_rep(void)
 {
-    if (BC && T0 != A)
+    if (BC && T0 != A) {
         PC = PARAM1 - 2;
-    else
+    } else {
         PC = PARAM1;
+    }
     FORCE_RET();
 }
 
@@ -590,10 +593,11 @@ void OPPROTO op_bli_io_dec(void)
 
 void OPPROTO op_bli_io_rep(void)
 {
-    if (BC & 0xff00)
+    if (BC & 0xff00) {
         PC = PARAM1 - 2;
-    else
+    } else {
         PC = PARAM1;
+    }
     FORCE_RET();
 }
 

@@ -173,7 +173,8 @@ static inline void zx_draw_line_32(uint8_t *d,
 
 static ZXVState *zxvstate;
 
-void zx_video_do_retrace(void) {
+void zx_video_do_retrace(void)
+{
     ZXVState *s = zxvstate;
 
     if (++s->flashcount == 16) {
@@ -285,20 +286,21 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 {
     ZXVState *s = (ZXVState *)opaque;
 
-/* port xxfe */
+    /* port xxfe */
     if (!(addr & 1)) {
         s->border = data & 0x07;
     }
 };
 
 void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
-                 unsigned long ula_ram_offset)
+                   unsigned long ula_ram_offset)
 {
     int zx_io_memory;
 
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
-    if (!s)
+    if (!s) {
         return;
+    }
     zxvstate = s;
     s->ds = ds;
     s->invalidate = 1;

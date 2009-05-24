@@ -217,14 +217,16 @@ char *idxnames[] = {
 
 typedef void (gen_mov_func)(TCGv v);
 
-static inline void gen_movb_v_HLmem(TCGv v) {
+static inline void gen_movb_v_HLmem(TCGv v)
+{
     TCGv addr = tcg_temp_new(TCG_TYPE_TL);
     gen_movw_v_HL(addr);
     tcg_gen_qemu_ld8u(v, addr, MEM_INDEX);
     tcg_temp_free(addr);
 }
 
-static inline void gen_movb_HLmem_v(TCGv v) {
+static inline void gen_movb_HLmem_v(TCGv v)
+{
     TCGv addr = tcg_temp_new(TCG_TYPE_TL);
     gen_movw_v_HL(addr);
     tcg_gen_qemu_st8(v, addr, MEM_INDEX);
@@ -248,7 +250,8 @@ static gen_mov_func *gen_movb_v_reg_tbl[] = {
     [OR_IYl]   = gen_movb_v_IYl,
 };
 
-static inline void gen_movb_v_reg(TCGv v, int reg) {
+static inline void gen_movb_v_reg(TCGv v, int reg)
+{
     gen_movb_v_reg_tbl[reg](v);
 }
 
@@ -274,7 +277,8 @@ static gen_mov_func *gen_movb_reg_v_tbl[] = {
     [OR_IYl]   = gen_movb_IYl_v,
 };
 
-static inline void gen_movb_reg_v(int reg, TCGv v) {
+static inline void gen_movb_reg_v(int reg, TCGv v)
+{
     gen_movb_reg_v_tbl[reg](v);
 }
 
@@ -283,7 +287,8 @@ static GenOpFunc1 *gen_op_movb_idx_T0[] = {
     [OR_IYmem] = gen_op_movb_IYmem_T0,
 };
 
-static inline int regmap(int reg, int m) {
+static inline int regmap(int reg, int m)
+{
     switch (m) {
     case MODE_DD:
         switch (reg) {
@@ -313,11 +318,13 @@ static inline int regmap(int reg, int m) {
     }
 }
 
-static inline int is_indexed(int reg) {
-    if (reg == OR_IXmem || reg == OR_IYmem)
+static inline int is_indexed(int reg)
+{
+    if (reg == OR_IXmem || reg == OR_IYmem) {
         return 1;
-    else
+    } else {
         return 0;
+    }
 }
 
 int reg[8] = {
@@ -380,7 +387,8 @@ static gen_mov_func *gen_movw_v_reg_tbl[] = {
     [OR2_HLX] = gen_movw_v_HLX,
 };
 
-static inline void gen_movw_v_reg(TCGv v, int regpair) {
+static inline void gen_movw_v_reg(TCGv v, int regpair)
+{
     gen_movw_v_reg_tbl[regpair](v);
 }
 
@@ -400,11 +408,13 @@ static gen_mov_func *gen_movw_reg_v_tbl[] = {
     [OR2_HLX] = gen_movw_HLX_v,
 };
 
-static inline void gen_movw_reg_v(int regpair, TCGv v) {
+static inline void gen_movw_reg_v(int regpair, TCGv v)
+{
     gen_movw_reg_v_tbl[regpair](v);
 }
 
-static inline int regpairmap(int regpair, int m) {
+static inline int regpairmap(int regpair, int m)
+{
     switch (regpair) {
     case OR2_HL:
         switch (m) {
@@ -442,8 +452,9 @@ static inline void gen_jmp_im(target_ulong pc)
 
 static void gen_debug(DisasContext *s, target_ulong cur_pc)
 {
-    if (s->cc_op != CC_OP_DYNAMIC)
+    if (s->cc_op != CC_OP_DYNAMIC) {
         gen_op_set_cc_op(s->cc_op);
+    }
     gen_jmp_im(cur_pc);
     gen_op_debug();
     s->is_jmp = 3;
@@ -451,8 +462,9 @@ static void gen_debug(DisasContext *s, target_ulong cur_pc)
 
 static void gen_eob(DisasContext *s)
 {
-    if (s->cc_op != CC_OP_DYNAMIC)
+    if (s->cc_op != CC_OP_DYNAMIC) {
         gen_op_set_cc_op(s->cc_op);
+    }
     if (s->tb->flags & HF_INHIBIT_IRQ_MASK) {
         gen_op_reset_inhibit_irq();
     }
@@ -466,8 +478,9 @@ static void gen_eob(DisasContext *s)
 
 static void gen_exception(DisasContext *s, int trapno, target_ulong cur_pc)
 {
-    if (s->cc_op != CC_OP_DYNAMIC)
+    if (s->cc_op != CC_OP_DYNAMIC) {
         gen_op_set_cc_op(s->cc_op);
+    }
     gen_jmp_im(cur_pc);
     gen_op_raise_exception(trapno);
     s->is_jmp = 3;
@@ -581,7 +594,8 @@ static inline void gen_cond_jump(int cc, int l1)
 }
 
 static inline void gen_jcc(DisasContext *s, int cc,
-                           target_ulong val, target_ulong next_pc) {
+                           target_ulong val, target_ulong next_pc)
+{
     TranslationBlock *tb;
     int l1;
 
@@ -600,7 +614,8 @@ static inline void gen_jcc(DisasContext *s, int cc,
 }
 
 static inline void gen_callcc(DisasContext *s, int cc,
-                              target_ulong val, target_ulong next_pc) {
+                              target_ulong val, target_ulong next_pc)
+{
     TranslationBlock *tb;
     int l1;
 
@@ -621,7 +636,8 @@ static inline void gen_callcc(DisasContext *s, int cc,
 }
 
 static inline void gen_retcc(DisasContext *s, int cc,
-                             target_ulong next_pc) {
+                             target_ulong next_pc)
+{
     TranslationBlock *tb;
     int l1;
 
@@ -641,7 +657,8 @@ static inline void gen_retcc(DisasContext *s, int cc,
     s->is_jmp = 3;
 }
 
-static inline void gen_ex(int regpair1, int regpair2) {
+static inline void gen_ex(int regpair1, int regpair2)
+{
     TCGv tmp1 = tcg_temp_new(TCG_TYPE_TL);
     TCGv tmp2 = tcg_temp_new(TCG_TYPE_TL);
     gen_movw_v_reg(tmp1, regpair1);
@@ -676,12 +693,13 @@ next_byte:
 
 /* START */
 
-    if (prefixes & PREFIX_DD)
+    if (prefixes & PREFIX_DD) {
         m = MODE_DD;
-    else if (prefixes & PREFIX_FD)
+    } else if (prefixes & PREFIX_FD) {
         m = MODE_FD;
-    else
+    } else {
         m = MODE_NORMAL;
+    }
 
     /* unprefixed opcodes */
 
@@ -858,17 +876,20 @@ next_byte:
                     d = ldsb_code(s->pc);
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
-                } else
+                } else {
                     gen_movb_v_reg(cpu_T[0], r1);
+                }
                 gen_op_incb_T0_cc();
-                if (is_indexed(r1))
+                if (is_indexed(r1)) {
                     gen_op_movb_idx_T0[r1](d);
-                else
+                } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
-                if (is_indexed(r1))
+                }
+                if (is_indexed(r1)) {
                     zprintf("inc (%s%c$%02x)\n", idxnames[r1], shexb(d));
-                else
+                } else {
                     zprintf("inc %s\n", regnames[r1]);
+                }
                 break;
 
             case 5:
@@ -877,17 +898,20 @@ next_byte:
                     d = ldsb_code(s->pc);
                     s->pc++;
                     gen_op_movb_T0_idx[r1](d);
-                } else
+                } else {
                     gen_movb_v_reg(cpu_T[0], r1);
+                }
                 gen_op_decb_T0_cc();
-                if (is_indexed(r1))
+                if (is_indexed(r1)) {
                     gen_op_movb_idx_T0[r1](d);
-                else
+                } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
-                if (is_indexed(r1))
+                }
+                if (is_indexed(r1)) {
                     zprintf("dec (%s%c$%02x)\n", idxnames[r1], shexb(d));
-                else
+                } else {
                     zprintf("dec %s\n", regnames[r1]);
+                }
                 break;
 
             case 6:
@@ -899,14 +923,16 @@ next_byte:
                 n = ldub_code(s->pc);
                 s->pc++;
                 gen_op_mov_T0_im(n);
-                if (is_indexed(r1))
+                if (is_indexed(r1)) {
                     gen_op_movb_idx_T0[r1](d);
-                else
+                } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
-                if (is_indexed(r1))
+                }
+                if (is_indexed(r1)) {
                     zprintf("ld (%s%c$%02x),$%02x\n", idxnames[r1], shexb(d), n);
-                else
+                } else {
                     zprintf("ld %s,$%02x\n", regnames[r1], n);
+                }
                 break;
 
             case 7:
@@ -968,20 +994,23 @@ next_byte:
                     d = ldsb_code(s->pc);
                     s->pc++;
                 }
-                if (is_indexed(r1))
+                if (is_indexed(r1)) {
                     gen_op_movb_T0_idx[r1](d);
-                else
+                } else {
                     gen_movb_v_reg(cpu_T[0], r1);
-                if (is_indexed(r2))
+                }
+                if (is_indexed(r2)) {
                     gen_op_movb_idx_T0[r2](d);
-                else
+                } else {
                     gen_movb_reg_v(r2, cpu_T[0]);
-                if (is_indexed(r1))
+                }
+                if (is_indexed(r1)) {
                     zprintf("ld %s,(%s%c$%02x)\n", regnames[r2], idxnames[r1], shexb(d));
-                else if (is_indexed(r2))
+                } else if (is_indexed(r2)) {
                     zprintf("ld (%s%c$%02x),%s\n", idxnames[r2], shexb(d), regnames[r1]);
-                else
+                } else {
                     zprintf("ld %s,%s\n", regnames[r2], regnames[r1]);
+                }
             }
             break;
 
@@ -991,13 +1020,15 @@ next_byte:
                 d = ldsb_code(s->pc);
                 s->pc++;
                 gen_op_movb_T0_idx[r1](d);
-            } else
+            } else {
                 gen_movb_v_reg(cpu_T[0], r1);
+            }
             gen_op_alu[y](); /* places output in A */
-            if (is_indexed(r1))
+            if (is_indexed(r1)) {
                 zprintf("%s(%s%c$%02x)\n", alu[y], idxnames[r1], shexb(d));
-            else
+            } else {
                 zprintf("%s%s\n", alu[y], regnames[r1]);
+            }
             break;
 
         case 3:
@@ -1201,8 +1232,9 @@ next_byte:
         if (m != MODE_NORMAL) {
             r1 = regmap(OR_HLmem, m);
             gen_op_movb_T0_idx[r1](d);
-            if (z != 6)
+            if (z != 6) {
                 r2 = regmap(reg[z], 0);
+            }
         } else {
             r1 = regmap(reg[z], m);
             gen_movb_v_reg(cpu_T[0], r1);
@@ -1214,8 +1246,9 @@ next_byte:
             gen_op_rot_T0[y]();
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
-                if (z != 6)
+                if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
+                }
             } else {
                 gen_movb_reg_v(r1, cpu_T[0]);
             }
@@ -1229,8 +1262,9 @@ next_byte:
             gen_op_res_T0(~(1 << y));
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
-                if (z != 6)
+                if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
+                }
             } else {
                 gen_movb_reg_v(r1, cpu_T[0]);
             }
@@ -1240,8 +1274,9 @@ next_byte:
             gen_op_set_T0(1 << y);
             if (m != MODE_NORMAL) {
                 gen_op_movb_idx_T0[r1](d);
-                if (z != 6)
+                if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
+                }
             } else {
                 gen_movb_reg_v(r1, cpu_T[0]);
             }
@@ -1427,10 +1462,11 @@ next_byte:
                     gen_movw_v_DE(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
 
-                    if (!(y & 1))
+                    if (!(y & 1)) {
                         gen_op_bli_ld_inc_cc();
-                    else
+                    } else {
                         gen_op_bli_ld_dec_cc();
+                    }
                     if ((y & 2)) {
                         gen_op_bli_ld_rep(s->pc);
                         gen_eob(s);
@@ -1443,10 +1479,11 @@ next_byte:
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_bli_cp_cc();
 
-                    if (!(y & 1))
+                    if (!(y & 1)) {
                         gen_op_bli_cp_inc_cc();
-                    else
+                    } else {
                         gen_op_bli_cp_dec_cc();
+                    }
                     if ((y & 2)) {
                         gen_op_bli_cp_rep(s->pc);
                         gen_eob(s);
@@ -1458,10 +1495,11 @@ next_byte:
                     gen_op_in_T0_bc_cc();
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
-                    if (!(y & 1))
+                    if (!(y & 1)) {
                         gen_op_bli_io_inc();
-                    else
+                    } else {
                         gen_op_bli_io_dec();
+                    }
                     if ((y & 2)) {
                         gen_op_bli_io_rep(s->pc);
                         gen_eob(s);
@@ -1473,10 +1511,11 @@ next_byte:
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_op_out_T0_bc();
-                    if (!(y & 1))
+                    if (!(y & 1)) {
                         gen_op_bli_io_inc();
-                    else
+                    } else {
                         gen_op_bli_io_dec();
+                    }
                     if ((y & 2)) {
                         gen_op_bli_io_rep(s->pc);
                         gen_eob(s);
@@ -1580,9 +1619,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     lj = -1;
     dc->model = env->model;
 
-    for(;;) {
+    for (;;) {
         if (env->nb_breakpoints > 0) {
-            for(j = 0; j < env->nb_breakpoints; j++) {
+            for (j = 0; j < env->nb_breakpoints; j++) {
                 if (env->breakpoints[j] == pc_ptr) {
                     gen_debug(dc, pc_ptr - dc->cs_base);
                     break;
@@ -1593,8 +1632,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
             j = gen_opc_ptr - gen_opc_buf;
             if (lj < j) {
                 lj++;
-                while (lj < j)
+                while (lj < j) {
                     gen_opc_instr_start[lj++] = 0;
+                }
             }
             gen_opc_pc[lj] = pc_ptr;
 //            gen_opc_cc_op[lj] = dc->cc_op;
@@ -1602,8 +1642,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
         }
         pc_ptr = disas_insn(dc, pc_ptr);
         /* stop translation if indicated */
-        if (dc->is_jmp)
+        if (dc->is_jmp) {
             break;
+        }
         /* if single step mode, we generate only one instruction and
            generate an exception */
         /* if irq were inhibited with HF_INHIBIT_IRQ_MASK, we clear
@@ -1629,8 +1670,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     if (search_pc) {
         j = gen_opc_ptr - gen_opc_buf;
         lj++;
-        while (lj <= j)
+        while (lj <= j) {
             gen_opc_instr_start[lj++] = 0;
+        }
     }
 
 #ifdef DEBUG_DISAS
@@ -1654,8 +1696,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     /* optimize flag computations */
     optimize_flags(gen_opc_buf, gen_opc_ptr - gen_opc_buf);
 
-    if (!search_pc)
+    if (!search_pc) {
         tb->size = pc_ptr - pc_start;
+    }
     return 0;
 }
 
