@@ -282,16 +282,8 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_MIPS)
 #elif defined(TARGET_SH4)
 #elif defined(TARGET_CRIS)
+#elif defined(TARGET_Z80)
     /* XXXXX */
-#elif defined(TARGET_Z80)
-    env_to_regs();
-    /* put eflags in CPU temporary format */
-    CC_SRC = env->eflags & (CC_S | CC_Z | CC_P | CC_C);
-    CC_OP = CC_OP_EFLAGS;
-    env->eflags &= ~(CC_S | CC_Z | CC_P | CC_C);
-#elif defined(TARGET_Z80)
-    /* restore flags in standard format */
-//    env->eflags = env->eflags | cc_table[CC_OP].compute_all();
 #else
 #error unsupported target CPU
 #endif
@@ -663,10 +655,8 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_SH4)
 #elif defined(TARGET_ALPHA)
 #elif defined(TARGET_CRIS)
-    /* XXXXX */
 #elif defined(TARGET_Z80)
-    /* restore flags in standard format */
-//    env->eflags = env->eflags | cc_table[CC_OP].compute_all();
+    /* XXXXX */
 #else
 #error unsupported target CPU
 #endif

@@ -786,27 +786,6 @@ void OPPROTO op_muluw_cc(void)
 
 /*********** END OF Z80 OPS ***********/
 
-void OPPROTO op_set_cc_op(void)
-{
-    CC_OP = PARAM1;
-}
-
-static int compute_all_eflags(void)
-{
-    return CC_SRC;
-}
-
-static int compute_c_eflags(void)
-{
-    return CC_SRC & CC_C;
-}
-
-CCTable cc_table[CC_OP_NB] = {
-    [CC_OP_DYNAMIC] = { /* should never happen */ },
-
-    [CC_OP_EFLAGS] = { compute_all_eflags, compute_c_eflags },
-};
-
 /* threading support */
 void OPPROTO op_lock(void)
 {

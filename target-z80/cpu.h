@@ -134,13 +134,6 @@
 #define EXCP11_ALGN	17
 #define EXCP12_MCHK	18
 
-enum {
-    CC_OP_DYNAMIC, /* must use dynamic code to get cc_op */
-    CC_OP_EFLAGS,  /* all cc are explicitely computed, CC_SRC = flags */
-
-    CC_OP_NB,
-};
-
 #define NB_MMU_MODES 2
 
 typedef struct CPUZ80State {
@@ -166,9 +159,6 @@ typedef struct CPUZ80State {
                         stored elsewhere */
 
     /* emulator internal eflags handling */
-    target_ulong cc_src;
-    target_ulong cc_dst;
-    uint32_t cc_op;
     uint32_t hflags; /* hidden flags, see HF_xxx constants */
 
     target_ulong cr[5]; /* NOTE: cr1 is unused */

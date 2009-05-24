@@ -62,7 +62,6 @@ typedef struct DisasContext {
     int model;
     /* current block context */
     target_ulong cs_base; /* base of CS segment */
-    int cc_op;  /* current CC operation */
     int singlestep_enabled; /* "hardware" single step enabled */
     int jmp_opt; /* use direct block chaining for direct jumps */
     int flags; /* all execution flags */
@@ -527,9 +526,6 @@ static inline void gen_jmp_im(target_ulong pc)
 
 static void gen_debug(DisasContext *s, target_ulong cur_pc)
 {
-    if (s->cc_op != CC_OP_DYNAMIC) {
-        gen_op_set_cc_op(s->cc_op);
-    }
     gen_jmp_im(cur_pc);
     gen_helper_debug();
     s->is_jmp = 3;
@@ -537,9 +533,6 @@ static void gen_debug(DisasContext *s, target_ulong cur_pc)
 
 static void gen_eob(DisasContext *s)
 {
-    if (s->cc_op != CC_OP_DYNAMIC) {
-        gen_op_set_cc_op(s->cc_op);
-    }
     if (s->tb->flags & HF_INHIBIT_IRQ_MASK) {
         gen_helper_reset_inhibit_irq();
     }
@@ -553,9 +546,6 @@ static void gen_eob(DisasContext *s)
 
 static void gen_exception(DisasContext *s, int trapno, target_ulong cur_pc)
 {
-    if (s->cc_op != CC_OP_DYNAMIC) {
-        gen_op_set_cc_op(s->cc_op);
-    }
     gen_jmp_im(cur_pc);
     gen_helper_raise_exception(trapno);
     s->is_jmp = 3;
@@ -1641,13 +1631,6 @@ void z80_translate_init(void)
 #endif
 }
 
-/* CPU flags computation optimization: we move backward thru the
-   generated code to see which flags are needed. The operation is
-   modified if suitable */
-static void optimize_flags(uint16_t *opc_buf, int opc_buf_len)
-{
-}
-
 /* generate intermediate code in gen_opc_buf and gen_opparam_buf for
    basic block 'tb'. If search_pc is TRUE, also generate PC
    information for each intermediate instruction. */
@@ -1669,7 +1652,6 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     cflags = tb->cflags;
 
     dc->singlestep_enabled = env->singlestep_enabled;
-    dc->cc_op = CC_OP_DYNAMIC;
     dc->cs_base = cs_base;
     dc->tb = tb;
     dc->flags = flags;
@@ -1707,7 +1689,6 @@ static inline int gen_intermediate_code_internal(CPUState *env,
                 }
             }
             gen_opc_pc[lj] = pc_ptr;
-//            gen_opc_cc_op[lj] = dc->cc_op;
             gen_opc_instr_start[lj] = 1;
         }
         pc_ptr = disas_insn(dc, pc_ptr);
@@ -1762,9 +1743,6 @@ static inline int gen_intermediate_code_internal(CPUState *env,
         }
     }
 #endif
-
-    /* optimize flag computations */
-    optimize_flags(gen_opc_buf, gen_opc_ptr - gen_opc_buf);
 
     if (!search_pc) {
         tb->size = pc_ptr - pc_start;

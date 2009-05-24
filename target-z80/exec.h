@@ -67,44 +67,8 @@ extern int loglevel;
 
 #define PC  (env->pc)
 
-#define CC_SRC (env->cc_src)
-#define CC_DST (env->cc_dst)
-#define CC_OP  (env->cc_op)
-
-/* float macros */
-#if 0
-#define FT0    (env->ft0)
-#define ST0    (env->fpregs[env->fpstt].d)
-#define ST(n)  (env->fpregs[(env->fpstt + (n)) & 7].d)
-#define ST1    ST(1)
-
-#ifdef USE_FP_CONVERT
-#define FP_CONVERT  (env->fp_convert)
-#endif
-#endif
-
 #include "cpu.h"
 #include "exec-all.h"
-
-typedef struct CCTable {
-    int (*compute_all)(void); /* return all the flags */
-    int (*compute_c)(void);  /* return the C flag */
-} CCTable;
-
-extern CCTable cc_table[];
-
-void load_seg(int seg_reg, int selector);
-void helper_ljmp_protected_T0_T1(int next_eip);
-void helper_lcall_real_T0_T1(int shift, int next_eip);
-void helper_lcall_protected_T0_T1(int shift, int next_eip);
-void helper_iret_real(int shift);
-void helper_iret_protected(int shift, int next_eip);
-void helper_lret_protected(int shift, int addend);
-void helper_lldt_T0(void);
-void helper_ltr_T0(void);
-void helper_movl_crN_T0(int reg);
-void helper_movl_drN_T0(int reg);
-void helper_invlpg(target_ulong addr);
 
 int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
                              int is_write, int is_user, int is_softmmu);
@@ -117,84 +81,15 @@ void raise_interrupt(int intno, int is_int, int error_code,
                      int next_eip_addend);
 void raise_exception_err(int exception_index, int error_code);
 void raise_exception(int exception_index);
-void do_smm_enter(void);
 void __hidden cpu_loop_exit(void);
-
-void OPPROTO op_movl_eflags_T0(void);
-void OPPROTO op_movl_T0_eflags(void);
 
 #if !defined(CONFIG_USER_ONLY)
 
 #include "softmmu_exec.h"
 
-static inline double ldfq(target_ulong ptr)
-{
-    union {
-        double d;
-        uint64_t i;
-    } u;
-    u.i = ldq(ptr);
-    return u.d;
-}
-
-static inline void stfq(target_ulong ptr, double v)
-{
-    union {
-        double d;
-        uint64_t i;
-    } u;
-    u.d = v;
-    stq(ptr, u.i);
-}
-
-static inline float ldfl(target_ulong ptr)
-{
-    union {
-        float f;
-        uint32_t i;
-    } u;
-    u.i = ldl(ptr);
-    return u.f;
-}
-
-static inline void stfl(target_ulong ptr, float v)
-{
-    union {
-        float f;
-        uint32_t i;
-    } u;
-    u.f = v;
-    stl(ptr, u.i);
-}
-
 #endif /* !defined(CONFIG_USER_ONLY) */
 
-#define RC_MASK         0xc00
-#define RC_NEAR		0x000
-#define RC_DOWN		0x400
-#define RC_UP		0x800
-#define RC_CHOP		0xc00
-
-void helper_halt(void);
-void helper_monitor(void);
-void helper_mwait(void);
-
 extern const uint8_t parity_table[256];
-extern const uint8_t rclw_table[32];
-extern const uint8_t rclb_table[32];
-
-static inline uint32_t compute_eflags(void)
-{
-    return env->eflags | cc_table[CC_OP].compute_all();
-}
-
-/* NOTE: CC_OP must be modified manually to CC_OP_EFLAGS */
-static inline void load_eflags(int eflags, int update_mask)
-{
-    CC_SRC = eflags & (CC_S | CC_Z | CC_P | CC_C);
-    env->eflags = (env->eflags & ~update_mask) |
-        (eflags & update_mask);
-}
 
 static inline void env_to_regs(void)
 {
