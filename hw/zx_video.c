@@ -51,34 +51,24 @@ typedef struct {
     int invalidate;
 } ZXVState;
 
-char *colnames[8] = {
-    "black",
-    "blue",
-    "red",
-    "magenta",
-    "green",
-    "cyan",
-    "yellow",
-    "white"
-};
+static const uint32_t cols[16] = {
+    0x00000000, /*  0: Black          */
+    0x000000c0, /*  1: Blue           */
+    0x00c00000, /*  2: Red            */
+    0x00c000c0, /*  3: Magenta        */
+    0x0000c000, /*  4: Green          */
+    0x0000c0c0, /*  5: Cyan           */
+    0x00c0c000, /*  6: Yellow         */
+    0x00c0c0c0, /*  7: Light grey     */
 
-uint32_t cols[16] = {
-    0x00000000,
-    0x000000c0,
-    0x00c00000,
-    0x00c000c0,
-    0x0000c000,
-    0x0000c0c0,
-    0x00c0c000,
-    0x00c0c0c0,
-    0x00000000,
-    0x000000ff,
-    0x00ff0000,
-    0x00ff00ff,
-    0x0000ff00,
-    0x0000ffff,
-    0x00ffff00,
-    0x00ffffff,
+    0x00000000, /*  8: Black          */
+    0x000000ff, /*  9: Bright blue    */
+    0x00ff0000, /* 10: Bright red     */
+    0x00ff00ff, /* 11: Bright magenta */
+    0x0000ff00, /* 12: Bright green   */
+    0x0000ffff, /* 13: Bright cyan    */
+    0x00ffff00, /* 14: Bright yellow  */
+    0x00ffffff, /* 15: White          */
 };
 
 /* copied from vga_template.h */

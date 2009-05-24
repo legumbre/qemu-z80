@@ -44,7 +44,7 @@
 #define DPRINTF(fmt, ...)
 #endif
 
-int keystate[8];
+static int keystate[8];
 
 static uint32_t io_keyboard_read(void *opaque, uint32_t addr)
 {
@@ -75,9 +75,9 @@ static void main_cpu_reset(void *opaque)
     cpu_reset(env);
 }
 
-QEMUTimer *zx_ula_timer;
+static QEMUTimer *zx_ula_timer;
 
-void zx_50hz_timer(void *opaque)
+static void zx_50hz_timer(void *opaque)
 {
 //    printf("zx_irq_timer()\n");
     int64_t next_time;
@@ -92,9 +92,9 @@ void zx_50hz_timer(void *opaque)
     zx_video_do_retrace();
 }
 
-CPUState *zx_env;
+static CPUState *zx_env;
 
-void zx_timer_init(DisplayState *ds) {
+static void zx_timer_init(DisplayState *ds) {
     /* FIXME */
 
     int64_t t = qemu_get_clock(vm_clock);
