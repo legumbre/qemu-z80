@@ -189,7 +189,7 @@ static const int map[0x100][2] = {
     [0x36] = {ZX_KEY_CAPSSHIFT, -1}, /* Right Shift */
     [0x38] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Alt */
     [0x39] = {ZX_KEY_SPACE,     -1}, /* Space Bar */
-    [0x9c] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Alt -> Symbol Shift */
+    [0x9c] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Alt */
 
     [0xb7] = {ZX_KEY_CAPSSHIFT, ZX_KEY_7}, /* Up Arrow */
     [0xb8] = {ZX_KEY_CAPSSHIFT, ZX_KEY_5}, /* Left Arrow */
@@ -201,8 +201,8 @@ static const int map[0x100][2] = {
 /* FIXME:
  *   Need to mappings from stepping on each other...
  *   or at least make them step on one another in a consistent manner?
- *   Could use separate state arrays for surpressing + adding for these mappings,
- *   and allow only one fancy key at a time...
+ *   Could use separate state arrays for surpressing/adding keys
+ *   and allow only one change to the modifier keys at a time...
  *
  * Also need to implement shifted mappings.
  */
@@ -215,7 +215,6 @@ static void zx_put_keycode(void *opaque, int keycode)
     int i;
     int valid;
 
-    /* 'fake shift' code */
     if (keycode == 0xe0) {
         ext_keycode = 1;
     } else {
