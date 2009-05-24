@@ -192,7 +192,7 @@ static void zx_draw_line(ZXVState *s1, uint8_t *d,
         int attrib, fg, bg, bright, flash;
 
         attrib = *as;
-        bright = (attrib & 0x40) >> 4;
+        bright = (attrib & 0x40) >> 3;
         flash = (attrib & 0x80) && s1->flash;
         if (flash) {
             fg = (attrib >> 3) & 0x07;
