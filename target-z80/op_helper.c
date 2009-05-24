@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "exec.h"
+#include "helper.h"
 
 const uint8_t parity_table[256] = {
     CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
@@ -148,13 +149,41 @@ void raise_exception(int exception_index)
     raise_interrupt(exception_index, 0, 0, 0);
 }
 
-void helper_halt(void)
+void HELPER(halt)(void)
 {
     //printf("halting at PC 0x%x\n",env->pc);
     env->halted = 1;
     env->hflags &= ~HF_INHIBIT_IRQ_MASK; /* needed if sti is just before */
     env->exception_index = EXCP_HLT;
     cpu_loop_exit();
+}
+
+void HELPER(in_T0_im)(uint32_t val)
+{
+    T0 = cpu_inb(env, (A << 8) | val);
+}
+
+void HELPER(in_T0_bc_cc)(void)
+{
+    int sf, zf, pf;
+
+    helper_in_debug(BC);
+    T0 = cpu_inb(env, BC);
+
+    sf = (T0 & 0x80) ? CC_S : 0;
+    zf = T0 ? 0 : CC_Z;
+    pf = parity_table[(uint8_t)T0];
+    F = (F & CC_C) | sf | zf | pf;
+}
+
+void HELPER(out_T0_im)(uint32_t val)
+{
+    cpu_outb(env, (A << 8) | val, T0);
+}
+
+void HELPER(out_T0_bc)(void)
+{
+    cpu_outb(env, BC, T0);
 }
 
 void helper_monitor(void)

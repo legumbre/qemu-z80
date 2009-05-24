@@ -53,35 +53,6 @@ void OPPROTO op_reset_inhibit_irq(void)
 
 /* Misc */
 
-void OPPROTO op_in_T0_im(void)
-{
-    helper_in_debug((A << 8) | PARAM1);
-    T0 = cpu_inb(env, (A << 8) | PARAM1);
-}
-
-void OPPROTO op_in_T0_bc_cc(void)
-{
-    int sf, zf, pf;
-
-    helper_in_debug(BC);
-    T0 = cpu_inb(env, BC);
-
-    sf = (T0 & 0x80) ? CC_S : 0;
-    zf = T0 ? 0 : CC_Z;
-    pf = parity_table[(uint8_t)T0];
-    F = (F & CC_C) | sf | zf | pf;
-}
-
-void OPPROTO op_out_T0_im(void)
-{
-    cpu_outb(env, (A << 8) | PARAM1, T0);
-}
-
-void OPPROTO op_out_T0_bc(void)
-{
-    cpu_outb(env, BC, T0);
-}
-
 void OPPROTO op_bit_T0(void)
 {
     int sf, zf, pf;

@@ -29,8 +29,10 @@
 #include "cpu.h"
 #include "exec-all.h"
 #include "disas.h"
-#include "helper.h"
 #include "tcg-op.h"
+
+#define GEN_HELPER 1
+#include "helper.h"
 
 #define PREFIX_CB  0x01
 #define PREFIX_DD  0x02
@@ -1050,7 +1052,7 @@ next_byte:
         case 1:
             if (z == 6 && y == 6) {
                 gen_jmp_im(s->pc);
-                tcg_gen_helper_0_0(helper_halt);
+                gen_helper_halt();
                 zprintf("halt\n");
             } else {
                 if (z == 6) {
@@ -1180,13 +1182,13 @@ next_byte:
                     n = ldub_code(s->pc);
                     s->pc++;
                     gen_movb_v_A(cpu_T[0]);
-                    gen_op_out_T0_im(n);
+                    gen_helper_out_T0_im(tcg_const_tl(n));
                     zprintf("out ($%02x),a\n", n);
                     break;
                 case 3:
                     n = ldub_code(s->pc);
                     s->pc++;
-                    gen_op_in_T0_im(n);
+                    gen_helper_in_T0_im(tcg_const_tl(n));
                     gen_movb_A_v(cpu_T[0]);
                     zprintf("in a,($%02x)\n", n);
                     break;
@@ -1411,7 +1413,7 @@ next_byte:
         case 1:
             switch (z) {
             case 0:
-                gen_op_in_T0_bc_cc();
+                gen_helper_in_T0_bc_cc();
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
                     gen_movb_reg_v(r1, cpu_T[0]);
@@ -1429,7 +1431,7 @@ next_byte:
                     tcg_gen_movi_tl(cpu_T[0], 0);
                     zprintf("out (c),0\n");
                 }
-                gen_op_out_T0_bc();
+                gen_helper_out_T0_bc();
                 break;
             case 2:
                 r1 = regpairmap(OR2_HL, m);
@@ -1565,7 +1567,7 @@ next_byte:
                     break;
 
                 case 2: /* ini/ind/inir/indr */
-                    gen_op_in_T0_bc_cc();
+                    gen_helper_in_T0_bc_cc();
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1)) {
@@ -1583,7 +1585,7 @@ next_byte:
                 case 3: /* outi/outd/otir/otdr */
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                    gen_op_out_T0_bc();
+                    gen_helper_out_T0_bc();
                     if (!(y & 1)) {
                         gen_op_bli_io_inc();
                     } else {
@@ -1637,11 +1639,6 @@ void z80_translate_init(void)
     cpu_T[1] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG2, "T1");
     cpu_T[2] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG3, "T2");
 #endif
-
-    /* register helpers */
-#undef DEF_HELPER
-#define DEF_HELPER(ret, name, params) tcg_register_helper(name, #name);
-#include "helper.h"
 }
 
 /* CPU flags computation optimization: we move backward thru the
