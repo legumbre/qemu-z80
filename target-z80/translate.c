@@ -1332,7 +1332,7 @@ next_byte:
             zprintf("bit %i,%s\n", y, regnames[r1]);
             break;
         case 2:
-            gen_op_res_T0(~(1 << y));
+            tcg_gen_andi_tl(cpu_T[0], cpu_T[0], ~(1 << y));
             if (m != MODE_NORMAL) {
                 gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {
@@ -1344,7 +1344,7 @@ next_byte:
             zprintf("res %i,%s\n", y, regnames[r1]);
             break;
         case 3:
-            gen_op_set_T0(1 << y);
+            tcg_gen_ori_tl(cpu_T[0], cpu_T[0], 1 << y);
             if (m != MODE_NORMAL) {
                 gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {

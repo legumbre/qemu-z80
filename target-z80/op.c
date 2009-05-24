@@ -92,16 +92,6 @@ void OPPROTO op_bit_T0(void)
     F = (F & CC_C) | sf | zf | CC_H | pf;
 }
 
-void OPPROTO op_res_T0(void)
-{
-    T0 &= (uint8_t)PARAM1;
-}
-
-void OPPROTO op_set_T0(void)
-{
-    T0 |= (uint8_t)PARAM1;
-}
-
 void OPPROTO op_jmp_T0(void)
 {
     PC = T0;
