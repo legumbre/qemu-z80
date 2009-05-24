@@ -123,8 +123,6 @@ void __hidden cpu_loop_exit(void);
 void OPPROTO op_movl_eflags_T0(void);
 void OPPROTO op_movl_T0_eflags(void);
 
-void helper_in_debug(int port);
-
 #if !defined(CONFIG_USER_ONLY)
 
 #include "softmmu_exec.h"

@@ -167,7 +167,6 @@ void HELPER(in_T0_bc_cc)(void)
 {
     int sf, zf, pf;
 
-    helper_in_debug(BC);
     T0 = cpu_inb(env, BC);
 
     sf = (T0 & 0x80) ? CC_S : 0;
@@ -239,9 +238,4 @@ void tlb_fill(target_ulong addr, int is_write, int is_user, void *retaddr)
         }
     }
     env = saved_env;
-}
-
-void helper_in_debug(int port)
-{
-//    printf("IN with port %02x\n", port);
 }
