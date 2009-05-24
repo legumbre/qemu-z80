@@ -51,32 +51,6 @@ void OPPROTO op_reset_inhibit_irq(void)
 
 /************ Z80 MICRO-OPS ***********/
 
-/* Loads/stores */
-
-void OPPROTO op_movb_T0_IXmem(void)
-{
-    A0 = (uint16_t)(IX + PARAM1);
-    T0 = ldub_kernel(A0);
-}
-
-void OPPROTO op_movb_IXmem_T0(void)
-{
-    A0 = (uint16_t)(IX + PARAM1);
-    stb_kernel(A0, T0);
-}
-
-void OPPROTO op_movb_T0_IYmem(void)
-{
-    A0 = (uint16_t)(IY + PARAM1);
-    T0 = ldub_kernel(A0);
-}
-
-void OPPROTO op_movb_IYmem_T0(void)
-{
-    A0 = (uint16_t)(IY + PARAM1);
-    stb_kernel(A0, T0);
-}
-
 /* Stack operations */
 
 void OPPROTO op_pushw_T0(void)

@@ -216,6 +216,7 @@ static const char *const idxnames[] = {
 #undef REGPAIR
 
 typedef void (gen_mov_func)(TCGv v);
+typedef void (gen_mov_func_idx)(TCGv v, uint16_t ofs);
 
 static inline void gen_movb_v_HLmem(TCGv v)
 {
@@ -229,6 +230,46 @@ static inline void gen_movb_HLmem_v(TCGv v)
 {
     TCGv addr = tcg_temp_new(TCG_TYPE_TL);
     gen_movw_v_HL(addr);
+    tcg_gen_qemu_st8(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_movb_v_IXmem(TCGv v, uint16_t ofs)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_IX(addr);
+    tcg_gen_addi_tl(addr, addr, ofs);
+    tcg_gen_ext16u_tl(addr, addr);
+    tcg_gen_qemu_ld8u(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_movb_v_IYmem(TCGv v, uint16_t ofs)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_IY(addr);
+    tcg_gen_addi_tl(addr, addr, ofs);
+    tcg_gen_ext16u_tl(addr, addr);
+    tcg_gen_qemu_ld8u(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_movb_IXmem_v(TCGv v, uint16_t ofs)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_IX(addr);
+    tcg_gen_addi_tl(addr, addr, ofs);
+    tcg_gen_ext16u_tl(addr, addr);
+    tcg_gen_qemu_st8(v, addr, MEM_INDEX);
+    tcg_temp_free(addr);
+}
+
+static inline void gen_movb_IYmem_v(TCGv v, uint16_t ofs)
+{
+    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    gen_movw_v_IY(addr);
+    tcg_gen_addi_tl(addr, addr, ofs);
+    tcg_gen_ext16u_tl(addr, addr);
     tcg_gen_qemu_st8(v, addr, MEM_INDEX);
     tcg_temp_free(addr);
 }
@@ -255,10 +296,15 @@ static inline void gen_movb_v_reg(TCGv v, int reg)
     gen_movb_v_reg_tbl[reg](v);
 }
 
-static GenOpFunc1 *const gen_op_movb_T0_idx[] = {
-    [OR_IXmem] = gen_op_movb_T0_IXmem,
-    [OR_IYmem] = gen_op_movb_T0_IYmem,
+static gen_mov_func_idx *const gen_movb_v_idx_tbl[] = {
+    [OR_IXmem] = gen_movb_v_IXmem,
+    [OR_IYmem] = gen_movb_v_IYmem,
 };
+
+static inline void gen_movb_v_idx(TCGv v, int idx, int ofs)
+{
+    gen_movb_v_idx_tbl[idx](v, ofs);
+}
 
 static gen_mov_func *const gen_movb_reg_v_tbl[] = {
     [OR_B]     = gen_movb_B_v,
@@ -282,10 +328,15 @@ static inline void gen_movb_reg_v(int reg, TCGv v)
     gen_movb_reg_v_tbl[reg](v);
 }
 
-static GenOpFunc1 *const gen_op_movb_idx_T0[] = {
-    [OR_IXmem] = gen_op_movb_IXmem_T0,
-    [OR_IYmem] = gen_op_movb_IYmem_T0,
+static gen_mov_func_idx *const gen_movb_idx_v_tbl[] = {
+    [OR_IXmem] = gen_movb_IXmem_v,
+    [OR_IYmem] = gen_movb_IYmem_v,
 };
+
+static inline void gen_movb_idx_v(int idx, TCGv v, int ofs)
+{
+    gen_movb_idx_v_tbl[idx](v, ofs);
+}
 
 static inline int regmap(int reg, int m)
 {
@@ -875,13 +926,13 @@ next_byte:
                 if (is_indexed(r1)) {
                     d = ldsb_code(s->pc);
                     s->pc++;
-                    gen_op_movb_T0_idx[r1](d);
+                    gen_movb_v_idx(cpu_T[0], r1, d);
                 } else {
                     gen_movb_v_reg(cpu_T[0], r1);
                 }
                 gen_op_incb_T0_cc();
                 if (is_indexed(r1)) {
-                    gen_op_movb_idx_T0[r1](d);
+                    gen_movb_idx_v(r1, cpu_T[0], d);
                 } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
                 }
@@ -897,13 +948,13 @@ next_byte:
                 if (is_indexed(r1)) {
                     d = ldsb_code(s->pc);
                     s->pc++;
-                    gen_op_movb_T0_idx[r1](d);
+                    gen_movb_v_idx(cpu_T[0], r1, d);
                 } else {
                     gen_movb_v_reg(cpu_T[0], r1);
                 }
                 gen_op_decb_T0_cc();
                 if (is_indexed(r1)) {
-                    gen_op_movb_idx_T0[r1](d);
+                    gen_movb_idx_v(r1, cpu_T[0], d);
                 } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
                 }
@@ -924,7 +975,7 @@ next_byte:
                 s->pc++;
                 tcg_gen_movi_tl(cpu_T[0], n);
                 if (is_indexed(r1)) {
-                    gen_op_movb_idx_T0[r1](d);
+                    gen_movb_idx_v(r1, cpu_T[0], d);
                 } else {
                     gen_movb_reg_v(r1, cpu_T[0]);
                 }
@@ -995,12 +1046,12 @@ next_byte:
                     s->pc++;
                 }
                 if (is_indexed(r1)) {
-                    gen_op_movb_T0_idx[r1](d);
+                    gen_movb_v_idx(cpu_T[0], r1, d);
                 } else {
                     gen_movb_v_reg(cpu_T[0], r1);
                 }
                 if (is_indexed(r2)) {
-                    gen_op_movb_idx_T0[r2](d);
+                    gen_movb_idx_v(r2, cpu_T[0], d);
                 } else {
                     gen_movb_reg_v(r2, cpu_T[0]);
                 }
@@ -1019,7 +1070,7 @@ next_byte:
             if (is_indexed(r1)) {
                 d = ldsb_code(s->pc);
                 s->pc++;
-                gen_op_movb_T0_idx[r1](d);
+                gen_movb_v_idx(cpu_T[0], r1, d);
             } else {
                 gen_movb_v_reg(cpu_T[0], r1);
             }
@@ -1231,7 +1282,7 @@ next_byte:
 
         if (m != MODE_NORMAL) {
             r1 = regmap(OR_HLmem, m);
-            gen_op_movb_T0_idx[r1](d);
+            gen_movb_v_idx(cpu_T[0], r1, d);
             if (z != 6) {
                 r2 = regmap(reg[z], 0);
             }
@@ -1245,7 +1296,7 @@ next_byte:
             /* TODO: TST instead of SLL for R800 */
             gen_op_rot_T0[y]();
             if (m != MODE_NORMAL) {
-                gen_op_movb_idx_T0[r1](d);
+                gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
                 }
@@ -1261,7 +1312,7 @@ next_byte:
         case 2:
             gen_op_res_T0(~(1 << y));
             if (m != MODE_NORMAL) {
-                gen_op_movb_idx_T0[r1](d);
+                gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
                 }
@@ -1273,7 +1324,7 @@ next_byte:
         case 3:
             gen_op_set_T0(1 << y);
             if (m != MODE_NORMAL) {
-                gen_op_movb_idx_T0[r1](d);
+                gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {
                     gen_movb_reg_v(r2, cpu_T[0]);
                 }
