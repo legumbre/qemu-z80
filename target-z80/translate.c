@@ -521,7 +521,7 @@ static const int regpair2[4] = {
 
 static inline void gen_jmp_im(target_ulong pc)
 {
-    gen_op_movl_pc_im(pc);
+    gen_helper_movl_pc_im(tcg_const_tl(pc));
 }
 
 static void gen_debug(DisasContext *s, target_ulong cur_pc)
@@ -595,15 +595,17 @@ static const char *const alu[8] = {
     "cp ",
 };
 
-static GenOpFunc *const gen_op_alu[8] = {
-    gen_op_add_cc,
-    gen_op_adc_cc,
-    gen_op_sub_cc,
-    gen_op_sbc_cc,
-    gen_op_and_cc,
-    gen_op_xor_cc,
-    gen_op_or_cc,
-    gen_op_cp_cc,
+typedef void (alu_helper_func)(void);
+
+static alu_helper_func *const gen_alu[8] = {
+    gen_helper_add_cc,
+    gen_helper_adc_cc,
+    gen_helper_sub_cc,
+    gen_helper_sbc_cc,
+    gen_helper_and_cc,
+    gen_helper_xor_cc,
+    gen_helper_or_cc,
+    gen_helper_cp_cc,
 };
 
 /* Rotation/shift operations */
@@ -619,15 +621,17 @@ static const char *const rot[8] = {
     "srl",
 };
 
-static GenOpFunc *const gen_op_rot_T0[8] = {
-    gen_op_rlc_T0_cc,
-    gen_op_rrc_T0_cc,
-    gen_op_rl_T0_cc,
-    gen_op_rr_T0_cc,
-    gen_op_sla_T0_cc,
-    gen_op_sra_T0_cc,
-    gen_op_sll_T0_cc,
-    gen_op_srl_T0_cc,
+typedef void (rot_helper_func)(void);
+
+static rot_helper_func *const gen_rot_T0[8] = {
+    gen_helper_rlc_T0_cc,
+    gen_helper_rrc_T0_cc,
+    gen_helper_rl_T0_cc,
+    gen_helper_rr_T0_cc,
+    gen_helper_sla_T0_cc,
+    gen_helper_sra_T0_cc,
+    gen_helper_sll_T0_cc,
+    gen_helper_srl_T0_cc,
 };
 
 /* Block instructions */
@@ -716,7 +720,7 @@ static inline void gen_retcc(DisasContext *s, int cc,
 
     gen_set_label(l1);
     gen_popw(cpu_T[0]);
-    gen_op_jmp_T0();
+    gen_helper_jmp_T0();
     gen_eob(s);
 
     s->is_jmp = 3;
@@ -798,7 +802,7 @@ next_byte:
                 case 2:
                     n = ldsb_code(s->pc);
                     s->pc++;
-                    gen_op_djnz(s->pc + n, s->pc);
+                    gen_helper_djnz(tcg_const_tl(s->pc + n), tcg_const_tl(s->pc));
                     gen_eob(s);
                     s->is_jmp = 3;
                     zprintf("djnz $%02x\n", n);
@@ -838,7 +842,7 @@ next_byte:
                     r2 = regpairmap(OR2_HL, m);
                     gen_movw_v_reg(cpu_T[0], r1);
                     gen_movw_v_reg(cpu_T[1], r2);
-                    gen_op_addw_T0_T1_cc();
+                    gen_helper_addw_T0_T1_cc();
                     gen_movw_reg_v(r2, cpu_T[0]);
                     zprintf("add %s,%s\n", regpairnames[r2], regpairnames[r1]);
                     break;
@@ -944,7 +948,7 @@ next_byte:
                 } else {
                     gen_movb_v_reg(cpu_T[0], r1);
                 }
-                gen_op_incb_T0_cc();
+                gen_helper_incb_T0_cc();
                 if (is_indexed(r1)) {
                     gen_movb_idx_v(r1, cpu_T[0], d);
                 } else {
@@ -966,7 +970,7 @@ next_byte:
                 } else {
                     gen_movb_v_reg(cpu_T[0], r1);
                 }
-                gen_op_decb_T0_cc();
+                gen_helper_decb_T0_cc();
                 if (is_indexed(r1)) {
                     gen_movb_idx_v(r1, cpu_T[0], d);
                 } else {
@@ -1003,35 +1007,35 @@ next_byte:
             case 7:
                 switch (y) {
                 case 0:
-                    gen_op_rlca_cc();
+                    gen_helper_rlca_cc();
                     zprintf("rlca\n");
                     break;
                 case 1:
-                    gen_op_rrca_cc();
+                    gen_helper_rrca_cc();
                     zprintf("rrca\n");
                     break;
                 case 2:
-                    gen_op_rla_cc();
+                    gen_helper_rla_cc();
                     zprintf("rla\n");
                     break;
                 case 3:
-                    gen_op_rra_cc();
+                    gen_helper_rra_cc();
                     zprintf("rra\n");
                     break;
                 case 4:
-                    gen_op_daa_cc();
+                    gen_helper_daa_cc();
                     zprintf("daa\n");
                     break;
                 case 5:
-                    gen_op_cpl_cc();
+                    gen_helper_cpl_cc();
                     zprintf("cpl\n");
                     break;
                 case 6:
-                    gen_op_scf_cc();
+                    gen_helper_scf_cc();
                     zprintf("scf\n");
                     break;
                 case 7:
-                    gen_op_ccf_cc();
+                    gen_helper_ccf_cc();
                     zprintf("ccf\n");
                     break;
                 }
@@ -1088,7 +1092,7 @@ next_byte:
             } else {
                 gen_movb_v_reg(cpu_T[0], r1);
             }
-            gen_op_alu[y](); /* places output in A */
+            gen_alu[y](); /* places output in A */
             if (is_indexed(r1)) {
                 zprintf("%s(%s%c$%02x)\n", alu[y], idxnames[r1], shexb(d));
             } else {
@@ -1115,7 +1119,7 @@ next_byte:
                     switch (p) {
                     case 0:
                         gen_popw(cpu_T[0]);
-                        gen_op_jmp_T0();
+                        gen_helper_jmp_T0();
                         zprintf("ret\n");
                         gen_eob(s);
                         s->is_jmp = 3;
@@ -1130,7 +1134,7 @@ next_byte:
                     case 2:
                         r1 = regpairmap(OR2_HL, m);
                         gen_movw_v_reg(cpu_T[0], r1);
-                        gen_op_jmp_T0();
+                        gen_helper_jmp_T0();
                         zprintf("jp %s\n", regpairnames[r1]);
                         gen_eob(s);
                         s->is_jmp = 3;
@@ -1195,11 +1199,11 @@ next_byte:
                     zprintf("ex de,hl\n");
                     break;
                 case 6:
-                    gen_op_di();
+                    gen_helper_di();
                     zprintf("di\n");
                     break;
                 case 7:
-                    gen_op_ei();
+                    gen_helper_ei();
                     zprintf("ei\n");
 //                  gen_eob(s);
 //                  s->is_ei = 1;
@@ -1258,7 +1262,7 @@ next_byte:
                 n = ldub_code(s->pc);
                 s->pc++;
                 tcg_gen_movi_tl(cpu_T[0], n);
-                gen_op_alu[y](); /* places output in A */
+                gen_alu[y](); /* places output in A */
                 zprintf("%s$%02x\n", alu[y], n);
                 break;
 
@@ -1308,7 +1312,7 @@ next_byte:
         switch (x) {
         case 0:
             /* TODO: TST instead of SLL for R800 */
-            gen_op_rot_T0[y]();
+            gen_rot_T0[y]();
             if (m != MODE_NORMAL) {
                 gen_movb_idx_v(r1, cpu_T[0], d);
                 if (z != 6) {
@@ -1320,7 +1324,7 @@ next_byte:
             zprintf("%s %s\n", rot[y], regnames[r1]);
             break;
         case 1:
-            gen_op_bit_T0(1 << y);
+            gen_helper_bit_T0(tcg_const_tl(1 << y));
             zprintf("bit %i,%s\n", y, regnames[r1]);
             break;
         case 2:
@@ -1376,7 +1380,7 @@ next_byte:
                     /* does mulub work with r1 == h, l, (hl) or a? */
                     r1 = regmap(reg[y], m);
                     gen_movb_v_reg(cpu_T[0], r1);
-                    gen_op_mulub_cc();
+                    gen_helper_mulub_cc();
                     zprintf("mulub a,%s\n", regnames[r1]);
                     break;
                 case 3:
@@ -1385,7 +1389,7 @@ next_byte:
                         /* what is the effect of DD/FD prefixes here? */
                         r1 = regpairmap(regpair[p], m);
                         gen_movw_v_reg(cpu_T[0], r1);
-                        gen_op_muluw_cc();
+                        gen_helper_muluw_cc();
                         zprintf("muluw hl,%s\n", regpairnames[r1]);
                     } else {
                         zprintf("nop\n");
@@ -1430,10 +1434,10 @@ next_byte:
                 gen_movw_v_reg(cpu_T[1], r2);
                 if (q == 0) {
                     zprintf("sbc %s,%s\n", regpairnames[r1], regpairnames[r2]);
-                    gen_op_sbcw_T0_T1_cc();
+                    gen_helper_sbcw_T0_T1_cc();
                 } else {
                     zprintf("adc %s,%s\n", regpairnames[r1], regpairnames[r2]);
-                    gen_op_adcw_T0_T1_cc();
+                    gen_helper_adcw_T0_T1_cc();
                 }
                 gen_movw_reg_v(r1, cpu_T[0]);
                 break;
@@ -1455,13 +1459,13 @@ next_byte:
                 break;
             case 4:
                 zprintf("neg\n");
-                gen_op_neg_cc();
+                gen_helper_neg_cc();
                 break;
             case 5:
                 /* FIXME */
                 gen_popw(cpu_T[0]);
-                gen_op_jmp_T0();
-                gen_op_ri();
+                gen_helper_jmp_T0();
+                gen_helper_ri();
                 if (q == 0) {
                     zprintf("retn\n");
                 } else {
@@ -1472,7 +1476,7 @@ next_byte:
 //              s->is_ei = 1;
                 break;
             case 6:
-                gen_op_imode(imode[y]);
+                gen_helper_imode(tcg_const_tl(imode[y]));
                 zprintf("im im[%i]\n", imode[y]);
 //              gen_eob(s);
 //              s->is_ei = 1;
@@ -1480,30 +1484,30 @@ next_byte:
             case 7:
                 switch (y) {
                 case 0:
-                    gen_op_ld_I_A();
+                    gen_helper_ld_I_A();
                     zprintf("ld i,a\n");
                     break;
                 case 1:
-                    gen_op_ld_R_A();
+                    gen_helper_ld_R_A();
                     zprintf("ld r,a\n");
                     break;
                 case 2:
-                    gen_op_ld_A_I();
+                    gen_helper_ld_A_I();
                     zprintf("ld a,i\n");
                     break;
                 case 3:
-                    gen_op_ld_A_R();
+                    gen_helper_ld_A_R();
                     zprintf("ld a,r\n");
                     break;
                 case 4:
                     gen_movb_v_HLmem(cpu_T[0]);
-                    gen_op_rrd_cc();
+                    gen_helper_rrd_cc();
                     gen_movb_HLmem_v(cpu_T[0]);
                     zprintf("rrd\n");
                     break;
                 case 5:
                     gen_movb_v_HLmem(cpu_T[0]);
-                    gen_op_rld_cc();
+                    gen_helper_rld_cc();
                     gen_movb_HLmem_v(cpu_T[0]);
                     zprintf("rld\n");
                     break;
@@ -1528,12 +1532,12 @@ next_byte:
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
 
                     if (!(y & 1)) {
-                        gen_op_bli_ld_inc_cc();
+                        gen_helper_bli_ld_inc_cc();
                     } else {
-                        gen_op_bli_ld_dec_cc();
+                        gen_helper_bli_ld_dec_cc();
                     }
                     if ((y & 2)) {
-                        gen_op_bli_ld_rep(s->pc);
+                        gen_helper_bli_ld_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
                     }
@@ -1542,15 +1546,15 @@ next_byte:
                 case 1: /* cpi/cpd/cpir/cpdr */
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
-                    gen_op_bli_cp_cc();
+                    gen_helper_bli_cp_cc();
 
                     if (!(y & 1)) {
-                        gen_op_bli_cp_inc_cc();
+                        gen_helper_bli_cp_inc_cc();
                     } else {
-                        gen_op_bli_cp_dec_cc();
+                        gen_helper_bli_cp_dec_cc();
                     }
                     if ((y & 2)) {
-                        gen_op_bli_cp_rep(s->pc);
+                        gen_helper_bli_cp_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
                     }
@@ -1561,12 +1565,12 @@ next_byte:
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1)) {
-                        gen_op_bli_io_inc();
+                        gen_helper_bli_io_inc();
                     } else {
-                        gen_op_bli_io_dec();
+                        gen_helper_bli_io_dec();
                     }
                     if ((y & 2)) {
-                        gen_op_bli_io_rep(s->pc);
+                        gen_helper_bli_io_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
                     }
@@ -1577,12 +1581,12 @@ next_byte:
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_helper_out_T0_bc();
                     if (!(y & 1)) {
-                        gen_op_bli_io_inc();
+                        gen_helper_bli_io_inc();
                     } else {
-                        gen_op_bli_io_dec();
+                        gen_helper_bli_io_dec();
                     }
                     if ((y & 2)) {
-                        gen_op_bli_io_rep(s->pc);
+                        gen_helper_bli_io_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
                     }

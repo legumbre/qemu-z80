@@ -1371,10 +1371,8 @@ case "$target_cpu" in
   ;;
   z80)
     echo "TARGET_ARCH=z80" >> $config_mak
-    echo "CONFIG_DYNGEN_OP=yes" >> $config_mak
     echo "#define TARGET_ARCH \"z80\"" >> $config_h
     echo "#define TARGET_Z80 1" >> $config_h
-    echo "#define CONFIG_DYNGEN_OP 1" >> $config_h
   ;;
   *)
     echo "Unsupported target CPU"
