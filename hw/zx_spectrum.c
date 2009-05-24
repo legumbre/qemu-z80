@@ -34,9 +34,6 @@
 #include <libspectrum.h>
 #endif
 
-/* output Bochs bios info messages */
-//#define DEBUG_BIOS
-
 #define ROM_FILENAME "zx-rom.bin"
 
 //#define DEBUG_ZX_SPECTRUM

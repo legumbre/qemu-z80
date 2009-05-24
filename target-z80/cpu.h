@@ -254,8 +254,6 @@ static inline int cpu_mmu_index (CPUState *env)
     return 0;
 }
 
-void optimize_flags_init(void);
-
 #include "cpu-all.h"
 
 #endif /* CPU_Z80_H */

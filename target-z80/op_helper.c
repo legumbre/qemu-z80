@@ -19,8 +19,6 @@
  */
 #include "exec.h"
 
-//#define DEBUG_PCALL
-
 const uint8_t parity_table[256] = {
     CC_P, 0, 0, CC_P, 0, CC_P, CC_P, 0,
     0, CC_P, CC_P, 0, CC_P, 0, 0, CC_P,
