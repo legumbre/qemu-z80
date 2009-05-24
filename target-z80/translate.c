@@ -92,7 +92,7 @@ enum {
     OR_IYmem,
 };
 
-char *regnames[] = {
+static const char *const regnames[] = {
     [OR_B]     = "b",
     [OR_C]     = "c",
     [OR_D]     = "d",
@@ -112,7 +112,7 @@ char *regnames[] = {
     [OR_IYmem] = "(iy+d)",
 };
 
-char *idxnames[] = {
+static const char *const idxnames[] = {
     [OR_IXmem] = "ix",
     [OR_IYmem] = "iy",
 };
@@ -233,7 +233,7 @@ static inline void gen_movb_HLmem_v(TCGv v)
     tcg_temp_free(addr);
 }
 
-static gen_mov_func *gen_movb_v_reg_tbl[] = {
+static gen_mov_func *const gen_movb_v_reg_tbl[] = {
     [OR_B]     = gen_movb_v_B,
     [OR_C]     = gen_movb_v_C,
     [OR_D]     = gen_movb_v_D,
@@ -255,12 +255,12 @@ static inline void gen_movb_v_reg(TCGv v, int reg)
     gen_movb_v_reg_tbl[reg](v);
 }
 
-static GenOpFunc1 *gen_op_movb_T0_idx[] = {
+static GenOpFunc1 *const gen_op_movb_T0_idx[] = {
     [OR_IXmem] = gen_op_movb_T0_IXmem,
     [OR_IYmem] = gen_op_movb_T0_IYmem,
 };
 
-static gen_mov_func *gen_movb_reg_v_tbl[] = {
+static gen_mov_func *const gen_movb_reg_v_tbl[] = {
     [OR_B]     = gen_movb_B_v,
     [OR_C]     = gen_movb_C_v,
     [OR_D]     = gen_movb_D_v,
@@ -282,7 +282,7 @@ static inline void gen_movb_reg_v(int reg, TCGv v)
     gen_movb_reg_v_tbl[reg](v);
 }
 
-static GenOpFunc1 *gen_op_movb_idx_T0[] = {
+static GenOpFunc1 *const gen_op_movb_idx_T0[] = {
     [OR_IXmem] = gen_op_movb_IXmem_T0,
     [OR_IYmem] = gen_op_movb_IYmem_T0,
 };
@@ -327,7 +327,7 @@ static inline int is_indexed(int reg)
     }
 }
 
-int reg[8] = {
+static const int reg[8] = {
     OR_B,
     OR_C,
     OR_D,
@@ -355,7 +355,7 @@ enum {
     OR2_HLX,
 };
 
-char *regpairnames[] = {
+static const char *const regpairnames[] = {
     [OR2_AF]  = "af",
     [OR2_BC]  = "bc",
     [OR2_DE]  = "de",
@@ -371,7 +371,7 @@ char *regpairnames[] = {
     [OR2_HLX] = "hlx",
 };
 
-static gen_mov_func *gen_movw_v_reg_tbl[] = {
+static gen_mov_func *const gen_movw_v_reg_tbl[] = {
     [OR2_AF]  = gen_movw_v_AF,
     [OR2_BC]  = gen_movw_v_BC,
     [OR2_DE]  = gen_movw_v_DE,
@@ -392,7 +392,7 @@ static inline void gen_movw_v_reg(TCGv v, int regpair)
     gen_movw_v_reg_tbl[regpair](v);
 }
 
-static gen_mov_func *gen_movw_reg_v_tbl[] = {
+static gen_mov_func *const gen_movw_reg_v_tbl[] = {
     [OR2_AF]  = gen_movw_AF_v,
     [OR2_BC]  = gen_movw_BC_v,
     [OR2_DE]  = gen_movw_DE_v,
@@ -431,14 +431,14 @@ static inline int regpairmap(int regpair, int m)
     }
 }
 
-int regpair[4] = {
+static const int regpair[4] = {
     OR2_BC,
     OR2_DE,
     OR2_HL,
     OR2_SP,
 };
 
-int regpair2[4] = {
+static const int regpair2[4] = {
     OR2_BC,
     OR2_DE,
     OR2_HL,
@@ -488,7 +488,7 @@ static void gen_exception(DisasContext *s, int trapno, target_ulong cur_pc)
 
 /* Conditions */
 
-char *cc[8] = {
+static const char *const cc[8] = {
     "nz",
     "z",
     "nc",
@@ -510,7 +510,7 @@ enum {
     COND_M,
 };
 
-int cc_flags[4] = {
+static const int cc_flags[4] = {
     CC_Z,
     CC_C,
     CC_P,
@@ -519,7 +519,7 @@ int cc_flags[4] = {
 
 /* Arithmetic/logic operations */
 
-char *alu[8] = {
+static const char *const alu[8] = {
     "add a,",
     "adc a,",
     "sub ",
@@ -530,7 +530,7 @@ char *alu[8] = {
     "cp ",
 };
 
-static GenOpFunc *gen_op_alu[8] = {
+static GenOpFunc *const gen_op_alu[8] = {
     gen_op_add_cc,
     gen_op_adc_cc,
     gen_op_sub_cc,
@@ -543,7 +543,7 @@ static GenOpFunc *gen_op_alu[8] = {
 
 /* Rotation/shift operations */
 
-char *rot[8] = {
+static const char *const rot[8] = {
     "rlc",
     "rrc",
     "rl",
@@ -554,7 +554,7 @@ char *rot[8] = {
     "srl",
 };
 
-static GenOpFunc *gen_op_rot_T0[8] = {
+static GenOpFunc *const gen_op_rot_T0[8] = {
     gen_op_rlc_T0_cc,
     gen_op_rrc_T0_cc,
     gen_op_rl_T0_cc,
@@ -567,14 +567,14 @@ static GenOpFunc *gen_op_rot_T0[8] = {
 
 /* Block instructions */
 
-char *bli[4][4] = {
+static const char *const bli[4][4] = {
     { "ldi",  "cpi",  "ini",  "outi", },
     { "ldd",  "cpd",  "ind",  "outd", },
     { "ldir", "cpir", "inir", "otir", },
     { "lddr", "cpdr", "indr", "otdr", },
 };
 
-int imode[8] = {
+static const int imode[8] = {
     0, 0, 1, 2, 0, 0, 1, 2,
 };
 
