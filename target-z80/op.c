@@ -53,21 +53,6 @@ void OPPROTO op_reset_inhibit_irq(void)
 
 /* Loads/stores */
 
-void OPPROTO op_mov_T0_im(void)
-{
-    T0 = (uint16_t)PARAM1;
-}
-
-void OPPROTO op_mov_T1_im(void)
-{
-    T0 = (uint16_t)PARAM1;
-}
-
-void OPPROTO op_mov_A0_im(void)
-{
-    A0 = (uint16_t)PARAM1;
-}
-
 void OPPROTO op_movb_T0_IXmem(void)
 {
     A0 = (uint16_t)(IX + PARAM1);

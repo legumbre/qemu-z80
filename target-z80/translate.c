@@ -628,7 +628,7 @@ static inline void gen_callcc(DisasContext *s, int cc,
     gen_goto_tb(s, 0, next_pc);
 
     gen_set_label(l1);
-    gen_op_mov_T0_im(next_pc);
+    tcg_gen_movi_tl(cpu_T[0], next_pc);
     gen_op_pushw_T0();
     gen_goto_tb(s, 1, val);
 
@@ -763,7 +763,7 @@ next_byte:
                 case 0:
                     n = lduw_code(s->pc);
                     s->pc += 2;
-                    gen_op_mov_T0_im(n);
+                    tcg_gen_movi_tl(cpu_T[0], n);
                     r1 = regpairmap(regpair[p], m);
                     gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("ld %s,$%04x\n", regpairnames[r1], n);
@@ -801,7 +801,7 @@ next_byte:
                         s->pc += 2;
                         r1 = regpairmap(OR2_HL, m);
                         gen_movw_v_reg(cpu_T[0], r1);
-                        gen_op_mov_A0_im(n);
+                        tcg_gen_movi_i32(cpu_A0, n);
                         tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),%s\n", n, regpairnames[r1]);
                         break;
@@ -809,7 +809,7 @@ next_byte:
                         n = lduw_code(s->pc);
                         s->pc += 2;
                         gen_movb_v_A(cpu_T[0]);
-                        gen_op_mov_A0_im(n);
+                        tcg_gen_movi_i32(cpu_A0, n);
                         tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                         zprintf("ld ($%04x),a\n", n);
                         break;
@@ -833,7 +833,7 @@ next_byte:
                         n = lduw_code(s->pc);
                         s->pc += 2;
                         r1 = regpairmap(OR2_HL, m);
-                        gen_op_mov_A0_im(n);
+                        tcg_gen_movi_i32(cpu_A0, n);
                         tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
                         gen_movw_reg_v(r1, cpu_T[0]);
                         zprintf("ld %s,($%04x)\n", regpairnames[r1], n);
@@ -841,7 +841,7 @@ next_byte:
                     case 3:
                         n = lduw_code(s->pc);
                         s->pc += 2;
-                        gen_op_mov_A0_im(n);
+                        tcg_gen_movi_i32(cpu_A0, n);
                         tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
                         gen_movb_A_v(cpu_T[0]);
                         zprintf("ld a,($%04x)\n", n);
@@ -922,7 +922,7 @@ next_byte:
                 }
                 n = ldub_code(s->pc);
                 s->pc++;
-                gen_op_mov_T0_im(n);
+                tcg_gen_movi_tl(cpu_T[0], n);
                 if (is_indexed(r1)) {
                     gen_op_movb_idx_T0[r1](d);
                 } else {
@@ -1162,7 +1162,7 @@ next_byte:
                     case 0:
                         n = lduw_code(s->pc);
                         s->pc += 2;
-                        gen_op_mov_T0_im(s->pc);
+                        tcg_gen_movi_tl(cpu_T[0], s->pc);
                         gen_op_pushw_T0();
                         gen_jmp_im(n);
                         zprintf("call $%04x\n", n);
@@ -1192,13 +1192,13 @@ next_byte:
             case 6:
                 n = ldub_code(s->pc);
                 s->pc++;
-                gen_op_mov_T0_im(n);
+                tcg_gen_movi_tl(cpu_T[0], n);
                 gen_op_alu[y](); /* places output in A */
                 zprintf("%s$%02x\n", alu[y], n);
                 break;
 
             case 7:
-                gen_op_mov_T0_im(s->pc);
+                tcg_gen_movi_tl(cpu_T[0], s->pc);
                 gen_op_pushw_T0();
                 gen_jmp_im(y*8);
                 zprintf("rst $%02x\n", y*8);
@@ -1353,7 +1353,7 @@ next_byte:
                     gen_movb_v_reg(cpu_T[0], r1);
                     zprintf("out (c),%s\n", regnames[r1]);
                 } else {
-                    gen_op_mov_T0_im(0);
+                    tcg_gen_movi_tl(cpu_T[0], 0);
                     zprintf("out (c),0\n");
                 }
                 gen_op_out_T0_bc();
@@ -1378,11 +1378,11 @@ next_byte:
                 r1 = regpairmap(regpair[p], m);
                 if (q == 0) {
                     gen_movw_v_reg(cpu_T[0], r1);
-                    gen_op_mov_A0_im(n);
+                    tcg_gen_movi_i32(cpu_A0, n);
                     tcg_gen_qemu_st16(cpu_T[0], cpu_A0, MEM_INDEX);
                     zprintf("ld ($%02x),%s\n", n, regpairnames[r1]);
                 } else {
-                    gen_op_mov_A0_im(n);
+                    tcg_gen_movi_i32(cpu_A0, n);
                     tcg_gen_qemu_ld16u(cpu_T[0], cpu_A0, MEM_INDEX);
                     gen_movw_reg_v(r1, cpu_T[0]);
                     zprintf("ld %s,($%02x)\n", regpairnames[r1], n);
