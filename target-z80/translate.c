@@ -531,7 +531,7 @@ static void gen_debug(DisasContext *s, target_ulong cur_pc)
         gen_op_set_cc_op(s->cc_op);
     }
     gen_jmp_im(cur_pc);
-    gen_op_debug();
+    gen_helper_debug();
     s->is_jmp = 3;
 }
 
@@ -541,10 +541,10 @@ static void gen_eob(DisasContext *s)
         gen_op_set_cc_op(s->cc_op);
     }
     if (s->tb->flags & HF_INHIBIT_IRQ_MASK) {
-        gen_op_reset_inhibit_irq();
+        gen_helper_reset_inhibit_irq();
     }
     if (s->singlestep_enabled) {
-        gen_op_debug();
+        gen_helper_debug();
     } else {
         tcg_gen_exit_tb(0);
     }
@@ -557,7 +557,7 @@ static void gen_exception(DisasContext *s, int trapno, target_ulong cur_pc)
         gen_op_set_cc_op(s->cc_op);
     }
     gen_jmp_im(cur_pc);
-    gen_op_raise_exception(trapno);
+    gen_helper_raise_exception(trapno);
     s->is_jmp = 3;
 }
 

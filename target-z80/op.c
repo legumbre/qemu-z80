@@ -26,29 +26,6 @@ void OPPROTO op_movl_pc_im(void)
     PC = (uint16_t)PARAM1;
 }
 
-void OPPROTO op_debug(void)
-{
-    env->exception_index = EXCP_DEBUG;
-    cpu_loop_exit();
-}
-
-void OPPROTO op_raise_exception(void)
-{
-    int exception_index;
-    exception_index = PARAM1;
-    raise_exception(exception_index);
-}
-
-void OPPROTO op_set_inhibit_irq(void)
-{
-    env->hflags |= HF_INHIBIT_IRQ_MASK;
-}
-
-void OPPROTO op_reset_inhibit_irq(void)
-{
-    env->hflags &= ~HF_INHIBIT_IRQ_MASK;
-}
-
 /************ Z80 MICRO-OPS ***********/
 
 /* Misc */

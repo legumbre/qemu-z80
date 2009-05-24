@@ -19,6 +19,11 @@ static inline void gen_helper_##name(TCGv arg1) \
 #define HELPER(x) glue(helper_,x)
 #endif
 
+DEF_HELPER_0_0(debug, void, (void))
+DEF_HELPER_0_1(raise_exception, void, (int))
+DEF_HELPER_0_0(set_inhibit_irq, void, (void))
+DEF_HELPER_0_0(reset_inhibit_irq, void, (void))
+
 DEF_HELPER_0_0(halt, void, (void))
 DEF_HELPER_0_1(in_T0_im, void, (uint32_t))
 DEF_HELPER_0_0(in_T0_bc_cc, void, (void))

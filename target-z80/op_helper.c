@@ -149,6 +149,29 @@ void raise_exception(int exception_index)
     raise_interrupt(exception_index, 0, 0, 0);
 }
 
+void HELPER(debug)(void)
+{
+    env->exception_index = EXCP_DEBUG;
+    cpu_loop_exit();
+}
+
+void HELPER(raise_exception)(int exception_index)
+{
+    raise_exception(exception_index);
+}
+
+void HELPER(set_inhibit_irq)(void)
+{
+    env->hflags |= HF_INHIBIT_IRQ_MASK;
+}
+
+void HELPER(reset_inhibit_irq)(void)
+{
+    env->hflags &= ~HF_INHIBIT_IRQ_MASK;
+}
+
+/* instruction-specific helpers */
+
 void HELPER(halt)(void)
 {
     //printf("halting at PC 0x%x\n",env->pc);
