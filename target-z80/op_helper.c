@@ -186,18 +186,9 @@ void HELPER(out_T0_bc)(void)
     cpu_outb(env, BC, T0);
 }
 
-void helper_monitor(void)
-{
-}
-
-void helper_mwait(void)
-{
-}
-
 #if !defined(CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
-#define GETPC() (__builtin_return_address(0))
 
 #define SHIFT 0
 #include "softmmu_template.h"
