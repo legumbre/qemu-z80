@@ -32,6 +32,7 @@
 
 typedef struct {
     DisplayState *ds;
+    QEMUConsole *console;
     uint8_t *vram_ptr;
     unsigned long vram_offset;
 
@@ -251,7 +252,7 @@ static void zx_update_display(void *opaque)
 
     if (s->ds->width != s->twidth ||
         s->ds->height != s->theight) {
-        dpy_resize(s->ds, s->twidth, s->theight);
+        qemu_console_resize(s->console, s->twidth, s->theight);
         s->invalidate = 1;
         s->prevborder = -1;
     }
@@ -323,9 +324,10 @@ void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
 //    s->vram_ptr = zx_screen_base;
 //    s->vram_offset = ula_ram_offset;
 
-    graphic_console_init(ds, zx_update_display,
-                         zx_invalidate_display,
-                         NULL, NULL, s);
+    s->console = graphic_console_init(ds, zx_update_display,
+                                      zx_invalidate_display,
+                                      NULL, NULL, s);
+    qemu_console_resize(s->console, s->twidth, s->theight);
 
     s->bwidth = 32;
     s->bheight = 24;
@@ -335,7 +337,6 @@ void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
     s->theight = s->sheight + s->bheight * 2;
     s->border = 0;
     s->flash = 0;
-    dpy_resize(s->ds, s->twidth, s->theight);
 
     s->vram_ptr = phys_ram_base;//+ zx_io_memory;
     s->vram_offset = 0;//zx_io_memory;
