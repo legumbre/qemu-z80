@@ -248,6 +248,15 @@ static inline int cpu_mmu_index (CPUState *env)
 static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
 {
     env->pc = tb->pc;
+    env->hflags = tb->flags;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->pc;
+    *cs_base = 0;
+    *flags = env->hflags;
 }
 
 #endif /* CPU_Z80_H */

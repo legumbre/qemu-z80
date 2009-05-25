@@ -1677,6 +1677,10 @@ void z80_translate_init(void)
     cpu_T[1] = tcg_global_reg_new_i32(TCG_AREG2, "T1");
     cpu_T[2] = tcg_global_reg_new_i32(TCG_AREG3, "T2");
 #endif
+
+    /* register helpers */
+#define GEN_HELPER 2
+#include "helper.h"
 }
 
 /* generate intermediate code in gen_opc_buf and gen_opparam_buf for
@@ -1689,6 +1693,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     DisasContext dc1, *dc = &dc1;
     target_ulong pc_ptr;
     uint16_t *gen_opc_end;
+    CPUBreakpoint *bp;
     int flags, j, lj, cflags;
     target_ulong pc_start;
     target_ulong cs_base;
@@ -1729,9 +1734,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
 
     gen_icount_start();
     for (;;) {
-        if (env->nb_breakpoints > 0) {
-            for (j = 0; j < env->nb_breakpoints; j++) {
-                if (env->breakpoints[j] == pc_ptr) {
+        if (env->breakpoints > 0) {
+            for (bp = env->breakpoints; bp != NULL; bp = bp->next) {
+                if (bp->pc == pc_ptr) {
                     gen_debug(dc, pc_ptr - dc->cs_base);
                     break;
                 }
