@@ -149,6 +149,7 @@ FreeBSD)
 bsd="yes"
 audio_drv_list="oss"
 audio_possible_drivers="oss sdl esd pa"
+aio_lib="-lpthread"
 if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
     kqemu="yes"
 fi
@@ -157,6 +158,8 @@ NetBSD)
 bsd="yes"
 audio_drv_list="oss"
 audio_possible_drivers="oss sdl esd"
+oss_lib="-lossaudio"
+aio_lib="-lrt -lpthread"
 ;;
 OpenBSD)
 bsd="yes"
@@ -164,6 +167,7 @@ openbsd="yes"
 audio_drv_list="oss"
 audio_possible_drivers="oss sdl esd"
 oss_lib="-lossaudio"
+aio_lib="-lpthread"
 ;;
 Darwin)
 bsd="yes"
@@ -174,6 +178,7 @@ audio_drv_list="coreaudio"
 audio_possible_drivers="coreaudio sdl fmod"
 OS_CFLAGS="-mdynamic-no-pic"
 OS_LDFLAGS="-framework CoreFoundation -framework IOKit"
+aio_lib="-lpthread"
 ;;
 SunOS)
     solaris="yes"
@@ -217,6 +222,7 @@ audio_drv_list="oss"
 audio_possible_drivers="oss alsa sdl esd pa"
 linux="yes"
 linux_user="yes"
+usb="linux"
 if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
     kqemu="yes"
     audio_possible_drivers="$audio_possible_drivers fmod"
@@ -227,6 +233,7 @@ esac
 if [ "$bsd" = "yes" ] ; then
   if [ "$darwin" != "yes" ] ; then
     make="gmake"
+    usb="bsd"
   fi
   bsd_user="yes"
 fi
@@ -526,7 +533,7 @@ fi
 if [ "$darwin" = "yes" -o "$mingw32" = "yes" ] ; then
     AIOLIBS=
 elif [ "$bsd" = "yes" ]; then
-    AIOLIBS="-lpthread"
+    AIOLIBS="$aio_lib"
 else
     # Some Linux architectures (e.g. s390) don't imply -lpthread automatically.
     AIOLIBS="-lrt -lpthread"
@@ -1369,6 +1376,19 @@ if [ "$bsd" = "yes" ] ; then
 fi
 
 echo "#define CONFIG_UNAME_RELEASE \"$uname_release\"" >> $config_h
+
+# USB host support
+case "$usb" in
+linux)
+  echo "HOST_USB=linux" >> $config_mak
+;;
+bsd)
+  echo "HOST_USB=bsd" >> $config_mak
+;;
+*)
+  echo "HOST_USB=stub" >> $config_mak
+;;
+esac
 
 tools=
 if test `expr "$target_list" : ".*softmmu.*"` != 0 ; then

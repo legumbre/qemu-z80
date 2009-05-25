@@ -54,14 +54,9 @@ register target_ulong T2 asm(AREG3);
 #define T1_64 T1
 #define T2_64 T2
 #endif
-/* Provision for Altivec */
-#define AVR0 (env->avr0)
-#define AVR1 (env->avr1)
-#define AVR2 (env->avr2)
 
 #define FT0 (env->ft0)
 #define FT1 (env->ft1)
-#define FT2 (env->ft2)
 
 #if defined (DEBUG_OP)
 # define RETURN() __asm__ __volatile__("nop" : : : "memory");
@@ -95,8 +90,8 @@ static always_inline target_ulong rotl64 (target_ulong i, int n)
 #include "softmmu_exec.h"
 #endif /* !defined(CONFIG_USER_ONLY) */
 
-void do_raise_exception_err (uint32_t exception, int error_code);
-void do_raise_exception (uint32_t exception);
+void raise_exception_err (CPUState *env, int exception, int error_code);
+void raise_exception (CPUState *env, int exception);
 
 int get_physical_address (CPUState *env, mmu_ctx_t *ctx, target_ulong vaddr,
                           int rw, int access_type);
