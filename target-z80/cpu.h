@@ -175,8 +175,6 @@ typedef struct CPUZ80State {
     target_ulong exception_next_pc;
     target_ulong dr[8]; /* debug registers */
     uint32_t smbase;
-    int interrupt_request;
-    int user_mode_only; /* user mode only simulation */
 
     CPU_COMMON
 
