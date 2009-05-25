@@ -341,11 +341,11 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
         int i;
         if (libspectrum_init() != LIBSPECTRUM_ERROR_NONE ||
             libspectrum_identify_file(&type, kernel_filename, NULL, 0) != LIBSPECTRUM_ERROR_NONE ||
-            libspectrum_identify_class(&cls, type) != LIBSPECTRUM_ERROR_NONE ||
-            libspectrum_snap_alloc(&snap) != LIBSPECTRUM_ERROR_NONE) {
+            libspectrum_identify_class(&cls, type) != LIBSPECTRUM_ERROR_NONE) {
             fprintf(stderr, "%s: libspectrum error\n", __FUNCTION__);
             exit(1);
         }
+        snap = libspectrum_snap_alloc();
         if (cls != LIBSPECTRUM_CLASS_SNAPSHOT) {
             fprintf(stderr, "%s: %s is not a snapshot\n", __FUNCTION__, kernel_filename);
             exit(1);
