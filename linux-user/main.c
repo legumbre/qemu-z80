@@ -23,6 +23,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include "qemu.h"
 #include "qemu-common.h"
@@ -107,10 +108,12 @@ int cpu_inl(CPUState *env, int addr)
     return 0;
 }
 
+#if defined(TARGET_I386)
 int cpu_get_pic_interrupt(CPUState *env)
 {
     return -1;
 }
+#endif
 
 /* timers for rdtsc */
 
@@ -276,13 +279,12 @@ static void write_dt(void *ptr, unsigned long addr, unsigned long limit,
     e2 = ((addr >> 16) & 0xff) | (addr & 0xff000000) | (limit & 0x000f0000);
     e2 |= flags;
     p = ptr;
-    p[0] = tswapl(e1);
-    p[1] = tswapl(e2);
+    p[0] = tswap32(e1);
+    p[1] = tswap32(e2);
 }
 
-#if TARGET_X86_64
-uint64_t idt_table[512];
-
+static uint64_t *idt_table;
+#ifdef TARGET_X86_64
 static void set_gate64(void *ptr, unsigned int type, unsigned int dpl,
                        uint64_t addr, unsigned int sel)
 {
@@ -301,8 +303,6 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 #else
-uint64_t idt_table[256];
-
 static void set_gate(void *ptr, unsigned int type, unsigned int dpl,
                      uint32_t addr, unsigned int sel)
 {
@@ -474,9 +474,6 @@ void cpu_loop(CPUX86State *env)
 #endif
 
 #ifdef TARGET_ARM
-
-/* XXX: find a better solution */
-extern void tb_invalidate_page_range(abi_ulong start, abi_ulong end);
 
 static void arm_cache_flush(abi_ulong start, abi_ulong last)
 {
@@ -709,10 +706,10 @@ void cpu_loop(CPUARMState *env)
             /* just indicate that signals should be handled asap */
             break;
         case EXCP_PREFETCH_ABORT:
-            addr = env->cp15.c6_data;
+            addr = env->cp15.c6_insn;
             goto do_segv;
         case EXCP_DATA_ABORT:
-            addr = env->cp15.c6_insn;
+            addr = env->cp15.c6_data;
             goto do_segv;
         do_segv:
             {
@@ -756,6 +753,7 @@ void cpu_loop(CPUARMState *env)
 #endif
 
 #ifdef TARGET_SPARC
+#define SPARC64_STACK_BIAS 2047
 
 //#define DEBUG_WIN
 
@@ -778,6 +776,10 @@ static inline void save_window_offset(CPUSPARCState *env, int cwp1)
     abi_ulong sp_ptr;
 
     sp_ptr = env->regbase[get_reg_index(env, cwp1, 6)];
+#ifdef TARGET_SPARC64
+    if (sp_ptr & 3)
+        sp_ptr += SPARC64_STACK_BIAS;
+#endif
 #if defined(DEBUG_WIN)
     printf("win_overflow: sp_ptr=0x" TARGET_ABI_FMT_lx " save_cwp=%d\n",
            sp_ptr, cwp1);
@@ -806,15 +808,24 @@ static void save_window(CPUSPARCState *env)
 
 static void restore_window(CPUSPARCState *env)
 {
-    unsigned int new_wim, i, cwp1;
+#ifndef TARGET_SPARC64
+    unsigned int new_wim;
+#endif
+    unsigned int i, cwp1;
     abi_ulong sp_ptr;
 
+#ifndef TARGET_SPARC64
     new_wim = ((env->wim << 1) | (env->wim >> (env->nwindows - 1))) &
         ((1LL << env->nwindows) - 1);
+#endif
 
     /* restore the invalid window */
     cwp1 = cpu_cwp_inc(env, env->cwp + 1);
     sp_ptr = env->regbase[get_reg_index(env, cwp1, 6)];
+#ifdef TARGET_SPARC64
+    if (sp_ptr & 3)
+        sp_ptr += SPARC64_STACK_BIAS;
+#endif
 #if defined(DEBUG_WIN)
     printf("win_underflow: sp_ptr=0x" TARGET_ABI_FMT_lx " load_cwp=%d\n",
            sp_ptr, cwp1);
@@ -824,12 +835,13 @@ static void restore_window(CPUSPARCState *env)
         get_user_ual(env->regbase[get_reg_index(env, cwp1, 8 + i)], sp_ptr);
         sp_ptr += sizeof(abi_ulong);
     }
-    env->wim = new_wim;
 #ifdef TARGET_SPARC64
     env->canrestore++;
     if (env->cleanwin < env->nwindows - 1)
         env->cleanwin++;
     env->cansave--;
+#else
+    env->wim = new_wim;
 #endif
 }
 
@@ -841,14 +853,23 @@ static void flush_windows(CPUSPARCState *env)
     for(;;) {
         /* if restore would invoke restore_window(), then we can stop */
         cwp1 = cpu_cwp_inc(env, env->cwp + offset);
+#ifndef TARGET_SPARC64
         if (env->wim & (1 << cwp1))
             break;
+#else
+        if (env->canrestore == 0)
+            break;
+        env->cansave++;
+        env->canrestore--;
+#endif
         save_window_offset(env, cwp1);
         offset++;
     }
-    /* set wim so that restore will reload the registers */
     cwp1 = cpu_cwp_inc(env, env->cwp + 1);
+#ifndef TARGET_SPARC64
+    /* set wim so that restore will reload the registers */
     env->wim = 1 << cwp1;
+#endif
 #if defined(DEBUG_WIN)
     printf("flush_windows: nb=%d\n", offset - 1);
 #endif
@@ -1262,20 +1283,6 @@ void cpu_loop(CPUPPCState *env)
             cpu_abort(env, "Instruction TLB exception while in user mode. "
                       "Aborting\n");
             break;
-        case POWERPC_EXCP_DEBUG:    /* Debug interrupt                       */
-            /* XXX: check this */
-            {
-                int sig;
-
-                sig = gdb_handlesig(env, TARGET_SIGTRAP);
-                if (sig) {
-                    info.si_signo = sig;
-                    info.si_errno = 0;
-                    info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(env, info.si_signo, &info);
-                  }
-            }
-            break;
         case POWERPC_EXCP_SPEU:     /* SPE/embedded floating-point unavail.  */
             EXCP_DUMP(env, "No SPE/floating-point instruction allowed\n");
             info.si_signo = TARGET_SIGILL;
@@ -1431,6 +1438,19 @@ void cpu_loop(CPUPPCState *env)
 #if 0
             printf("syscall returned 0x%08x (%d)\n", ret, ret);
 #endif
+            break;
+        case EXCP_DEBUG:
+            {
+                int sig;
+
+                sig = gdb_handlesig(env, TARGET_SIGTRAP);
+                if (sig) {
+                    info.si_signo = sig;
+                    info.si_errno = 0;
+                    info.si_code = TARGET_TRAP_BRKPT;
+                    queue_signal(env, info.si_signo, &info);
+                  }
+            }
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -1864,6 +1884,7 @@ void cpu_loop (CPUState *env)
 
         switch (trapnr) {
         case 0x160:
+            env->pc += 2;
             ret = do_syscall(env,
                              env->gregs[3],
                              env->gregs[4],
@@ -1873,7 +1894,6 @@ void cpu_loop (CPUState *env)
                              env->gregs[0],
                              env->gregs[1]);
             env->gregs[0] = ret;
-            env->pc += 2;
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -1943,7 +1963,6 @@ void cpu_loop (CPUState *env)
                              env->pregs[7], 
                              env->pregs[11]);
             env->regs[10] = ret;
-            env->pc += 2;
             break;
         case EXCP_DEBUG:
             {
@@ -2120,7 +2139,6 @@ void cpu_loop (CPUState *env)
             exit(1);
             break;
         case EXCP_CALL_PAL ... (EXCP_CALL_PALP - 1):
-            fprintf(stderr, "Call to PALcode\n");
             call_pal(env, (trapnr >> 6) | 0x80);
             break;
         case EXCP_CALL_PALP ... (EXCP_CALL_PALE - 1):
@@ -2151,7 +2169,7 @@ void cpu_loop (CPUState *env)
 }
 #endif /* TARGET_ALPHA */
 
-void usage(void)
+static void usage(void)
 {
     printf("qemu-" TARGET_ARCH " version " QEMU_VERSION ", Copyright (c) 2003-2008 Fabrice Bellard\n"
            "usage: qemu-" TARGET_ARCH " [options] program [arguments...]\n"
@@ -2230,7 +2248,7 @@ int main(int argc, char **argv)
             break;
         } else if (!strcmp(r, "d")) {
             int mask;
-            CPULogItem *item;
+            const CPULogItem *item;
 
 	    if (optind >= argc)
 		break;
@@ -2444,8 +2462,15 @@ int main(int argc, char **argv)
 #endif
 
     /* linux interrupt setup */
-    env->idt.base = h2g(idt_table);
-    env->idt.limit = sizeof(idt_table) - 1;
+#ifndef TARGET_ABI32
+    env->idt.limit = 511;
+#else
+    env->idt.limit = 255;
+#endif
+    env->idt.base = target_mmap(0, sizeof(uint64_t) * (env->idt.limit + 1),
+                                PROT_READ|PROT_WRITE,
+                                MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+    idt_table = g2h(env->idt.base);
     set_idt(0, 0);
     set_idt(1, 0);
     set_idt(2, 0);
@@ -2471,9 +2496,11 @@ int main(int argc, char **argv)
     /* linux segment setup */
     {
         uint64_t *gdt_table;
-        gdt_table = qemu_mallocz(sizeof(uint64_t) * TARGET_GDT_ENTRIES);
-        env->gdt.base = h2g((unsigned long)gdt_table);
+        env->gdt.base = target_mmap(0, sizeof(uint64_t) * TARGET_GDT_ENTRIES,
+                                    PROT_READ|PROT_WRITE,
+                                    MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
         env->gdt.limit = sizeof(uint64_t) * TARGET_GDT_ENTRIES - 1;
+        gdt_table = g2h(env->gdt.base);
 #ifdef TARGET_ABI32
         write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
                  DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |

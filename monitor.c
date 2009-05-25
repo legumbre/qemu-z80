@@ -36,13 +36,11 @@
 #include "disas.h"
 #include <dirent.h>
 #include "qemu-timer.h"
+#include "migration.h"
+#include "kvm.h"
 
 //#define DEBUG
 //#define DEBUG_COMPLETION
-
-#ifndef offsetof
-#define offsetof(type, field) ((size_t) &((type *)0)->field)
-#endif
 
 /*
  * Supported types:
@@ -61,7 +59,7 @@
 typedef struct term_cmd_t {
     const char *name;
     const char *args_type;
-    void (*handler)();
+    void *handler;
     const char *params;
     const char *help;
 } term_cmd_t;
@@ -70,15 +68,15 @@ typedef struct term_cmd_t {
 static CharDriverState *monitor_hd[MAX_MON];
 static int hide_banner;
 
-static term_cmd_t term_cmds[];
-static term_cmd_t info_cmds[];
+static const term_cmd_t term_cmds[];
+static const term_cmd_t info_cmds[];
 
 static uint8_t term_outbuf[1024];
 static int term_outbuf_index;
 
 static void monitor_start_input(void);
 
-CPUState *mon_cpu = NULL;
+static CPUState *mon_cpu = NULL;
 
 void term_flush(void)
 {
@@ -179,9 +177,9 @@ static int compare_cmd(const char *name, const char *list)
     return 0;
 }
 
-static void help_cmd1(term_cmd_t *cmds, const char *prefix, const char *name)
+static void help_cmd1(const term_cmd_t *cmds, const char *prefix, const char *name)
 {
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
 
     for(cmd = cmds; cmd->name != NULL; cmd++) {
         if (!name || !strcmp(name, cmd->name))
@@ -196,7 +194,7 @@ static void help_cmd(const char *name)
     } else {
         help_cmd1(term_cmds, "", name);
         if (name && !strcmp(name, "log")) {
-            CPULogItem *item;
+            const CPULogItem *item;
             term_printf("Log items (comma separated):\n");
             term_printf("%-10s %s\n", "none", "remove all logs");
             for(item = cpu_log_items; item->mask != 0; item++) {
@@ -225,7 +223,8 @@ static void do_commit(const char *device)
 
 static void do_info(const char *item)
 {
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
+    void (*handler)(void);
 
     if (!item)
         goto help;
@@ -237,7 +236,8 @@ static void do_info(const char *item)
     help_cmd("info");
     return;
  found:
-    cmd->handler();
+    handler = cmd->handler;
+    handler();
 }
 
 static void do_info_version(void)
@@ -249,6 +249,15 @@ static void do_info_name(void)
 {
     if (qemu_name)
         term_printf("%s\n", qemu_name);
+}
+
+static void do_info_uuid(void)
+{
+    term_printf(UUID_FMT "\n", qemu_uuid[0], qemu_uuid[1], qemu_uuid[2],
+            qemu_uuid[3], qemu_uuid[4], qemu_uuid[5], qemu_uuid[6],
+            qemu_uuid[7], qemu_uuid[8], qemu_uuid[9], qemu_uuid[10],
+            qemu_uuid[11], qemu_uuid[12], qemu_uuid[13], qemu_uuid[14],
+            qemu_uuid[15]);
 }
 
 static void do_info_block(void)
@@ -596,7 +605,10 @@ static void memory_dump(int count, int format, int wsize,
             env = mon_get_cpu();
             if (!env)
                 break;
-            cpu_memory_rw_debug(env, addr, buf, l, 0);
+            if (cpu_memory_rw_debug(env, addr, buf, l, 0) < 0) {
+                term_printf(" Cannot access memory\n");
+                break;
+            }
         }
         i = 0;
         while (i < l) {
@@ -796,6 +808,8 @@ static const KeyDef key_defs[] = {
 
     { 0x38, "alt" },
     { 0xb8, "alt_r" },
+    { 0x64, "altgr" },
+    { 0xe4, "altgr_r" },
     { 0x1d, "ctrl" },
     { 0x9d, "ctrl_r" },
 
@@ -848,6 +862,9 @@ static const KeyDef key_defs[] = {
     { 0x30, "b" },
     { 0x31, "n" },
     { 0x32, "m" },
+    { 0x33, "comma" },
+    { 0x34, "dot" },
+    { 0x35, "slash" },
 
     { 0x37, "asterisk" },
 
@@ -1247,6 +1264,19 @@ static void do_info_kqemu(void)
 #endif
 }
 
+static void do_info_kvm(void)
+{
+#ifdef CONFIG_KVM
+    term_printf("kvm support: ");
+    if (kvm_enabled())
+	term_printf("enabled\n");
+    else
+	term_printf("disabled\n");
+#else
+    term_printf("kvm support: not compiled\n");
+#endif
+}
+
 #ifdef CONFIG_PROFILER
 
 int64_t kqemu_time;
@@ -1322,9 +1352,6 @@ static void do_stop_capture (int n)
 }
 
 #ifdef HAS_AUDIO
-int wav_start_capture (CaptureState *s, const char *path, int freq,
-                       int bits, int nchannels);
-
 static void do_wav_capture (const char *path,
                             int has_freq, int freq,
                             int has_bits, int bits,
@@ -1363,7 +1390,7 @@ static void do_inject_nmi(int cpu_index)
 }
 #endif
 
-static term_cmd_t term_cmds[] = {
+static const term_cmd_t term_cmds[] = {
     { "help|?", "s?", do_help,
       "[cmd]", "show the help" },
     { "commit", "s", do_commit,
@@ -1442,14 +1469,22 @@ static term_cmd_t term_cmds[] = {
     { "nmi", "i", do_inject_nmi,
       "cpu", "inject an NMI on the given CPU", },
 #endif
+    { "migrate", "-ds", do_migrate,
+      "[-d] uri", "migrate to URI (using -d to not wait for completion)" },
+    { "migrate_cancel", "", do_migrate_cancel,
+      "", "cancel the current VM migration" },
+    { "migrate_set_speed", "s", do_migrate_set_speed,
+      "value", "set maximum speed (in bytes) for migrations" },
     { NULL, NULL, },
 };
 
-static term_cmd_t info_cmds[] = {
+static const term_cmd_t info_cmds[] = {
     { "version", "", do_info_version,
       "", "show the version of qemu" },
     { "network", "", do_info_network,
       "", "show the network state" },
+    { "chardev", "", qemu_chr_info,
+      "", "show the character devices" },
     { "block", "", do_info_block,
       "", "show the block devices" },
     { "blockstats", "", do_info_blockstats,
@@ -1476,6 +1511,8 @@ static term_cmd_t info_cmds[] = {
       "", "show dynamic compiler info", },
     { "kqemu", "", do_info_kqemu,
       "", "show kqemu information", },
+    { "kvm", "", do_info_kvm,
+      "", "show kvm information", },
     { "usb", "", usb_info,
       "", "show guest USB devices", },
     { "usbhost", "", usb_host_info,
@@ -1494,6 +1531,8 @@ static term_cmd_t info_cmds[] = {
       "", "show the vnc server status"},
     { "name", "", do_info_name,
       "", "show the current VM name" },
+    { "uuid", "", do_info_uuid,
+      "", "show the current VM UUID" },
 #if defined(TARGET_PPC)
     { "cpustats", "", do_info_cpu_stats,
       "", "show CPU statistics", },
@@ -1502,6 +1541,7 @@ static term_cmd_t info_cmds[] = {
     { "slirp", "", do_info_slirp,
       "", "show SLIRP statistics", },
 #endif
+    { "migrate", "", do_info_migrate, "", "show migration status" },
     { NULL, NULL, },
 };
 
@@ -1516,12 +1556,12 @@ static jmp_buf expr_env;
 typedef struct MonitorDef {
     const char *name;
     int offset;
-    target_long (*get_value)(struct MonitorDef *md, int val);
+    target_long (*get_value)(const struct MonitorDef *md, int val);
     int type;
 } MonitorDef;
 
 #if defined(TARGET_I386)
-static target_long monitor_get_pc (struct MonitorDef *md, int val)
+static target_long monitor_get_pc (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1531,7 +1571,7 @@ static target_long monitor_get_pc (struct MonitorDef *md, int val)
 #endif
 
 #if defined(TARGET_PPC)
-static target_long monitor_get_ccr (struct MonitorDef *md, int val)
+static target_long monitor_get_ccr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     unsigned int u;
@@ -1547,7 +1587,7 @@ static target_long monitor_get_ccr (struct MonitorDef *md, int val)
     return u;
 }
 
-static target_long monitor_get_msr (struct MonitorDef *md, int val)
+static target_long monitor_get_msr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1555,15 +1595,15 @@ static target_long monitor_get_msr (struct MonitorDef *md, int val)
     return env->msr;
 }
 
-static target_long monitor_get_xer (struct MonitorDef *md, int val)
+static target_long monitor_get_xer (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
         return 0;
-    return ppc_load_xer(env);
+    return env->xer;
 }
 
-static target_long monitor_get_decr (struct MonitorDef *md, int val)
+static target_long monitor_get_decr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1571,7 +1611,7 @@ static target_long monitor_get_decr (struct MonitorDef *md, int val)
     return cpu_ppc_load_decr(env);
 }
 
-static target_long monitor_get_tbu (struct MonitorDef *md, int val)
+static target_long monitor_get_tbu (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1579,7 +1619,7 @@ static target_long monitor_get_tbu (struct MonitorDef *md, int val)
     return cpu_ppc_load_tbu(env);
 }
 
-static target_long monitor_get_tbl (struct MonitorDef *md, int val)
+static target_long monitor_get_tbl (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1590,7 +1630,7 @@ static target_long monitor_get_tbl (struct MonitorDef *md, int val)
 
 #if defined(TARGET_SPARC)
 #ifndef TARGET_SPARC64
-static target_long monitor_get_psr (struct MonitorDef *md, int val)
+static target_long monitor_get_psr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1599,7 +1639,7 @@ static target_long monitor_get_psr (struct MonitorDef *md, int val)
 }
 #endif
 
-static target_long monitor_get_reg(struct MonitorDef *md, int val)
+static target_long monitor_get_reg(const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1608,7 +1648,7 @@ static target_long monitor_get_reg(struct MonitorDef *md, int val)
 }
 #endif
 
-static MonitorDef monitor_defs[] = {
+static const MonitorDef monitor_defs[] = {
 #ifdef TARGET_I386
 
 #define SEG(name, seg) \
@@ -1859,7 +1899,7 @@ static void expr_error(const char *fmt)
 /* return 0 if OK, -1 if not found, -2 if no CPU defined */
 static int get_monitor_def(target_long *pval, const char *name)
 {
-    MonitorDef *md;
+    const MonitorDef *md;
     void *ptr;
 
     for(md = monitor_defs; md->name != NULL; md++) {
@@ -1893,7 +1933,7 @@ static void next(void)
 {
     if (pch != '\0') {
         pch++;
-        while (isspace(*pch))
+        while (qemu_isspace(*pch))
             pch++;
     }
 }
@@ -1952,7 +1992,7 @@ static int64_t expr_unary(void)
                     *q++ = *pch;
                 pch++;
             }
-            while (isspace(*pch))
+            while (qemu_isspace(*pch))
                 pch++;
             *q = 0;
             ret = get_monitor_def(&reg, buf);
@@ -1977,7 +2017,7 @@ static int64_t expr_unary(void)
             expr_error("invalid char in expression");
         }
         pch = p;
-        while (isspace(*pch))
+        while (qemu_isspace(*pch))
             pch++;
         break;
     }
@@ -2071,7 +2111,7 @@ static int get_expr(int64_t *pval, const char **pp)
         *pp = pch;
         return -1;
     }
-    while (isspace(*pch))
+    while (qemu_isspace(*pch))
         pch++;
     *pval = expr_sum();
     *pp = pch;
@@ -2086,7 +2126,7 @@ static int get_str(char *buf, int buf_size, const char **pp)
 
     q = buf;
     p = *pp;
-    while (isspace(*p))
+    while (qemu_isspace(*p))
         p++;
     if (*p == '\0') {
     fail:
@@ -2131,7 +2171,7 @@ static int get_str(char *buf, int buf_size, const char **pp)
         }
         p++;
     } else {
-        while (*p != '\0' && !isspace(*p)) {
+        while (*p != '\0' && !qemu_isspace(*p)) {
             if ((q - buf) < buf_size - 1) {
                 *q++ = *p;
             }
@@ -2153,11 +2193,22 @@ static void monitor_handle_command(const char *cmdline)
     const char *p, *pstart, *typestr;
     char *q;
     int c, nb_args, len, i, has_arg;
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
     char cmdname[256];
     char buf[1024];
     void *str_allocated[MAX_ARGS];
     void *args[MAX_ARGS];
+    void (*handler_0)(void);
+    void (*handler_1)(void *arg0);
+    void (*handler_2)(void *arg0, void *arg1);
+    void (*handler_3)(void *arg0, void *arg1, void *arg2);
+    void (*handler_4)(void *arg0, void *arg1, void *arg2, void *arg3);
+    void (*handler_5)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4);
+    void (*handler_6)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4, void *arg5);
+    void (*handler_7)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4, void *arg5, void *arg6);
 
 #ifdef DEBUG
     term_printf("command='%s'\n", cmdline);
@@ -2166,12 +2217,12 @@ static void monitor_handle_command(const char *cmdline)
     /* extract the command name */
     p = cmdline;
     q = cmdname;
-    while (isspace(*p))
+    while (qemu_isspace(*p))
         p++;
     if (*p == '\0')
         return;
     pstart = p;
-    while (*p != '\0' && *p != '/' && !isspace(*p))
+    while (*p != '\0' && *p != '/' && !qemu_isspace(*p))
         p++;
     len = p - pstart;
     if (len > sizeof(cmdname) - 1)
@@ -2207,7 +2258,7 @@ static void monitor_handle_command(const char *cmdline)
                 int ret;
                 char *str;
 
-                while (isspace(*p))
+                while (qemu_isspace(*p))
                     p++;
                 if (*typestr == '?') {
                     typestr++;
@@ -2233,7 +2284,7 @@ static void monitor_handle_command(const char *cmdline)
                     goto fail;
                 }
                 str = qemu_malloc(strlen(buf) + 1);
-                strcpy(str, buf);
+                pstrcpy(str, sizeof(buf), buf);
                 str_allocated[nb_args] = str;
             add_str:
                 if (nb_args >= MAX_ARGS) {
@@ -2248,15 +2299,15 @@ static void monitor_handle_command(const char *cmdline)
             {
                 int count, format, size;
 
-                while (isspace(*p))
+                while (qemu_isspace(*p))
                     p++;
                 if (*p == '/') {
                     /* format found */
                     p++;
                     count = 1;
-                    if (isdigit(*p)) {
+                    if (qemu_isdigit(*p)) {
                         count = 0;
-                        while (isdigit(*p)) {
+                        while (qemu_isdigit(*p)) {
                             count = count * 10 + (*p - '0');
                             p++;
                         }
@@ -2295,7 +2346,7 @@ static void monitor_handle_command(const char *cmdline)
                         }
                     }
                 next:
-                    if (*p != '\0' && !isspace(*p)) {
+                    if (*p != '\0' && !qemu_isspace(*p)) {
                         term_printf("invalid char in format: '%c'\n", *p);
                         goto fail;
                     }
@@ -2305,8 +2356,8 @@ static void monitor_handle_command(const char *cmdline)
                         /* for 'i', not specifying a size gives -1 as size */
                         if (size < 0)
                             size = default_fmt_size;
+                        default_fmt_size = size;
                     }
-                    default_fmt_size = size;
                     default_fmt_format = format;
                 } else {
                     count = 1;
@@ -2329,7 +2380,7 @@ static void monitor_handle_command(const char *cmdline)
             {
                 int64_t val;
 
-                while (isspace(*p))
+                while (qemu_isspace(*p))
                     p++;
                 if (*typestr == '?' || *typestr == '.') {
                     if (*typestr == '?') {
@@ -2340,7 +2391,7 @@ static void monitor_handle_command(const char *cmdline)
                     } else {
                         if (*p == '.') {
                             p++;
-                            while (isspace(*p))
+                            while (qemu_isspace(*p))
                                 p++;
                             has_arg = 1;
                         } else {
@@ -2385,7 +2436,7 @@ static void monitor_handle_command(const char *cmdline)
                 c = *typestr++;
                 if (c == '\0')
                     goto bad_type;
-                while (isspace(*p))
+                while (qemu_isspace(*p))
                     p++;
                 has_option = 0;
                 if (*p == '-') {
@@ -2410,7 +2461,7 @@ static void monitor_handle_command(const char *cmdline)
         }
     }
     /* check that all arguments were parsed */
-    while (isspace(*p))
+    while (qemu_isspace(*p))
         p++;
     if (*p != '\0') {
         term_printf("%s: extraneous characters at the end of line\n",
@@ -2420,28 +2471,36 @@ static void monitor_handle_command(const char *cmdline)
 
     switch(nb_args) {
     case 0:
-        cmd->handler();
+        handler_0 = cmd->handler;
+        handler_0();
         break;
     case 1:
-        cmd->handler(args[0]);
+        handler_1 = cmd->handler;
+        handler_1(args[0]);
         break;
     case 2:
-        cmd->handler(args[0], args[1]);
+        handler_2 = cmd->handler;
+        handler_2(args[0], args[1]);
         break;
     case 3:
-        cmd->handler(args[0], args[1], args[2]);
+        handler_3 = cmd->handler;
+        handler_3(args[0], args[1], args[2]);
         break;
     case 4:
-        cmd->handler(args[0], args[1], args[2], args[3]);
+        handler_4 = cmd->handler;
+        handler_4(args[0], args[1], args[2], args[3]);
         break;
     case 5:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4]);
+        handler_5 = cmd->handler;
+        handler_5(args[0], args[1], args[2], args[3], args[4]);
         break;
     case 6:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4], args[5]);
+        handler_6 = cmd->handler;
+        handler_6(args[0], args[1], args[2], args[3], args[4], args[5]);
         break;
     case 7:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+        handler_7 = cmd->handler;
+        handler_7(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
         break;
     default:
         term_printf("unsupported number of arguments: %d\n", nb_args);
@@ -2492,7 +2551,7 @@ static void file_completion(const char *input)
     if (!p) {
         input_path_len = 0;
         pstrcpy(file_prefix, sizeof(file_prefix), input);
-        strcpy(path, ".");
+        pstrcpy(path, sizeof(path), ".");
     } else {
         input_path_len = p - input + 1;
         memcpy(path, input, input_path_len);
@@ -2514,13 +2573,15 @@ static void file_completion(const char *input)
             break;
         if (strstart(d->d_name, file_prefix, NULL)) {
             memcpy(file, input, input_path_len);
-            strcpy(file + input_path_len, d->d_name);
+            if (input_path_len < sizeof(file))
+                pstrcpy(file + input_path_len, sizeof(file) - input_path_len,
+                        d->d_name);
             /* stat the file to find out if it's a directory.
              * In that case add a slash to speed up typing long paths
              */
             stat(file, &sb);
             if(S_ISDIR(sb.st_mode))
-                strcat(file, "/");
+                pstrcat(file, sizeof(file), "/");
             add_completion(file);
         }
     }
@@ -2548,7 +2609,7 @@ static void parse_cmdline(const char *cmdline,
     p = cmdline;
     nb_args = 0;
     for(;;) {
-        while (isspace(*p))
+        while (qemu_isspace(*p))
             p++;
         if (*p == '\0')
             break;
@@ -2569,7 +2630,7 @@ void readline_find_completion(const char *cmdline)
     char *args[MAX_ARGS];
     int nb_args, i, len;
     const char *ptype, *str;
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
     const KeyDef *key;
 
     parse_cmdline(cmdline, &nb_args, args);
@@ -2582,7 +2643,7 @@ void readline_find_completion(const char *cmdline)
     /* if the line ends with a space, it means we want to complete the
        next arg */
     len = strlen(cmdline);
-    if (len > 0 && isspace(cmdline[len - 1])) {
+    if (len > 0 && qemu_isspace(cmdline[len - 1])) {
         if (nb_args >= MAX_ARGS)
             return;
         args[nb_args++] = qemu_strdup("");
@@ -2659,12 +2720,27 @@ static void term_read(void *opaque, const uint8_t *buf, int size)
         readline_handle_byte(buf[i]);
 }
 
-static void monitor_start_input(void);
+static int monitor_suspended;
 
 static void monitor_handle_command1(void *opaque, const char *cmdline)
 {
     monitor_handle_command(cmdline);
-    monitor_start_input();
+    if (!monitor_suspended)
+        monitor_start_input();
+    else
+        monitor_suspended = 2;
+}
+
+void monitor_suspend(void)
+{
+    monitor_suspended = 1;
+}
+
+void monitor_resume(void)
+{
+    if (monitor_suspended == 2)
+        monitor_start_input();
+    monitor_suspended = 0;
 }
 
 static void monitor_start_input(void)
@@ -2728,17 +2804,30 @@ void monitor_readline(const char *prompt, int is_password,
                       char *buf, int buf_size)
 {
     int i;
+    int old_focus[MAX_MON];
 
     if (is_password) {
-        for (i = 0; i < MAX_MON; i++)
-            if (monitor_hd[i] && monitor_hd[i]->focus == 0)
+        for (i = 0; i < MAX_MON; i++) {
+            old_focus[i] = 0;
+            if (monitor_hd[i]) {
+                old_focus[i] = monitor_hd[i]->focus;
+                monitor_hd[i]->focus = 0;
                 qemu_chr_send_event(monitor_hd[i], CHR_EVENT_FOCUS);
+            }
+        }
     }
+
     readline_start(prompt, is_password, monitor_readline_cb, NULL);
     monitor_readline_buf = buf;
     monitor_readline_buf_size = buf_size;
     monitor_readline_started = 1;
     while (monitor_readline_started) {
         main_loop_wait(10);
+    }
+    /* restore original focus */
+    if (is_password) {
+        for (i = 0; i < MAX_MON; i++)
+            if (old_focus[i])
+                monitor_hd[i]->focus = old_focus[i];
     }
 }

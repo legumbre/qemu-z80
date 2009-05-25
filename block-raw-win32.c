@@ -22,13 +22,12 @@
  * THE SOFTWARE.
  */
 #include "qemu-common.h"
-#ifndef QEMU_IMG
 #include "qemu-timer.h"
-#include "exec-all.h"
-#endif
 #include "block_int.h"
 #include <assert.h>
 #include <winioctl.h>
+
+//#define WIN32_AIO
 
 #define FTYPE_FILE 0
 #define FTYPE_CD     1
@@ -100,13 +99,15 @@ static int raw_open(BlockDriverState *bs, const char *filename, int flags)
     } else {
         create_flags = OPEN_EXISTING;
     }
-#ifdef QEMU_IMG
-    overlapped = FILE_ATTRIBUTE_NORMAL;
-#else
+#ifdef WIN32_AIO
     overlapped = FILE_FLAG_OVERLAPPED;
+#else
+    overlapped = FILE_ATTRIBUTE_NORMAL;
 #endif
-    if (flags & BDRV_O_DIRECT)
+    if ((flags & BDRV_O_NOCACHE))
         overlapped |= FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
+    else if (!(flags & BDRV_O_CACHE_WB))
+        overlapped |= FILE_FLAG_WRITE_THROUGH;
     s->hfile = CreateFile(filename, access_flags,
                           FILE_SHARE_READ, NULL,
                           create_flags, overlapped, NULL);
@@ -133,10 +134,12 @@ static int raw_pread(BlockDriverState *bs, int64_t offset,
     ov.OffsetHigh = offset >> 32;
     ret = ReadFile(s->hfile, buf, count, &ret_count, &ov);
     if (!ret) {
+#ifdef WIN32_AIO
         ret = GetOverlappedResult(s->hfile, &ov, &ret_count, TRUE);
         if (!ret)
             return -EIO;
         else
+#endif
             return ret_count;
     }
     return ret_count;
@@ -155,17 +158,18 @@ static int raw_pwrite(BlockDriverState *bs, int64_t offset,
     ov.OffsetHigh = offset >> 32;
     ret = WriteFile(s->hfile, buf, count, &ret_count, &ov);
     if (!ret) {
+#ifdef WIN32_AIO
         ret = GetOverlappedResult(s->hfile, &ov, &ret_count, TRUE);
         if (!ret)
             return -EIO;
         else
+#endif
             return ret_count;
     }
     return ret_count;
 }
 
-#if 0
-#ifndef QEMU_IMG
+#ifdef WIN32_AIO
 static void raw_aio_cb(void *opaque)
 {
     RawAIOCB *acb = opaque;
@@ -181,7 +185,6 @@ static void raw_aio_cb(void *opaque)
         acb->common.cb(acb->common.opaque, 0);
     }
 }
-#endif
 
 static RawAIOCB *raw_aio_setup(BlockDriverState *bs,
         int64_t sector_num, uint8_t *buf, int nb_sectors,
@@ -204,9 +207,7 @@ static RawAIOCB *raw_aio_setup(BlockDriverState *bs,
     acb->ov.OffsetHigh = offset >> 32;
     acb->ov.hEvent = acb->hEvent;
     acb->count = nb_sectors * 512;
-#ifndef QEMU_IMG
     qemu_add_wait_object(acb->ov.hEvent, raw_aio_cb, acb);
-#endif
     return acb;
 }
 
@@ -226,9 +227,7 @@ static BlockDriverAIOCB *raw_aio_read(BlockDriverState *bs,
         qemu_aio_release(acb);
         return NULL;
     }
-#ifdef QEMU_IMG
     qemu_aio_release(acb);
-#endif
     return (BlockDriverAIOCB *)acb;
 }
 
@@ -248,15 +247,12 @@ static BlockDriverAIOCB *raw_aio_write(BlockDriverState *bs,
         qemu_aio_release(acb);
         return NULL;
     }
-#ifdef QEMU_IMG
     qemu_aio_release(acb);
-#endif
     return (BlockDriverAIOCB *)acb;
 }
 
 static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
 {
-#ifndef QEMU_IMG
     RawAIOCB *acb = (RawAIOCB *)blockacb;
     BlockDriverState *bs = acb->common.bs;
     BDRVRawState *s = bs->opaque;
@@ -265,9 +261,8 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
     /* XXX: if more than one async I/O it is not correct */
     CancelIo(s->hfile);
     qemu_aio_release(acb);
-#endif
 }
-#endif /* #if 0 */
+#endif /* #if WIN32_AIO */
 
 static void raw_flush(BlockDriverState *bs)
 {
@@ -346,33 +341,6 @@ static int raw_create(const char *filename, int64_t total_size,
     return 0;
 }
 
-void qemu_aio_init(void)
-{
-}
-
-void qemu_aio_poll(void)
-{
-}
-
-void qemu_aio_flush(void)
-{
-}
-
-void qemu_aio_wait_start(void)
-{
-}
-
-void qemu_aio_wait(void)
-{
-#ifndef QEMU_IMG
-    qemu_bh_poll();
-#endif
-}
-
-void qemu_aio_wait_end(void)
-{
-}
-
 BlockDriver bdrv_raw = {
     "raw",
     sizeof(BDRVRawState),
@@ -384,13 +352,12 @@ BlockDriver bdrv_raw = {
     raw_create,
     raw_flush,
 
-#if 0
+#ifdef WIN32_AIO
     .bdrv_aio_read = raw_aio_read,
     .bdrv_aio_write = raw_aio_write,
     .bdrv_aio_cancel = raw_aio_cancel,
     .aiocb_size = sizeof(RawAIOCB);
 #endif
-    .protocol_name = "file",
     .bdrv_pread = raw_pread,
     .bdrv_pwrite = raw_pwrite,
     .bdrv_truncate = raw_truncate,
@@ -470,13 +437,15 @@ static int hdev_open(BlockDriverState *bs, const char *filename, int flags)
     }
     create_flags = OPEN_EXISTING;
 
-#ifdef QEMU_IMG
-    overlapped = FILE_ATTRIBUTE_NORMAL;
-#else
+#ifdef WIN32_AIO
     overlapped = FILE_FLAG_OVERLAPPED;
+#else
+    overlapped = FILE_ATTRIBUTE_NORMAL;
 #endif
-    if (flags & BDRV_O_DIRECT)
+    if ((flags & BDRV_O_NOCACHE))
         overlapped |= FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH;
+    else if (!(flags & BDRV_O_CACHE_WB))
+        overlapped |= FILE_FLAG_WRITE_THROUGH;
     s->hfile = CreateFile(filename, access_flags,
                           FILE_SHARE_READ, NULL,
                           create_flags, overlapped, NULL);
@@ -536,7 +505,7 @@ BlockDriver bdrv_host_device = {
     NULL,
     raw_flush,
 
-#if 0
+#ifdef WIN32_AIO
     .bdrv_aio_read = raw_aio_read,
     .bdrv_aio_write = raw_aio_write,
     .bdrv_aio_cancel = raw_aio_cancel,

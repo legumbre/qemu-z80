@@ -2,6 +2,10 @@
 #define QEMU_OSDEP_H
 
 #include <stdarg.h>
+#ifdef __OpenBSD__
+#include <sys/types.h>
+#include <sys/signal.h>
+#endif
 
 #ifndef glue
 #define xglue(x, y) x ## y
@@ -17,6 +21,15 @@
 
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x)   __builtin_expect(!!(x), 0)
+#endif
+
+#ifndef offsetof
+#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *) 0)->MEMBER)
+#endif
+#ifndef container_of
+#define container_of(ptr, type, member) ({                      \
+        const typeof(((type *) 0)->member) *__mptr = (ptr);     \
+        (type *) ((char *) __mptr - offsetof(type, member));})
 #endif
 
 #ifndef MIN
@@ -48,6 +61,13 @@
 #endif
 
 #define qemu_printf printf
+
+#if defined (__GNUC__) && defined (__GNUC_MINOR_)
+# define QEMU_GNUC_PREREQ(maj, min) \
+         ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
+#else
+# define QEMU_GNUC_PREREQ(maj, min) 0
+#endif
 
 void *qemu_memalign(size_t alignment, size_t size);
 void *qemu_vmalloc(size_t size);

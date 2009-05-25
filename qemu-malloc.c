@@ -38,6 +38,11 @@ void *qemu_malloc(size_t size)
     return malloc(size);
 }
 
+void *qemu_realloc(void *ptr, size_t size)
+{
+    return realloc(ptr, size);
+}
+
 void *qemu_mallocz(size_t size)
 {
     void *ptr;
@@ -51,9 +56,24 @@ void *qemu_mallocz(size_t size)
 char *qemu_strdup(const char *str)
 {
     char *ptr;
-    ptr = qemu_malloc(strlen(str) + 1);
+    size_t len = strlen(str);
+    ptr = qemu_malloc(len + 1);
     if (!ptr)
         return NULL;
-    strcpy(ptr, str);
+    memcpy(ptr, str, len + 1);
     return ptr;
+}
+
+char *qemu_strndup(const char *str, size_t size)
+{
+    const char *end = memchr(str, 0, size);
+    char *new;
+
+    if (end)
+        size = end - str;
+
+    new = qemu_malloc(size + 1);
+    new[size] = 0;
+
+    return memcpy(new, str, size);
 }

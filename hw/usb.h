@@ -120,18 +120,49 @@ typedef struct USBPacket USBPacket;
 /* definition of a USB device */
 struct USBDevice {
     void *opaque;
+
+    /* 
+     * Process USB packet. 
+     * Called by the HC (Host Controller).
+     *
+     * Returns length of the transaction 
+     * or one of the USB_RET_XXX codes.
+     */ 
     int (*handle_packet)(USBDevice *dev, USBPacket *p);
+
+    /* 
+     * Called when device is destroyed.
+     */
     void (*handle_destroy)(USBDevice *dev);
 
     int speed;
 
     /* The following fields are used by the generic USB device
-       layer. They are here just to avoid creating a new structure for
-       them. */
+       layer. They are here just to avoid creating a new structure 
+       for them. */
+
+    /*
+     * Reset the device
+     */  
     void (*handle_reset)(USBDevice *dev);
+
+    /*
+     * Process control request.
+     * Called from handle_packet().
+     *
+     * Returns length or one of the USB_RET_ codes.
+     */
     int (*handle_control)(USBDevice *dev, int request, int value,
                           int index, int length, uint8_t *data);
+
+    /*
+     * Process data transfers (both BULK and ISOC).
+     * Called from handle_packet().
+     *
+     * Returns length or one of the USB_RET_ codes.
+     */
     int (*handle_data)(USBDevice *dev, USBPacket *p);
+
     uint8_t addr;
     char devname[32];
 
@@ -197,27 +228,35 @@ static inline void usb_cancel_packet(USBPacket * p)
     p->cancel_cb(p, p->cancel_opaque);
 }
 
+int usb_device_add_dev(USBDevice *dev);
+int usb_device_del_addr(int bus_num, int addr);
 void usb_attach(USBPort *port, USBDevice *dev);
 int usb_generic_handle_packet(USBDevice *s, USBPacket *p);
 int set_usb_string(uint8_t *buf, const char *str);
 void usb_send_msg(USBDevice *dev, int msg);
-
-void usb_packet_complete(USBPacket *p);
 
 /* usb hub */
 USBDevice *usb_hub_init(int nb_ports);
 
 /* usb-linux.c */
 USBDevice *usb_host_device_open(const char *devname);
+int usb_host_device_close(const char *devname);
 void usb_host_info(void);
 
 /* usb-hid.c */
 USBDevice *usb_mouse_init(void);
 USBDevice *usb_tablet_init(void);
 USBDevice *usb_keyboard_init(void);
+void usb_hid_datain_cb(USBDevice *dev, void *opaque, void (*datain)(void *));
 
 /* usb-msd.c */
 USBDevice *usb_msd_init(const char *filename);
+
+/* usb-net.c */
+USBDevice *usb_net_init(NICInfo *nd);
+
+/* usb-bt.c */
+USBDevice *usb_bt_init(HCIInfo *hci);
 
 /* usb-wacom.c */
 USBDevice *usb_wacom_init(void);

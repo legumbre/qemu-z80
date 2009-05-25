@@ -75,7 +75,7 @@ For system emulation, the following hardware targets are supported:
 @item G3 BW PowerMac (PowerPC processor)
 @item Mac99 PowerMac (PowerPC processor, in progress)
 @item Sun4m/Sun4c/Sun4d (32-bit Sparc processor)
-@item Sun4u (64-bit Sparc processor, in progress)
+@item Sun4u/Sun4v (64-bit Sparc processor, in progress)
 @item Malta board (32-bit and 64-bit MIPS processors)
 @item MIPS Magnum (64-bit MIPS processor)
 @item ARM Integrator/CP (ARM)
@@ -267,12 +267,27 @@ These options have the same definition as they have in @option{-hdachs}.
 @item snapshot=@var{snapshot}
 @var{snapshot} is "on" or "off" and allows to enable snapshot for given drive (see @option{-snapshot}).
 @item cache=@var{cache}
-@var{cache} is "on" or "off" and allows to disable host cache to access data.
+@var{cache} is "none", "writeback", or "writethrough" and controls how the host cache is used to access block data.
 @item format=@var{format}
 Specify which disk @var{format} will be used rather than detecting
 the format.  Can be used to specifiy format=raw to avoid interpreting
 an untrusted format header.
 @end table
+
+By default, writethrough caching is used for all block device.  This means that
+the host page cache will be used to read and write data but write notification
+will be sent to the guest only when the data has been reported as written by
+the storage subsystem.
+
+Writeback caching will report data writes as completed as soon as the data is
+present in the host page cache.  This is safe as long as you trust your host.
+If your host crashes or loses power, then the guest may experience data
+corruption.  When using the @option{-snapshot} option, writeback caching is
+used by default.
+
+The host page can be avoided entirely with @option{cache=none}.  This will
+attempt to do disk IO directly to the guests memory.  QEMU may still perform
+an internal copy of the data.
 
 Instead of @option{-cdrom} you can use:
 @example
@@ -336,6 +351,9 @@ be needed to boot from old floppy disks.
 Set virtual RAM size to @var{megs} megabytes. Default is 128 MiB.  Optionally,
 a suffix of ``M'' or ``G'' can be used to signify a value in megabytes or
 gigabytes respectively.
+
+@item -cpu @var{model}
+Select CPU model (-cpu ? for list and additional feature selection)
 
 @item -smp @var{n}
 Simulate an SMP system with @var{n} CPUs. On the PC target, up to 255
@@ -550,8 +568,10 @@ Pointer device that uses absolute coordinates (like a touchscreen). This
 means qemu is able to report the mouse position without having to grab the
 mouse. Also overrides the PS/2 mouse emulation when activated.
 
-@item disk:file
-Mass storage device based on file
+@item disk:[format=@var{format}]:file
+Mass storage device based on file. The optional @var{format} argument
+will be used rather than detecting the format. Can be used to specifiy
+format=raw to avoid interpreting an untrusted format header.
 
 @item host:bus.addr
 Pass through the host device identified by bus.addr (Linux only).
@@ -566,6 +586,9 @@ available devices.
 @item braille
 Braille device.  This will use BrlAPI to display the braille output on a real
 or fake device.
+
+@item net:options
+Network adapter that supports CDC ethernet and RNDIS protocols.
 
 @end table
 
@@ -672,6 +695,21 @@ qemu linux.img -net nic,macaddr=52:54:00:12:34:56 \
 /path/to/linux ubd0=/path/to/root_fs eth0=mcast
 @end example
 
+@item -net vde[,vlan=@var{n}][,sock=@var{socketpath}][,port=@var{n}][,group=@var{groupname}][,mode=@var{octalmode}]
+Connect VLAN @var{n} to PORT @var{n} of a vde switch running on host and
+listening for incoming connections on @var{socketpath}. Use GROUP @var{groupname}
+and MODE @var{octalmode} to change default ownership and permissions for
+communication port. This option is available only if QEMU has been compiled
+with vde support enabled.
+
+Example:
+@example
+# launch vde switch
+vde_switch -F -sock /tmp/myswitch
+# launch QEMU instance
+qemu linux.img -net nic -net vde,sock=/tmp/myswitch
+@end example
+
 @item -net none
 Indicate that no network devices should be configured. It is used to
 override the default configuration (@option{-net nic -net user}) which
@@ -741,6 +779,62 @@ telnet localhost 5555
 
 Then when you use on the host @code{telnet localhost 5555}, you
 connect to the guest telnet server.
+
+@end table
+
+Bluetooth(R) options:
+@table @option
+
+@item -bt hci[...]
+Defines the function of the corresponding Bluetooth HCI.  -bt options
+are matched with the HCIs present in the chosen machine type.  For
+example when emulating a machine with only one HCI built into it, only
+the first @code{-bt hci[...]} option is valid and defines the HCI's
+logic.  The Transport Layer is decided by the machine type.  Currently
+the machines @code{n800} and @code{n810} have one HCI and all other
+machines have none.
+
+@anchor{bt-hcis}
+The following three types are recognized:
+
+@table @code
+@item -bt hci,null
+(default) The corresponding Bluetooth HCI assumes no internal logic
+and will not respond to any HCI commands or emit events.
+
+@item -bt hci,host[:@var{id}]
+(@code{bluez} only) The corresponding HCI passes commands / events
+to / from the physical HCI identified by the name @var{id} (default:
+@code{hci0}) on the computer running QEMU.  Only available on @code{bluez}
+capable systems like Linux.
+
+@item -bt hci[,vlan=@var{n}]
+Add a virtual, standard HCI that will participate in the Bluetooth
+scatternet @var{n} (default @code{0}).  Similarly to @option{-net}
+VLANs, devices inside a bluetooth network @var{n} can only communicate
+with other devices in the same network (scatternet).
+@end table
+
+@item -bt vhci[,vlan=@var{n}]
+(Linux-host only) Create a HCI in scatternet @var{n} (default 0) attached
+to the host bluetooth stack instead of to the emulated target.  This
+allows the host and target machines to participate in a common scatternet
+and communicate.  Requires the Linux @code{vhci} driver installed.  Can
+be used as following:
+
+@example
+qemu [...OPTIONS...] -bt hci,vlan=5 -bt vhci,vlan=5
+@end example
+
+@item -bt device:@var{dev}[,vlan=@var{n}]
+Emulate a bluetooth device @var{dev} and place it in network @var{n}
+(default @code{0}).  QEMU can only emulate one type of bluetooth devices
+currently:
+
+@table @code
+@item keyboard
+Virtual wireless keyboard implementing the HIDP bluetooth profile.
+@end table
 
 @end table
 
@@ -935,11 +1029,24 @@ images.
 @item -L path
 Set the directory for the BIOS, VGA BIOS and keymaps.
 
-@item -std-vga
-Simulate a standard VGA card with Bochs VBE extensions (default is
-Cirrus Logic GD5446 PCI VGA). If your guest OS supports the VESA 2.0
-VBE extensions (e.g. Windows XP) and if you want to use high
-resolution modes (>= 1280x1024x16) then you should use this option.
+@item -vga @var{type}
+Select type of VGA card to emulate. Valid values for @var{type} are
+@table @code
+@item cirrus
+Cirrus Logic GD5446 Video card. All Windows versions starting from
+Windows 95 should recognize and use this graphic card. For optimal
+performances, use 16 bit color depth in the guest and the host OS.
+(This one is the default)
+@item std
+Standard VGA card with Bochs VBE extensions.  If your guest OS
+supports the VESA 2.0 VBE extensions (e.g. Windows XP) and if you want
+to use high resolution modes (>= 1280x1024x16) then you should use
+this option.
+@item vmware
+VMWare SVGA-II compatible adapter. Use it if you have sufficiently
+recent XFree86/XOrg server or Windows guest with a driver for this
+card.
+@end table
 
 @item -no-acpi
 Disable ACPI (Advanced Configuration and Power Interface) support. Use
@@ -1264,8 +1371,9 @@ used.
 
 @item sendkey @var{keys}
 
-Send @var{keys} to the emulator. Use @code{-} to press several keys
-simultaneously. Example:
+Send @var{keys} to the emulator. @var{keys} could be the name of the
+key or @code{#} followed by the raw value in either decimal or hexadecimal
+format. Use @code{-} to press several keys simultaneously. Example:
 @example
 sendkey ctrl-alt-f1
 @end example
@@ -1318,8 +1426,10 @@ snapshots.
 * disk_images_snapshot_mode:: Snapshot mode
 * vm_snapshots::              VM snapshots
 * qemu_img_invocation::       qemu-img Invocation
+* qemu_nbd_invocation::       qemu-nbd Invocation
 * host_drives::               Using host drives
 * disk_images_fat_images::    Virtual FAT disk images
+* disk_images_nbd::           NBD access
 @end menu
 
 @node disk_images_quickstart
@@ -1399,6 +1509,11 @@ state is not saved or restored properly (in particular USB).
 @subsection @code{qemu-img} Invocation
 
 @include qemu-img.texi
+
+@node qemu_nbd_invocation
+@subsection @code{qemu-nbd} Invocation
+
+@include qemu-nbd.texi
 
 @node host_drives
 @subsection Using host drives
@@ -1496,6 +1611,40 @@ What you should @emph{never} do:
 @item expect it to work when loadvm'ing ;
 @item write to the FAT directory on the host system while accessing it with the guest system.
 @end itemize
+
+@node disk_images_nbd
+@subsection NBD access
+
+QEMU can access directly to block device exported using the Network Block Device
+protocol.
+
+@example
+qemu linux.img -hdb nbd:my_nbd_server.mydomain.org:1024
+@end example
+
+If the NBD server is located on the same host, you can use an unix socket instead
+of an inet socket:
+
+@example
+qemu linux.img -hdb nbd:unix:/tmp/my_socket
+@end example
+
+In this case, the block device must be exported using qemu-nbd:
+
+@example
+qemu-nbd --socket=/tmp/my_socket my_disk.qcow2
+@end example
+
+The use of qemu-nbd allows to share a disk between several guests:
+@example
+qemu-nbd --socket=/tmp/my_socket --share=2 my_disk.qcow2
+@end example
+
+and then you can use it with two guests:
+@example
+qemu linux1.img -hdb nbd:unix:/tmp/my_socket
+qemu linux2.img -hdb nbd:unix:/tmp/my_socket
+@end example
 
 @node pcsys_network
 @section Network emulation
@@ -1666,6 +1815,23 @@ serial converter, faking a Matrix Orbital LCD Display (USB ID 0403:FA00).
 @item braille
 Braille device.  This will use BrlAPI to display the braille output on a real
 or fake device.
+@item net:@var{options}
+Network adapter that supports CDC ethernet and RNDIS protocols.  @var{options}
+specifies NIC options as with @code{-net nic,}@var{options} (see description).
+For instance, user-mode networking can be used with
+@example
+qemu [...OPTIONS...] -net user,vlan=0 -usbdevice net:vlan=0
+@end example
+Currently this cannot be used in machines that support PCI NICs.
+@item bt[:@var{hci-type}]
+Bluetooth dongle whose type is specified in the same format as with
+the @option{-bt hci} option, @pxref{bt-hcis,,allowed HCI types}.  If
+no type is given, the HCI logic corresponds to @code{-bt hci,vlan=0}.
+This USB device implements the USB Transport Layer of HCI.  Example
+usage:
+@example
+qemu [...OPTIONS...] -usbdevice bt:hci,vlan=3 -bt device:keyboard,vlan=3
+@end example
 @end table
 
 @node host_usb_devices
@@ -1755,7 +1921,7 @@ the protocol limits passwords to 8 characters it should not be considered
 to provide high security. The password can be fairly easily brute-forced by
 a client making repeat connections. For this reason, a VNC server using password
 authentication should be restricted to only listen on the loopback interface
-or UNIX domain sockets. Password ayuthentication is requested with the @code{password}
+or UNIX domain sockets. Password authentication is requested with the @code{password}
 option, and then once QEMU is running the password is set with the monitor. Until
 the monitor is used to set the password all clients will be rejected.
 
@@ -2173,14 +2339,37 @@ More information is available at
 @node Sparc32 System emulator
 @section Sparc32 System emulator
 
-Use the executable @file{qemu-system-sparc} to simulate a SPARCstation
-5, SPARCstation 10, SPARCstation 20, SPARCserver 600MP (sun4m
-architecture), SPARCstation 2 (sun4c architecture), SPARCserver 1000,
-or SPARCcenter 2000 (sun4d architecture). The emulation is somewhat
-complete.  SMP up to 16 CPUs is supported, but Linux limits the number
-of usable CPUs to 4.
+Use the executable @file{qemu-system-sparc} to simulate the following
+Sun4m architecture machines:
+@itemize @minus
+@item
+SPARCstation 4
+@item
+SPARCstation 5
+@item
+SPARCstation 10
+@item
+SPARCstation 20
+@item
+SPARCserver 600MP
+@item
+SPARCstation LX
+@item
+SPARCstation Voyager
+@item
+SPARCclassic
+@item
+SPARCbook
+@end itemize
 
-QEMU emulates the following sun4m/sun4d peripherals:
+The emulation is somewhat complete. SMP up to 16 CPUs is supported,
+but Linux limits the number of usable CPUs to 4.
+
+It's also possible to simulate a SPARCstation 2 (sun4c architecture),
+SPARCserver 1000, or SPARCcenter 2000 (sun4d architecture), but these
+emulators are not usable yet.
+
+QEMU emulates the following sun4m/sun4c/sun4d peripherals:
 
 @itemize @minus
 @item
@@ -2190,7 +2379,7 @@ TCX Frame buffer
 @item
 Lance (Am7990) Ethernet
 @item
-Non Volatile RAM M48T08
+Non Volatile RAM M48T02/M48T08
 @item
 Slave I/O: timers, interrupt controllers, Zilog serial ports, keyboard
 and power/reset logic
@@ -2212,8 +2401,10 @@ firmware implementation. The goal is to implement a 100% IEEE
 1275-1994 (referred to as Open Firmware) compliant firmware.
 
 A sample Linux 2.6 series kernel and ram disk image are available on
-the QEMU web site. Please note that currently NetBSD, OpenBSD or
-Solaris kernels don't work.
+the QEMU web site. There are still issues with NetBSD and OpenBSD, but
+some kernel versions work. Please note that currently Solaris kernels
+don't work probably due to interface issues between OpenBIOS and
+Solaris.
 
 @c man begin OPTIONS
 
@@ -2235,7 +2426,7 @@ qemu-system-sparc -prom-env 'auto-boot?=false' \
  -prom-env 'boot-device=sd(0,2,0):d' -prom-env 'boot-args=linux single'
 @end example
 
-@item -M [SS-5|SS-10|SS-20|SS-600MP|SS-2|SS-1000|SS-2000]
+@item -M [SS-4|SS-5|SS-10|SS-20|SS-600MP|LX|Voyager|SPARCClassic|SPARCbook|SS-2|SS-1000|SS-2000]
 
 Set the emulated machine type. Default is SS-5.
 
@@ -2246,10 +2437,12 @@ Set the emulated machine type. Default is SS-5.
 @node Sparc64 System emulator
 @section Sparc64 System emulator
 
-Use the executable @file{qemu-system-sparc64} to simulate a Sun4u machine.
-The emulator is not usable for anything yet.
+Use the executable @file{qemu-system-sparc64} to simulate a Sun4u
+(UltraSPARC PC-like machine), Sun4v (T1 PC-like machine), or generic
+Niagara (T1) machine. The emulator is not usable for anything yet, but
+it can launch some kernels.
 
-QEMU emulates the following sun4u peripherals:
+QEMU emulates the following peripherals:
 
 @itemize @minus
 @item
@@ -2257,10 +2450,38 @@ UltraSparc IIi APB PCI Bridge
 @item
 PCI VGA compatible card with VESA Bochs Extensions
 @item
+PS/2 mouse and keyboard
+@item
 Non Volatile RAM M48T59
 @item
 PC-compatible serial ports
+@item
+2 PCI IDE interfaces with hard disk and CD-ROM support
+@item
+Floppy disk
 @end itemize
+
+@c man begin OPTIONS
+
+The following options are specific to the Sparc64 emulation:
+
+@table @option
+
+@item -prom-env string
+
+Set OpenBIOS variables in NVRAM, for example:
+
+@example
+qemu-system-sparc64 -prom-env 'auto-boot?=false'
+@end example
+
+@item -M [sun4u|sun4v|Niagara]
+
+Set the emulated machine type. The default is sun4u.
+
+@end table
+
+@c man end
 
 @node MIPS System emulator
 @section MIPS System emulator
@@ -2508,6 +2729,8 @@ Secure Digital card connected to OMAP MMC/SD host
 @item
 Three OMAP on-chip UARTs and on-chip STI debugging console
 @item
+A Bluetooth(R) transciever and HCI connected to an UART
+@item
 Mentor Graphics "Inventra" dual-role USB controller embedded in a TI
 TUSB6010 chip - only USB host mode is supported
 @item
@@ -2603,6 +2826,7 @@ Two on-chip UARTs.
 * Supported Operating Systems ::
 * Linux User space emulator::
 * Mac OS X/Darwin User space emulator ::
+* BSD User space emulator ::
 @end menu
 
 @node Supported Operating Systems
@@ -2615,6 +2839,8 @@ The following OS are supported in user space emulation:
 Linux (referred as qemu-linux-user)
 @item
 Mac OS X/Darwin (referred as qemu-darwin-user)
+@item
+BSD (referred as qemu-bsd-user)
 @end itemize
 
 @node Linux User space emulator
@@ -2711,7 +2937,7 @@ qemu-i386 /usr/local/qemu-i386/wine/bin/wine \
 @subsection Command line options
 
 @example
-usage: qemu-i386 [-h] [-d] [-L path] [-s size] program [arguments...]
+usage: qemu-i386 [-h] [-d] [-L path] [-s size] [-cpu model] [-g port] program [arguments...]
 @end example
 
 @table @option
@@ -2721,6 +2947,8 @@ Print the help
 Set the x86 elf interpreter prefix (default=/usr/local/qemu-i386)
 @item -s size
 Set the x86 stack size in bytes (default=524288)
+@item -cpu model
+Select CPU model (-cpu ? for list and additional feature selection)
 @end table
 
 Debug options:
@@ -2730,6 +2958,8 @@ Debug options:
 Activate log (logfile=/tmp/qemu.log)
 @item -p pagesize
 Act as if the host page size was 'pagesize' bytes
+@item -g port
+Wait gdb connection to port
 @end table
 
 Environment variables:
@@ -2756,6 +2986,8 @@ configurations), and arm-uclinux bFLT format binaries.
 coldfire uClinux bFLT format binaries.
 
 The binary format is detected automatically.
+
+@command{qemu-sparc} can execute Sparc32 binaries (Sparc32 CPU, 32 bit ABI).
 
 @command{qemu-sparc32plus} can execute Sparc32 and SPARC32PLUS binaries
 (Sparc64 CPU, 32 bit ABI).
@@ -2837,6 +3069,68 @@ Print the help
 Set the library root path (default=/)
 @item -s size
 Set the stack size in bytes (default=524288)
+@end table
+
+Debug options:
+
+@table @option
+@item -d
+Activate log (logfile=/tmp/qemu.log)
+@item -p pagesize
+Act as if the host page size was 'pagesize' bytes
+@end table
+
+@node BSD User space emulator
+@section BSD User space emulator
+
+@menu
+* BSD Status::
+* BSD Quick Start::
+* BSD Command line options::
+@end menu
+
+@node BSD Status
+@subsection BSD Status
+
+@itemize @minus
+@item
+target Sparc64 on Sparc64: Some trivial programs work.
+@end itemize
+
+@node BSD Quick Start
+@subsection Quick Start
+
+In order to launch a BSD process, QEMU needs the process executable
+itself and all the target dynamic libraries used by it.
+
+@itemize
+
+@item On Sparc64, you can just try to launch any process by using the native
+libraries:
+
+@example
+qemu-sparc64 /bin/ls
+@end example
+
+@end itemize
+
+@node BSD Command line options
+@subsection Command line options
+
+@example
+usage: qemu-sparc64 [-h] [-d] [-L path] [-s size] [-bsd type] program [arguments...]
+@end example
+
+@table @option
+@item -h
+Print the help
+@item -L path
+Set the library root path (default=/)
+@item -s size
+Set the stack size in bytes (default=524288)
+@item -bsd type
+Set the type of the emulated BSD Operating system. Valid values are
+FreeBSD, NetBSD and OpenBSD (default).
 @end table
 
 Debug options:

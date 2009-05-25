@@ -9,6 +9,9 @@
 #define MOUSE_EVENT_RBUTTON 0x02
 #define MOUSE_EVENT_MBUTTON 0x04
 
+/* in ms */
+#define GUI_REFRESH_INTERVAL 30
+
 typedef void QEMUPutKBDEvent(void *opaque, int keycode);
 typedef void QEMUPutMouseEvent(void *opaque, int dx, int dy, int dz, int buttons_state);
 
@@ -80,6 +83,7 @@ struct DisplayState {
     void *opaque;
     struct QEMUTimer *gui_timer;
     uint64_t gui_timer_interval;
+    int idle; /* there is nothing to update (window invisible), set by vnc/sdl */
 
     void (*dpy_update)(struct DisplayState *s, int x, int y, int w, int h);
     void (*dpy_resize)(struct DisplayState *s, int w, int h);
@@ -132,10 +136,13 @@ void vga_hw_screen_dump(const char *filename);
 void vga_hw_text_update(console_ch_t *chardata);
 
 int is_graphic_console(void);
+int is_fixedsize_console(void);
 CharDriverState *text_console_init(DisplayState *ds, const char *p);
 void console_select(unsigned int index);
 void console_color_init(DisplayState *ds);
 void qemu_console_resize(QEMUConsole *console, int width, int height);
+void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+                int dst_x, int dst_y, int w, int h);
 
 /* sdl.c */
 void sdl_display_init(DisplayState *ds, int full_screen, int no_frame);
@@ -168,6 +175,8 @@ void term_flush(void);
 void term_print_help(void);
 void monitor_readline(const char *prompt, int is_password,
                       char *buf, int buf_size);
+void monitor_suspend(void);
+void monitor_resume(void);
 
 /* readline.c */
 typedef void ReadLineFunc(void *opaque, const char *str);

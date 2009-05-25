@@ -21,7 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
+
+#ifndef NDEBUG
+static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r0",
     "%r1",
     "%r2",
@@ -38,8 +40,9 @@ const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r13",
     "%r14",
 };
+#endif
 
-int tcg_target_reg_alloc_order[] = {
+static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_R0,
     TCG_REG_R1,
     TCG_REG_R2,
@@ -57,10 +60,10 @@ int tcg_target_reg_alloc_order[] = {
     TCG_REG_R14,
 };
 
-const int tcg_target_call_iarg_regs[4] = {
+static const int tcg_target_call_iarg_regs[4] = {
     TCG_REG_R0, TCG_REG_R1, TCG_REG_R2, TCG_REG_R3
 };
-const int tcg_target_call_oarg_regs[2] = {
+static const int tcg_target_call_oarg_regs[2] = {
     TCG_REG_R0, TCG_REG_R1
 };
 
@@ -91,7 +94,7 @@ static inline int tcg_target_get_call_iarg_regs_count(int flags)
 }
 
 /* parse target specific constraints */
-int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
+static int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
 {
     const char *ct_str;
 
@@ -808,15 +811,8 @@ static void tcg_out_div_helper(TCGContext *s, int cond, const TCGArg *args,
 }
 
 #ifdef CONFIG_SOFTMMU
-extern void __ldb_mmu(void);
-extern void __ldw_mmu(void);
-extern void __ldl_mmu(void);
-extern void __ldq_mmu(void);
 
-extern void __stb_mmu(void);
-extern void __stw_mmu(void);
-extern void __stl_mmu(void);
-extern void __stq_mmu(void);
+#include "../../softmmu_defs.h"
 
 static void *qemu_ld_helpers[4] = {
     __ldb_mmu,

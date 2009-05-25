@@ -34,7 +34,10 @@ struct arm_boot_info {
 void arm_load_kernel(CPUState *env, struct arm_boot_info *info);
 
 /* armv7m_nvic.c */
-int system_clock_scale;
+
+/* Multiplication factor to convert from system clock ticks to qemu timer
+   ticks.  */
+extern int system_clock_scale;
 qemu_irq *armv7m_nvic_init(CPUState *env);
 
 /* stellaris_enent.c */

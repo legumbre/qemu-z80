@@ -102,8 +102,8 @@ static abi_ulong copy_strings(abi_ulong p, int n, char **s)
     return p;
 }
 
-int target_pread(int fd, abi_ulong ptr, abi_ulong len,
-                 abi_ulong offset)
+static int target_pread(int fd, abi_ulong ptr, abi_ulong len,
+                        abi_ulong offset)
 {
     void *buf;
     int ret;
@@ -336,7 +336,7 @@ failed:
 /****************************************************************************/
 
 /* ??? This does not handle endianness correctly.  */
-void old_reloc(struct lib_info *libinfo, uint32_t rl)
+static void old_reloc(struct lib_info *libinfo, uint32_t rl)
 {
 #ifdef DEBUG
 	char *segment[] = { "TEXT", "DATA", "BSS", "*UNKNOWN*" };
@@ -349,9 +349,9 @@ void old_reloc(struct lib_info *libinfo, uint32_t rl)
         reloc_type = rl >> 30;
         /* ??? How to handle this?  */
 #if defined(CONFIG_COLDFIRE)
-	ptr = (uint32_t *) (libinfo->start_code + offset);
+	ptr = (uint32_t *) ((unsigned long) libinfo->start_code + offset);
 #else
-	ptr = (uint32_t *) (libinfo->start_data + offset);
+	ptr = (uint32_t *) ((unsigned long) libinfo->start_data + offset);
 #endif
 
 #ifdef DEBUG
@@ -670,7 +670,7 @@ static int load_flat_file(struct linux_binprm * bprm,
     }
 
     /* zero the BSS.  */
-    memset((void*)(datapos + data_len), 0, bss_len);
+    memset((void *)((unsigned long)datapos + data_len), 0, bss_len);
 
     return 0;
 }

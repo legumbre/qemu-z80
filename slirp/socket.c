@@ -8,7 +8,6 @@
 #define WANT_SYS_IOCTL_H
 #include <slirp.h>
 #include "ip_icmp.h"
-#include "main.h"
 #ifdef __sun__
 #include <sys/filio.h>
 #endif
@@ -117,6 +116,8 @@ soread(so)
 	len = sb->sb_datalen - sb->sb_cc;
 
 	iov[0].iov_base = sb->sb_wptr;
+        iov[1].iov_base = NULL;
+        iov[1].iov_len = 0;
 	if (sb->sb_wptr < sb->sb_rptr) {
 		iov[0].iov_len = sb->sb_rptr - sb->sb_wptr;
 		/* Should never succeed, but... */
@@ -320,6 +321,8 @@ sowrite(so)
         len = sb->sb_cc;
 
 	iov[0].iov_base = sb->sb_rptr;
+        iov[1].iov_base = NULL;
+        iov[1].iov_len = 0;
 	if (sb->sb_rptr < sb->sb_wptr) {
 		iov[0].iov_len = sb->sb_wptr - sb->sb_rptr;
 		/* Should never succeed, but... */

@@ -3302,7 +3302,7 @@ set_default_mips_dis_options (struct disassemble_info *info)
 #endif
 
   /* Set ISA, architecture, and cp0 register names as best we can.  */
-#if ! SYMTAB_AVAILABLE && 0
+#if !defined(SYMTAB_AVAILABLE) && 0
   /* This is running out on a target machine, not in a host tool.
      FIXME: Where does mips_target_info come from?  */
   target_processor = mips_target_info.processor;
@@ -3322,9 +3322,7 @@ set_default_mips_dis_options (struct disassemble_info *info)
 }
 
 void
-parse_mips_dis_option (option, len)
-     const char *option;
-     unsigned int len;
+parse_mips_dis_option (const char *option, unsigned int len)
 {
   unsigned int i, optionlen, vallen;
   const char *val;

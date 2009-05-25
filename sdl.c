@@ -89,7 +89,18 @@ static void sdl_resize(DisplayState *ds, int w, int h)
     ds->data = screen->pixels;
     ds->linesize = screen->pitch;
     ds->depth = screen->format->BitsPerPixel;
-    if (screen->format->Bshift > screen->format->Rshift) {
+    /* SDL BitsPerPixel never indicates any values other than
+       multiples of 8, so we need to check for strange depths. */
+    if (ds->depth == 16) {
+        uint32_t mask;
+
+        mask = screen->format->Rmask;
+        mask |= screen->format->Gmask;
+        mask |= screen->format->Bmask;
+        if ((mask & 0x8000) == 0)
+            ds->depth = 15;
+    }
+    if (ds->depth == 32 && screen->format->Rshift == 0) {
         ds->bgr = 1;
     } else {
         ds->bgr = 0;
@@ -465,10 +476,8 @@ static void sdl_refresh(DisplayState *ds)
                 sdl_process_key(&ev->key);
             break;
         case SDL_QUIT:
-            if (!no_quit) {
+            if (!no_quit)
                 qemu_system_shutdown_request();
-                vm_start();	/* In case we're paused */
-            }
             break;
         case SDL_MOUSEMOTION:
             if (gui_grab || kbd_mouse_is_absolute() ||
@@ -515,9 +524,11 @@ static void sdl_refresh(DisplayState *ds)
                 if (ev->active.gain) {
                     /* Back to default interval */
                     ds->gui_timer_interval = 0;
+                    ds->idle = 0;
                 } else {
                     /* Sleeping interval */
                     ds->gui_timer_interval = 500;
+                    ds->idle = 1;
                 }
             }
             break;
@@ -625,11 +636,6 @@ void sdl_display_init(DisplayState *ds, int full_screen, int no_frame)
         fprintf(stderr, "Could not initialize SDL - exiting\n");
         exit(1);
     }
-#ifndef _WIN32
-    /* NOTE: we still want Ctrl-C to work, so we undo the SDL redirections */
-    signal(SIGINT, SIG_DFL);
-    signal(SIGQUIT, SIG_DFL);
-#endif
 
     ds->dpy_update = sdl_update;
     ds->dpy_resize = sdl_resize;

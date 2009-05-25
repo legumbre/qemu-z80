@@ -20,6 +20,7 @@
 #include "hw.h"
 #include "pc.h"
 #include "qemu-timer.h"
+#include "host-utils.h"
 
 //#define DEBUG_APIC
 //#define DEBUG_IOAPIC
@@ -104,50 +105,16 @@ static void apic_init_ipi(APICState *s);
 static void apic_set_irq(APICState *s, int vector_num, int trigger_mode);
 static void apic_update_irq(APICState *s);
 
-/* Find first bit starting from msb. Return 0 if value = 0 */
+/* Find first bit starting from msb */
 static int fls_bit(uint32_t value)
 {
-    unsigned int ret = 0;
-
-#if defined(HOST_I386)
-    __asm__ __volatile__ ("bsr %1, %0\n" : "+r" (ret) : "rm" (value));
-    return ret;
-#else
-    if (value > 0xffff)
-        value >>= 16, ret = 16;
-    if (value > 0xff)
-        value >>= 8, ret += 8;
-    if (value > 0xf)
-        value >>= 4, ret += 4;
-    if (value > 0x3)
-        value >>= 2, ret += 2;
-    return ret + (value >> 1);
-#endif
+    return 31 - clz32(value);
 }
 
-/* Find first bit starting from lsb. Return 0 if value = 0 */
+/* Find first bit starting from lsb */
 static int ffs_bit(uint32_t value)
 {
-    unsigned int ret = 0;
-
-#if defined(HOST_I386)
-    __asm__ __volatile__ ("bsf %1, %0\n" : "+r" (ret) : "rm" (value));
-    return ret;
-#else
-    if (!value)
-        return 0;
-    if (!(value & 0xffff))
-        value >>= 16, ret = 16;
-    if (!(value & 0xff))
-        value >>= 8, ret += 8;
-    if (!(value & 0xf))
-        value >>= 4, ret += 4;
-    if (!(value & 0x3))
-        value >>= 2, ret += 2;
-    if (!(value & 0x1))
-        ret++;
-    return ret;
-#endif
+    return ctz32(value);
 }
 
 static inline void set_bit(uint32_t *tab, int index)
@@ -166,7 +133,7 @@ static inline void reset_bit(uint32_t *tab, int index)
     tab[i] &= ~mask;
 }
 
-void apic_local_deliver(CPUState *env, int vector)
+static void apic_local_deliver(CPUState *env, int vector)
 {
     APICState *s = env->apic_state;
     uint32_t lvt = s->lvt[vector];
@@ -194,6 +161,27 @@ void apic_local_deliver(CPUState *env, int vector)
             (lvt & APIC_LVT_LEVEL_TRIGGER))
             trigger_mode = APIC_TRIGGER_LEVEL;
         apic_set_irq(s, lvt & 0xff, trigger_mode);
+    }
+}
+
+void apic_deliver_pic_intr(CPUState *env, int level)
+{
+    if (level)
+        apic_local_deliver(env, APIC_LVT_LINT0);
+    else {
+        APICState *s = env->apic_state;
+        uint32_t lvt = s->lvt[APIC_LVT_LINT0];
+
+        switch ((lvt >> 8) & 7) {
+        case APIC_DM_FIXED:
+            if (!(lvt & APIC_LVT_LEVEL_TRIGGER))
+                break;
+            reset_bit(s->irr, lvt & 0xff);
+            /* fall through */
+        case APIC_DM_EXTINT:
+            cpu_reset_interrupt(env, CPU_INTERRUPT_HARD);
+            break;
+        }
     }
 }
 
@@ -437,6 +425,11 @@ static void apic_init_ipi(APICState *s)
     s->initial_count = 0;
     s->initial_count_load_time = 0;
     s->next_time = 0;
+
+    cpu_reset(s->cpu_env);
+
+    if (!(s->apicbase & MSR_IA32_APICBASE_BSP))
+        s->cpu_env->halted = 1;
 }
 
 /* send a SIPI message to the CPU to start it */
@@ -566,6 +559,8 @@ static void apic_timer_update(APICState *s, int64_t current_time)
         d = (current_time - s->initial_count_load_time) >>
             s->count_shift;
         if (s->lvt[APIC_LVT_TIMER] & APIC_LVT_TIMER_PERIODIC) {
+            if (!s->initial_count)
+                goto no_timer;
             d = ((d / ((uint64_t)s->initial_count + 1)) + 1) * ((uint64_t)s->initial_count + 1);
         } else {
             if (d >= s->initial_count)
@@ -846,6 +841,10 @@ static int apic_load(QEMUFile *f, void *opaque, int version_id)
 static void apic_reset(void *opaque)
 {
     APICState *s = opaque;
+
+    s->apicbase = 0xfee00000 |
+        (s->id ? 0 : MSR_IA32_APICBASE_BSP) | MSR_IA32_APICBASE_ENABLE;
+
     apic_init_ipi(s);
 
     if (s->id == 0) {
@@ -883,8 +882,6 @@ int apic_init(CPUState *env)
     s->id = last_apic_id++;
     env->cpuid_apic_id = s->id;
     s->cpu_env = env;
-    s->apicbase = 0xfee00000 |
-        (s->id ? 0 : MSR_IA32_APICBASE_BSP) | MSR_IA32_APICBASE_ENABLE;
 
     apic_reset(s);
 

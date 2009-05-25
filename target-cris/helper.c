@@ -74,7 +74,6 @@ int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 
 	D(printf ("%s addr=%x pc=%x rw=%x\n", __func__, address, env->pc, rw));
 	address &= TARGET_PAGE_MASK;
-	prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 	miss = cris_mmu_translate(&res, env, address, rw, mmu_idx);
 	if (miss)
 	{
@@ -90,9 +89,12 @@ int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 	}
 	else
 	{
-		phy = res.phy;
+		/*
+		 * Mask off the cache selection bit. The ETRAX busses do not
+		 * see the top bit.
+		 */
+		phy = res.phy & ~0x80000000;
 		prot = res.prot;
-		address &= TARGET_PAGE_MASK;
 		r = tlb_set_page(env, address, phy, prot, mmu_idx, is_softmmu);
 	}
 	if (r > 0)
@@ -117,7 +119,7 @@ void do_interrupt(CPUState *env)
 			/* These exceptions are genereated by the core itself.
 			   ERP should point to the insn following the brk.  */
 			ex_vec = env->trap_vector;
-			env->pregs[PR_ERP] = env->pc + 2;
+			env->pregs[PR_ERP] = env->pc;
 			break;
 
 		case EXCP_NMI:
@@ -140,6 +142,9 @@ void do_interrupt(CPUState *env)
 			env->pregs[PR_ERP] = env->pc;
 			break;
 	}
+
+	/* Fill in the IDX field.  */
+	env->pregs[PR_EXS] = (ex_vec & 0xff) << 8;
 
 	if (env->dslot) {
 		D(fprintf(logfile, "excp isr=%x PC=%x ds=%d SP=%x"

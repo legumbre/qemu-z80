@@ -26,6 +26,7 @@
 #include "qemu-timer.h"
 #include "console.h"
 #include "omap.h"	/* For struct i2s_codec_s and struct uwire_slave_s */
+#include "devices.h"
 
 #define TSC_DATA_REGISTERS_PAGE		0x0
 #define TSC_CONTROL_REGISTERS_PAGE	0x1
@@ -1046,8 +1047,8 @@ static void tsc210x_save(QEMUFile *f, void *opaque)
     qemu_put_be16s(f, &s->pll[0]);
     qemu_put_be16s(f, &s->pll[1]);
     qemu_put_be16s(f, &s->volume);
-    qemu_put_be64(f, (uint64_t) (s->volume_change - now));
-    qemu_put_be64(f, (uint64_t) (s->powerdown - now));
+    qemu_put_sbe64(f, (s->volume_change - now));
+    qemu_put_sbe64(f, (s->powerdown - now));
     qemu_put_byte(f, s->softstep);
     qemu_put_be16s(f, &s->dac_power);
 
@@ -1092,8 +1093,8 @@ static int tsc210x_load(QEMUFile *f, void *opaque, int version_id)
     qemu_get_be16s(f, &s->pll[0]);
     qemu_get_be16s(f, &s->pll[1]);
     qemu_get_be16s(f, &s->volume);
-    s->volume_change = (int64_t) qemu_get_be64(f) + now;
-    s->powerdown = (int64_t) qemu_get_be64(f) + now;
+    s->volume_change = qemu_get_sbe64(f) + now;
+    s->powerdown = qemu_get_sbe64(f) + now;
     s->softstep = qemu_get_byte(f);
     qemu_get_be16s(f, &s->dac_power);
 
@@ -1106,8 +1107,6 @@ static int tsc210x_load(QEMUFile *f, void *opaque, int version_id)
 
     return 0;
 }
-
-static int tsc2102_iid = 0;
 
 struct uwire_slave_s *tsc2102_init(qemu_irq pint, AudioState *audio)
 {
@@ -1154,7 +1153,7 @@ struct uwire_slave_s *tsc2102_init(qemu_irq pint, AudioState *audio)
         AUD_register_card(s->audio, s->name, &s->card);
 
     qemu_register_reset((void *) tsc210x_reset, s);
-    register_savevm(s->name, tsc2102_iid ++, 0,
+    register_savevm(s->name, -1, 0,
                     tsc210x_save, tsc210x_load, s);
 
     return &s->chip;
@@ -1208,8 +1207,7 @@ struct uwire_slave_s *tsc2301_init(qemu_irq penirq, qemu_irq kbirq,
         AUD_register_card(s->audio, s->name, &s->card);
 
     qemu_register_reset((void *) tsc210x_reset, s);
-    register_savevm(s->name, tsc2102_iid ++, 0,
-                    tsc210x_save, tsc210x_load, s);
+    register_savevm(s->name, -1, 0, tsc210x_save, tsc210x_load, s);
 
     return &s->chip;
 }

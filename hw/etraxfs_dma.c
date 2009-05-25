@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include "hw.h"
+#include "qemu-common.h"
+#include "sysemu.h"
 
 #include "etraxfs_dma.h"
 
@@ -156,7 +158,7 @@ enum {
 
 enum dma_ch_state
 {
-	RST = 0,
+	RST = 1,
 	STOPPED = 2,
 	RUNNING = 4
 };
@@ -190,6 +192,8 @@ struct fs_dma_ctrl
 
 	int nr_channels;
 	struct fs_dma_channel *channels;
+
+        QEMUBH *bh;
 };
 
 static inline uint32_t channel_reg(struct fs_dma_ctrl *ctrl, int c, int reg)
@@ -314,6 +318,8 @@ static inline void channel_start(struct fs_dma_ctrl *ctrl, int c)
 		ctrl->channels[c].state = RUNNING;
 	} else
 		printf("WARNING: starting DMA ch %d with no client\n", c);
+
+        qemu_bh_schedule_idle(ctrl->bh);
 }
 
 static void channel_continue(struct fs_dma_ctrl *ctrl, int c)
@@ -387,78 +393,86 @@ static void channel_update_irq(struct fs_dma_ctrl *ctrl, int c)
                 qemu_irq_lower(ctrl->channels[c].irq[0]);
 }
 
-static void channel_out_run(struct fs_dma_ctrl *ctrl, int c)
+static int channel_out_run(struct fs_dma_ctrl *ctrl, int c)
 {
 	uint32_t len;
 	uint32_t saved_data_buf;
 	unsigned char buf[2 * 1024];
 
-	if (ctrl->channels[c].eol == 1)
-		return;
+	if (ctrl->channels[c].eol)
+		return 0;
 
-	saved_data_buf = channel_reg(ctrl, c, RW_SAVED_DATA_BUF);
+	do {
+		saved_data_buf = channel_reg(ctrl, c, RW_SAVED_DATA_BUF);
 
-	D(fprintf(logfile, "ch=%d buf=%x after=%x saved_data_buf=%x\n",
-		 c,
-		 (uint32_t)ctrl->channels[c].current_d.buf,
-		 (uint32_t)ctrl->channels[c].current_d.after,
-		 saved_data_buf));
+		D(printf("ch=%d buf=%x after=%x saved_data_buf=%x\n",
+			 c,
+			 (uint32_t)ctrl->channels[c].current_d.buf,
+			 (uint32_t)ctrl->channels[c].current_d.after,
+			 saved_data_buf));
 
-	len = (uint32_t)(unsigned long) ctrl->channels[c].current_d.after;
-	len -= saved_data_buf;
+		len = (uint32_t)(unsigned long)
+			ctrl->channels[c].current_d.after;
+		len -= saved_data_buf;
 
-	if (len > sizeof buf)
-		len = sizeof buf;
-	cpu_physical_memory_read (saved_data_buf, buf, len);
+		if (len > sizeof buf)
+			len = sizeof buf;
+		cpu_physical_memory_read (saved_data_buf, buf, len);
 
-	D(printf("channel %d pushes %x %u bytes\n", c, 
-		 saved_data_buf, len));
+		D(printf("channel %d pushes %x %u bytes\n", c, 
+			 saved_data_buf, len));
 
-	if (ctrl->channels[c].client->client.push)
-		ctrl->channels[c].client->client.push(
-			ctrl->channels[c].client->client.opaque, buf, len);
-	else
-		printf("WARNING: DMA ch%d dataloss, no attached client.\n", c);
+		if (ctrl->channels[c].client->client.push)
+			ctrl->channels[c].client->client.push(
+				ctrl->channels[c].client->client.opaque,
+				buf, len);
+		else
+			printf("WARNING: DMA ch%d dataloss,"
+			       " no attached client.\n", c);
 
-	saved_data_buf += len;
+		saved_data_buf += len;
 
-	if (saved_data_buf ==
-	    (uint32_t)(unsigned long)ctrl->channels[c].current_d.after) {
-		/* Done. Step to next.  */
-		if (ctrl->channels[c].current_d.out_eop) {
-			/* TODO: signal eop to the client.  */
-			D(printf("signal eop\n"));
+		if (saved_data_buf == (uint32_t)(unsigned long)
+				ctrl->channels[c].current_d.after) {
+			/* Done. Step to next.  */
+			if (ctrl->channels[c].current_d.out_eop) {
+				/* TODO: signal eop to the client.  */
+				D(printf("signal eop\n"));
+			}
+			if (ctrl->channels[c].current_d.intr) {
+				/* TODO: signal eop to the client.  */
+				/* data intr.  */
+				D(printf("signal intr\n"));
+				ctrl->channels[c].regs[R_INTR] |= (1 << 2);
+				channel_update_irq(ctrl, c);
+			}
+			if (ctrl->channels[c].current_d.eol) {
+				D(printf("channel %d EOL\n", c));
+				ctrl->channels[c].eol = 1;
+
+				/* Mark the context as disabled.  */
+				ctrl->channels[c].current_c.dis = 1;
+				channel_store_c(ctrl, c);
+
+				channel_stop(ctrl, c);
+			} else {
+				ctrl->channels[c].regs[RW_SAVED_DATA] =
+					(uint32_t)(unsigned long)ctrl->
+						channels[c].current_d.next;
+				/* Load new descriptor.  */
+				channel_load_d(ctrl, c);
+				saved_data_buf = (uint32_t)(unsigned long)
+					ctrl->channels[c].current_d.buf;
+			}
+
+			channel_store_d(ctrl, c);
+			ctrl->channels[c].regs[RW_SAVED_DATA_BUF] =
+							saved_data_buf;
+			D(dump_d(c, &ctrl->channels[c].current_d));
 		}
-		if (ctrl->channels[c].current_d.intr) {
-			/* TODO: signal eop to the client.  */
-			/* data intr.  */
-			D(printf("signal intr\n"));
-			ctrl->channels[c].regs[R_INTR] |= (1 << 2);
-			channel_update_irq(ctrl, c);
-		}
-		if (ctrl->channels[c].current_d.eol) {
-			D(printf("channel %d EOL\n", c));
-			ctrl->channels[c].eol = 1;
-
-			/* Mark the context as disabled.  */
-			ctrl->channels[c].current_c.dis = 1;
-			channel_store_c(ctrl, c);
-
-			channel_stop(ctrl, c);
-		} else {
-			ctrl->channels[c].regs[RW_SAVED_DATA] =
-				(uint32_t)(unsigned long) ctrl->channels[c].current_d.next;
-			/* Load new descriptor.  */
-			channel_load_d(ctrl, c);
-			saved_data_buf = (uint32_t)(unsigned long)
-				ctrl->channels[c].current_d.buf;
-		}
-
-		channel_store_d(ctrl, c);
 		ctrl->channels[c].regs[RW_SAVED_DATA_BUF] = saved_data_buf;
-		D(dump_d(c, &ctrl->channels[c].current_d));
-	}
-	ctrl->channels[c].regs[RW_SAVED_DATA_BUF] = saved_data_buf;
+	} while (!ctrl->channels[c].eol);
+	return 1;
 }
 
 static int channel_in_process(struct fs_dma_ctrl *ctrl, int c, 
@@ -471,7 +485,7 @@ static int channel_in_process(struct fs_dma_ctrl *ctrl, int c,
 		return 0;
 
 	saved_data_buf = channel_reg(ctrl, c, RW_SAVED_DATA_BUF);
-	len = (uint32_t)(unsigned long) ctrl->channels[c].current_d.after;
+	len = (uint32_t)(unsigned long)ctrl->channels[c].current_d.after;
 	len -= saved_data_buf;
 	
 	if (len > buflen)
@@ -518,7 +532,8 @@ static int channel_in_process(struct fs_dma_ctrl *ctrl, int c,
 			channel_stop(ctrl, c);
 		} else {
 			ctrl->channels[c].regs[RW_SAVED_DATA] =
-				(uint32_t)(unsigned long) ctrl->channels[c].current_d.next;
+				(uint32_t)(unsigned long)ctrl->
+					channels[c].current_d.next;
 			/* Load new descriptor.  */
 			channel_load_d(ctrl, c);
 			saved_data_buf = (uint32_t)(unsigned long)
@@ -530,11 +545,14 @@ static int channel_in_process(struct fs_dma_ctrl *ctrl, int c,
 	return len;
 }
 
-static inline void channel_in_run(struct fs_dma_ctrl *ctrl, int c)
+static inline int channel_in_run(struct fs_dma_ctrl *ctrl, int c)
 {
-	if (ctrl->channels[c].client->client.pull)
+	if (ctrl->channels[c].client->client.pull) {
 		ctrl->channels[c].client->client.pull(
 			ctrl->channels[c].client->client.opaque);
+		return 1;
+	} else
+		return 0;
 }
 
 static uint32_t dma_rinvalid (void *opaque, target_phys_addr_t addr)
@@ -583,6 +601,17 @@ dma_winvalid (void *opaque, target_phys_addr_t addr, uint32_t value)
 }
 
 static void
+dma_update_state(struct fs_dma_ctrl *ctrl, int c)
+{
+	if ((ctrl->channels[c].regs[RW_CFG] & 1) != 3) {
+		if (ctrl->channels[c].regs[RW_CFG] & 2)
+			ctrl->channels[c].state = STOPPED;
+		if (!(ctrl->channels[c].regs[RW_CFG] & 1))
+			ctrl->channels[c].state = RST;
+	}
+}
+
+static void
 dma_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 {
         struct fs_dma_ctrl *ctrl = opaque;
@@ -599,9 +628,13 @@ dma_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 
 		case RW_CFG:
 			ctrl->channels[c].regs[addr] = value;
+			dma_update_state(ctrl, c);
 			break;
 		case RW_CMD:
 			/* continue.  */
+			if (value & ~1)
+				printf("Invalid store to ch=%d RW_CMD %x\n",
+				       c, value);
 			ctrl->channels[c].regs[addr] = value;
 			channel_continue(ctrl, c);
 			break;
@@ -622,6 +655,10 @@ dma_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 			break;
 
 		case RW_STREAM_CMD:
+			if (value & ~1023)
+				printf("Invalid store to ch=%d "
+				       "RW_STREAMCMD %x\n",
+				       c, value);
 			ctrl->channels[c].regs[addr] = value;
 			D(printf("stream_cmd ch=%d\n", c));
 			channel_stream_cmd(ctrl, c, value);
@@ -645,7 +682,7 @@ static CPUWriteMemoryFunc *dma_write[] = {
 	&dma_writel,
 };
 
-void etraxfs_dmac_run(void *opaque)
+static int etraxfs_dmac_run(void *opaque)
 {
 	struct fs_dma_ctrl *ctrl = opaque;
 	int i;
@@ -657,13 +694,14 @@ void etraxfs_dmac_run(void *opaque)
 	{
 		if (ctrl->channels[i].state == RUNNING)
 		{
-			p++;
-			if (ctrl->channels[i].input)
-				channel_in_run(ctrl, i);
-			else
-				channel_out_run(ctrl, i);
+			if (ctrl->channels[i].input) {
+				p += channel_in_run(ctrl, i);
+			} else {
+				p += channel_out_run(ctrl, i);
+			}
 		}
 	}
+	return p;
 }
 
 int etraxfs_dmac_input(struct etraxfs_dma_client *client, 
@@ -691,11 +729,16 @@ void etraxfs_dmac_connect_client(void *opaque, int c,
 }
 
 
-static void *etraxfs_dmac;
-void DMA_run(void)
+static void DMA_run(void *opaque)
 {
-	if (etraxfs_dmac)
-		etraxfs_dmac_run(etraxfs_dmac);
+    struct fs_dma_ctrl *etraxfs_dmac = opaque;
+    int p = 1;
+
+    if (vm_running)
+        p = etraxfs_dmac_run(etraxfs_dmac);
+
+    if (p)
+        qemu_bh_schedule_idle(etraxfs_dmac->bh);
 }
 
 void *etraxfs_dmac_init(CPUState *env, 
@@ -707,6 +750,8 @@ void *etraxfs_dmac_init(CPUState *env,
 	ctrl = qemu_mallocz(sizeof *ctrl);
 	if (!ctrl)
 		return NULL;
+
+        ctrl->bh = qemu_bh_new(DMA_run, ctrl);
 
 	ctrl->base = base;
 	ctrl->env = env;
@@ -726,8 +771,6 @@ void *etraxfs_dmac_init(CPUState *env,
 					      ctrl->channels[i].regmap);
 	}
 
-	/* Hax, we only support one DMA controller at a time.  */
-	etraxfs_dmac = ctrl;
 	return ctrl;
   err:
 	qemu_free(ctrl->channels);

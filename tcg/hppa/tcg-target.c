@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#ifndef NDEBUG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r0",
     "%r1",
@@ -56,6 +57,7 @@ static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%sp",
     "%r31",
 };
+#endif
 
 static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_R4,
@@ -106,7 +108,7 @@ static inline int tcg_target_get_call_iarg_regs_count(int flags)
 }
 
 /* parse target specific constraints */
-int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
+static int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
 {
     const char *ct_str;
 
@@ -345,15 +347,8 @@ static inline void tcg_out_call(TCGContext *s, void *func)
 }
 
 #if defined(CONFIG_SOFTMMU)
-extern void __ldb_mmu(void);
-extern void __ldw_mmu(void);
-extern void __ldl_mmu(void);
-extern void __ldq_mmu(void);
 
-extern void __stb_mmu(void);
-extern void __stw_mmu(void);
-extern void __stl_mmu(void);
-extern void __stq_mmu(void);
+#include "../../softmmu_defs.h"
 
 static void *qemu_ld_helpers[4] = {
     __ldb_mmu,

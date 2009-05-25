@@ -10,29 +10,6 @@
 
 register struct CPUMIPSState *env asm(AREG0);
 
-#if defined (USE_HOST_FLOAT_REGS)
-#error "implement me."
-#else
-#define FDT0 (env->ft0.fd)
-#define FDT1 (env->ft1.fd)
-#define FDT2 (env->ft2.fd)
-#define FST0 (env->ft0.fs[FP_ENDIAN_IDX])
-#define FST1 (env->ft1.fs[FP_ENDIAN_IDX])
-#define FST2 (env->ft2.fs[FP_ENDIAN_IDX])
-#define FSTH0 (env->ft0.fs[!FP_ENDIAN_IDX])
-#define FSTH1 (env->ft1.fs[!FP_ENDIAN_IDX])
-#define FSTH2 (env->ft2.fs[!FP_ENDIAN_IDX])
-#define DT0 (env->ft0.d)
-#define DT1 (env->ft1.d)
-#define DT2 (env->ft2.d)
-#define WT0 (env->ft0.w[FP_ENDIAN_IDX])
-#define WT1 (env->ft1.w[FP_ENDIAN_IDX])
-#define WT2 (env->ft2.w[FP_ENDIAN_IDX])
-#define WTH0 (env->ft0.w[!FP_ENDIAN_IDX])
-#define WTH1 (env->ft1.w[!FP_ENDIAN_IDX])
-#define WTH2 (env->ft2.w[!FP_ENDIAN_IDX])
-#endif
-
 #include "cpu.h"
 #include "exec-all.h"
 
@@ -56,10 +33,6 @@ void cpu_loop_exit(void);
 void do_raise_exception_err (uint32_t exception, int error_code);
 void do_raise_exception (uint32_t exception);
 
-void cpu_dump_state(CPUState *env, FILE *f,
-                    int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
-                    int flags);
-void cpu_mips_irqctrl_init (void);
 uint32_t cpu_mips_get_random (CPUState *env);
 uint32_t cpu_mips_get_count (CPUState *env);
 void cpu_mips_store_count (CPUState *env, uint32_t value);
@@ -70,15 +43,15 @@ void cpu_mips_update_irq (CPUState *env);
 void cpu_mips_clock_init (CPUState *env);
 void cpu_mips_tlb_flush (CPUState *env, int flush_global);
 
-static always_inline void env_to_regs(void)
+static inline void env_to_regs(void)
 {
 }
 
-static always_inline void regs_to_env(void)
+static inline void regs_to_env(void)
 {
 }
 
-static always_inline int cpu_halted(CPUState *env)
+static inline int cpu_halted(CPUState *env)
 {
     if (!env->halted)
         return 0;
@@ -90,10 +63,11 @@ static always_inline int cpu_halted(CPUState *env)
     return EXCP_HALTED;
 }
 
-static always_inline void compute_hflags(CPUState *env)
+static inline void compute_hflags(CPUState *env)
 {
     env->hflags &= ~(MIPS_HFLAG_COP1X | MIPS_HFLAG_64 | MIPS_HFLAG_CP0 |
-                     MIPS_HFLAG_F64 | MIPS_HFLAG_FPU | MIPS_HFLAG_KSU);
+                     MIPS_HFLAG_F64 | MIPS_HFLAG_FPU | MIPS_HFLAG_KSU |
+                     MIPS_HFLAG_UX);
     if (!(env->CP0_Status & (1 << CP0St_EXL)) &&
         !(env->CP0_Status & (1 << CP0St_ERL)) &&
         !(env->hflags & MIPS_HFLAG_DM)) {
@@ -104,6 +78,8 @@ static always_inline void compute_hflags(CPUState *env)
         (env->CP0_Status & (1 << CP0St_PX)) ||
         (env->CP0_Status & (1 << CP0St_UX)))
         env->hflags |= MIPS_HFLAG_64;
+    if (env->CP0_Status & (1 << CP0St_UX))
+        env->hflags |= MIPS_HFLAG_UX;
 #endif
     if ((env->CP0_Status & (1 << CP0St_CU0)) ||
         !(env->hflags & MIPS_HFLAG_KSU))
@@ -113,7 +89,7 @@ static always_inline void compute_hflags(CPUState *env)
     if (env->CP0_Status & (1 << CP0St_FR))
         env->hflags |= MIPS_HFLAG_F64;
     if (env->insn_flags & ISA_MIPS32R2) {
-        if (env->fpu->fcr0 & (1 << FCR0_F64))
+        if (env->active_fpu.fcr0 & (1 << FCR0_F64))
             env->hflags |= MIPS_HFLAG_COP1X;
     } else if (env->insn_flags & ISA_MIPS32) {
         if (env->hflags & MIPS_HFLAG_64)

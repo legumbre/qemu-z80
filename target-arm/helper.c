@@ -64,7 +64,7 @@ static void cpu_reset_model_id(CPUARMState *env, uint32_t id)
         env->vfp.xregs[ARM_VFP_MVFR0] = 0x11111111;
         env->vfp.xregs[ARM_VFP_MVFR1] = 0x00000000;
         memcpy(env->cp15.c0_c1, arm1136_cp15_c0_c1, 8 * sizeof(uint32_t));
-        memcpy(env->cp15.c0_c1, arm1136_cp15_c0_c2, 8 * sizeof(uint32_t));
+        memcpy(env->cp15.c0_c2, arm1136_cp15_c0_c2, 8 * sizeof(uint32_t));
         env->cp15.c0_cachetype = 0x1dd20d2;
         break;
     case ARM_CPUID_ARM11MPCORE:
@@ -76,7 +76,7 @@ static void cpu_reset_model_id(CPUARMState *env, uint32_t id)
         env->vfp.xregs[ARM_VFP_MVFR0] = 0x11111111;
         env->vfp.xregs[ARM_VFP_MVFR1] = 0x00000000;
         memcpy(env->cp15.c0_c1, mpcore_cp15_c0_c1, 8 * sizeof(uint32_t));
-        memcpy(env->cp15.c0_c1, mpcore_cp15_c0_c2, 8 * sizeof(uint32_t));
+        memcpy(env->cp15.c0_c2, mpcore_cp15_c0_c2, 8 * sizeof(uint32_t));
         env->cp15.c0_cachetype = 0x1dd20d2;
         break;
     case ARM_CPUID_CORTEXA8:
@@ -92,7 +92,7 @@ static void cpu_reset_model_id(CPUARMState *env, uint32_t id)
         env->vfp.xregs[ARM_VFP_MVFR0] = 0x11110222;
         env->vfp.xregs[ARM_VFP_MVFR1] = 0x00011100;
         memcpy(env->cp15.c0_c1, cortexa8_cp15_c0_c1, 8 * sizeof(uint32_t));
-        memcpy(env->cp15.c0_c1, cortexa8_cp15_c0_c2, 8 * sizeof(uint32_t));
+        memcpy(env->cp15.c0_c2, cortexa8_cp15_c0_c2, 8 * sizeof(uint32_t));
         env->cp15.c0_cachetype = 0x1dd20d2;
         break;
     case ARM_CPUID_CORTEXM3:
@@ -168,9 +168,62 @@ void cpu_reset(CPUARMState *env)
     if (IS_M(env))
         env->uncached_cpsr &= ~CPSR_I;
     env->vfp.xregs[ARM_VFP_FPEXC] = 0;
+    env->cp15.c2_base_mask = 0xffffc000u;
 #endif
     env->regs[15] = 0;
     tlb_flush(env, 1);
+}
+
+static int vfp_gdb_get_reg(CPUState *env, uint8_t *buf, int reg)
+{
+    int nregs;
+
+    /* VFP data registers are always little-endian.  */
+    nregs = arm_feature(env, ARM_FEATURE_VFP3) ? 32 : 16;
+    if (reg < nregs) {
+        stfq_le_p(buf, env->vfp.regs[reg]);
+        return 8;
+    }
+    if (arm_feature(env, ARM_FEATURE_NEON)) {
+        /* Aliases for Q regs.  */
+        nregs += 16;
+        if (reg < nregs) {
+            stfq_le_p(buf, env->vfp.regs[(reg - 32) * 2]);
+            stfq_le_p(buf + 8, env->vfp.regs[(reg - 32) * 2 + 1]);
+            return 16;
+        }
+    }
+    switch (reg - nregs) {
+    case 0: stl_p(buf, env->vfp.xregs[ARM_VFP_FPSID]); return 4;
+    case 1: stl_p(buf, env->vfp.xregs[ARM_VFP_FPSCR]); return 4;
+    case 2: stl_p(buf, env->vfp.xregs[ARM_VFP_FPEXC]); return 4;
+    }
+    return 0;
+}
+
+static int vfp_gdb_set_reg(CPUState *env, uint8_t *buf, int reg)
+{
+    int nregs;
+
+    nregs = arm_feature(env, ARM_FEATURE_VFP3) ? 32 : 16;
+    if (reg < nregs) {
+        env->vfp.regs[reg] = ldfq_le_p(buf);
+        return 8;
+    }
+    if (arm_feature(env, ARM_FEATURE_NEON)) {
+        nregs += 16;
+        if (reg < nregs) {
+            env->vfp.regs[(reg - 32) * 2] = ldfq_le_p(buf);
+            env->vfp.regs[(reg - 32) * 2 + 1] = ldfq_le_p(buf + 8);
+            return 16;
+        }
+    }
+    switch (reg - nregs) {
+    case 0: env->vfp.xregs[ARM_VFP_FPSID] = ldl_p(buf); return 4;
+    case 1: env->vfp.xregs[ARM_VFP_FPSCR] = ldl_p(buf); return 4;
+    case 2: env->vfp.xregs[ARM_VFP_FPEXC] = ldl_p(buf); return 4;
+    }
+    return 0;
 }
 
 CPUARMState *cpu_arm_init(const char *cpu_model)
@@ -194,6 +247,16 @@ CPUARMState *cpu_arm_init(const char *cpu_model)
     env->cpu_model_str = cpu_model;
     env->cp15.c0_cpuid = id;
     cpu_reset(env);
+    if (arm_feature(env, ARM_FEATURE_NEON)) {
+        gdb_register_coprocessor(env, vfp_gdb_get_reg, vfp_gdb_set_reg,
+                                 51, "arm-neon.xml", 0);
+    } else if (arm_feature(env, ARM_FEATURE_VFP3)) {
+        gdb_register_coprocessor(env, vfp_gdb_get_reg, vfp_gdb_set_reg,
+                                 35, "arm-vfp3.xml", 0);
+    } else if (arm_feature(env, ARM_FEATURE_VFP)) {
+        gdb_register_coprocessor(env, vfp_gdb_get_reg, vfp_gdb_set_reg,
+                                 19, "arm-vfp.xml", 0);
+    }
     return env;
 }
 
@@ -674,7 +737,7 @@ void do_interrupt_v7m(CPUARMState *env)
     /* ??? Should only do this if Configuration Control Register
        STACKALIGN bit is set.  */
     if (env->regs[13] & 4) {
-        env->regs[13] += 4;
+        env->regs[13] -= 4;
         xpsr |= 0x200;
     }
     /* Switch to the handler mode.  */
@@ -848,6 +911,19 @@ static inline int check_ap(CPUState *env, int ap, int domain, int access_type,
   }
 }
 
+static uint32_t get_level1_table_address(CPUState *env, uint32_t address)
+{
+    uint32_t table;
+
+    if (address & env->cp15.c2_mask)
+        table = env->cp15.c2_base1 & 0xffffc000;
+    else
+        table = env->cp15.c2_base0 & env->cp15.c2_base_mask;
+
+    table |= (address >> 18) & 0x3ffc;
+    return table;
+}
+
 static int get_phys_addr_v5(CPUState *env, uint32_t address, int access_type,
 			    int is_user, uint32_t *phys_ptr, int *prot)
 {
@@ -861,11 +937,7 @@ static int get_phys_addr_v5(CPUState *env, uint32_t address, int access_type,
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
-    if (address & env->cp15.c2_mask)
-        table = env->cp15.c2_base1;
-    else
-        table = env->cp15.c2_base0;
-    table = (table & 0xffffc000) | ((address >> 18) & 0x3ffc);
+    table = get_level1_table_address(env, address);
     desc = ldl_phys(table);
     type = (desc & 3);
     domain = (env->cp15.c3 >> ((desc >> 4) & 0x1e)) & 3;
@@ -953,11 +1025,7 @@ static int get_phys_addr_v6(CPUState *env, uint32_t address, int access_type,
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
-    if (address & env->cp15.c2_mask)
-        table = env->cp15.c2_base1;
-    else
-        table = env->cp15.c2_base0;
-    table = (table & 0xffffc000) | ((address >> 18) & 0x3ffc);
+    table = get_level1_table_address(env, address);
     desc = ldl_phys(table);
     type = (desc & 3);
     if (type == 0) {
@@ -1272,9 +1340,11 @@ void HELPER(set_cp15)(CPUState *env, uint32_t insn, uint32_t val)
         case 2:
             if (arm_feature(env, ARM_FEATURE_XSCALE))
                 goto bad_reg;
-            env->cp15.c1_coproc = val;
-            /* ??? Is this safe when called from within a TB?  */
-            tb_flush(env);
+            if (env->cp15.c1_coproc != val) {
+                env->cp15.c1_coproc = val;
+                /* ??? Is this safe when called from within a TB?  */
+                tb_flush(env);
+            }
             break;
         default:
             goto bad_reg;
@@ -1301,7 +1371,10 @@ void HELPER(set_cp15)(CPUState *env, uint32_t insn, uint32_t val)
 		env->cp15.c2_base1 = val;
 		break;
 	    case 2:
+                val &= 7;
+                env->cp15.c2_control = val;
 		env->cp15.c2_mask = ~(((uint32_t)0xffffffffu) >> val);
+                env->cp15.c2_base_mask = ~((uint32_t)0x3fffu >> val);
 		break;
 	    default:
 		goto bad_reg;
@@ -1619,17 +1692,7 @@ uint32_t HELPER(get_cp15)(CPUState *env, uint32_t insn)
 	    case 1:
 		return env->cp15.c2_base1;
 	    case 2:
-		{
-		    int n;
-		    uint32_t mask;
-		    n = 0;
-		    mask = env->cp15.c2_mask;
-		    while (mask) {
-			n++;
-			mask <<= 1;
-		    }
-		    return n;
-		}
+                return env->cp15.c2_control;
 	    default:
 		goto bad_reg;
 	    }
@@ -2059,7 +2122,7 @@ static inline uint8_t sub8_usat(uint8_t a, uint8_t b)
     uint32_t sum; \
     sum = (uint32_t)(uint16_t)(a) + (uint32_t)(uint16_t)(b); \
     RESULT(sum, n, 16); \
-    if ((sum >> 16) == 0) \
+    if ((sum >> 16) == 1) \
         ge |= 3 << (n * 2); \
     } while(0)
 
@@ -2067,8 +2130,8 @@ static inline uint8_t sub8_usat(uint8_t a, uint8_t b)
     uint32_t sum; \
     sum = (uint32_t)(uint8_t)(a) + (uint32_t)(uint8_t)(b); \
     RESULT(sum, n, 8); \
-    if ((sum >> 8) == 0) \
-        ge |= 3 << (n * 2); \
+    if ((sum >> 8) == 1) \
+        ge |= 1 << n; \
     } while(0)
 
 #define SUB16(a, b, n) do { \
@@ -2084,7 +2147,7 @@ static inline uint8_t sub8_usat(uint8_t a, uint8_t b)
     sum = (uint32_t)(uint8_t)(a) - (uint32_t)(uint8_t)(b); \
     RESULT(sum, n, 8); \
     if ((sum >> 8) == 0) \
-        ge |= 3 << (n * 2); \
+        ge |= 1 << n; \
     } while(0)
 
 #define PFX u

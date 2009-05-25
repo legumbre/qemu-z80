@@ -18,6 +18,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#ifndef _EXEC_ALL_H_
+#define _EXEC_ALL_H_
 /* allow to see translation results - the slowdown should be negligible, so we leave it */
 #define DEBUG_DISAS
 
@@ -57,11 +59,10 @@ typedef void (GenOpFunc1)(long);
 typedef void (GenOpFunc2)(long, long);
 typedef void (GenOpFunc3)(long, long, long);
 
-extern FILE *logfile;
-extern int loglevel;
+#include "qemu-log.h"
 
-int gen_intermediate_code(CPUState *env, struct TranslationBlock *tb);
-int gen_intermediate_code_pc(CPUState *env, struct TranslationBlock *tb);
+void gen_intermediate_code(CPUState *env, struct TranslationBlock *tb);
+void gen_intermediate_code_pc(CPUState *env, struct TranslationBlock *tb);
 void gen_pc_load(CPUState *env, struct TranslationBlock *tb,
                  unsigned long searched_pc, int pc_pos, void *puc);
 
@@ -191,38 +192,8 @@ extern int code_gen_max_blocks;
 #if defined(USE_DIRECT_JUMP)
 
 #if defined(__powerpc__)
-static inline void flush_icache_range(unsigned long start, unsigned long stop);
-static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr)
-{
-    /* This must be in concord with INDEX_op_goto_tb inside tcg_out_op */
-    uint32_t *ptr;
-    long disp = addr - jmp_addr;
-    unsigned long patch_size;
-
-    ptr = (uint32_t *)jmp_addr;
-
-    if ((disp << 6) >> 6 != disp) {
-        ptr[0] = 0x3c000000 | (addr >> 16);    /* lis 0,addr@ha */
-        ptr[1] = 0x60000000 | (addr & 0xffff); /* la  0,addr@l(0) */
-        ptr[2] = 0x7c0903a6;                   /* mtctr 0 */
-        ptr[3] = 0x4e800420;                   /* brctr */
-        patch_size = 16;
-    } else {
-        /* patch the branch destination */
-        if (disp != 16) {
-            *ptr = 0x48000000 | (disp & 0x03fffffc); /* b disp */
-            patch_size = 4;
-        } else {
-            ptr[0] = 0x60000000; /* nop */
-            ptr[1] = 0x60000000;
-            ptr[2] = 0x60000000;
-            ptr[3] = 0x60000000;
-            patch_size = 16;
-        }
-    }
-    /* flush icache */
-    flush_icache_range(jmp_addr, jmp_addr + patch_size);
-}
+extern void ppc_tb_set_jmp_target(unsigned long jmp_addr, unsigned long addr);
+#define tb_set_jmp_target1 ppc_tb_set_jmp_target
 #elif defined(__i386__) || defined(__x86_64__)
 static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr)
 {
@@ -287,10 +258,6 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
 
 TranslationBlock *tb_find_pc(unsigned long pc_ptr);
 
-#ifndef offsetof
-#define offsetof(type, field) ((size_t) &((type *)0)->field)
-#endif
-
 #if defined(_WIN32)
 #define ASM_DATA_SECTION ".section \".data\"\n"
 #define ASM_PREVIOUS_SECTION ".section .text\n"
@@ -319,6 +286,8 @@ extern int tb_invalidated_flag;
 
 void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
               void *retaddr);
+
+#include "softmmu_defs.h"
 
 #define ACCESS_TYPE (NB_MMU_MODES + 1)
 #define MEMSUFFIX _code
@@ -357,14 +326,14 @@ static inline target_ulong get_phys_addr_code(CPUState *env1, target_ulong addr)
 
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = cpu_mmu_index(env1);
-    if (__builtin_expect(env1->tlb_table[mmu_idx][page_index].addr_code !=
-                         (addr & TARGET_PAGE_MASK), 0)) {
+    if (unlikely(env1->tlb_table[mmu_idx][page_index].addr_code !=
+                 (addr & TARGET_PAGE_MASK))) {
         ldub_code(addr);
     }
     pd = env1->tlb_table[mmu_idx][page_index].addr_code & ~TARGET_PAGE_MASK;
     if (pd > IO_MEM_ROM && !(pd & IO_MEM_ROMD)) {
 #if defined(TARGET_SPARC) || defined(TARGET_MIPS)
-        do_unassigned_access(addr, 0, 1, 0);
+        do_unassigned_access(addr, 0, 1, 0, 4);
 #else
         cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x" TARGET_FMT_lx "\n", addr);
 #endif
@@ -417,4 +386,5 @@ static inline int kqemu_is_ok(CPUState *env)
              (env->eflags & IOPL_MASK) != IOPL_MASK)));
 }
 
+#endif
 #endif

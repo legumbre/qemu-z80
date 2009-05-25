@@ -29,6 +29,8 @@
 #include "exec-all.h"
 #include "svm.h"
 #include "qemu-common.h"
+#include "kvm.h"
+#include "helper.h"
 
 //#define DEBUG_MMU
 
@@ -115,6 +117,8 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
 #ifdef USE_KQEMU
     kqemu_init(env);
 #endif
+    if (kvm_enabled())
+        kvm_init_vcpu(env);
     return env;
 }
 
@@ -146,9 +150,9 @@ static x86_def_t x86_defs[] = {
     {
         .name = "qemu64",
         .level = 2,
-        .vendor1 = 0x68747541, /* "Auth" */
-        .vendor2 = 0x69746e65, /* "enti" */
-        .vendor3 = 0x444d4163, /* "cAMD" */
+        .vendor1 = CPUID_VENDOR_AMD_1,
+        .vendor2 = CPUID_VENDOR_AMD_2,
+        .vendor3 = CPUID_VENDOR_AMD_3,
         .family = 6,
         .model = 2,
         .stepping = 3,
@@ -165,6 +169,27 @@ static x86_def_t x86_defs[] = {
         .xlevel = 0x8000000A,
         .model_id = "QEMU Virtual CPU version " QEMU_VERSION,
     },
+    {
+        .name = "core2duo",
+        .level = 10,
+        .family = 6,
+        .model = 15,
+        .stepping = 11,
+	/* The original CPU also implements these features:
+               CPUID_VME, CPUID_DTS, CPUID_ACPI, CPUID_SS, CPUID_HT,
+               CPUID_TM, CPUID_PBE */
+        .features = PPRO_FEATURES |
+            CPUID_MTRR | CPUID_CLFLUSH | CPUID_MCA |
+            CPUID_PSE36,
+	/* The original CPU also implements these ext features:
+               CPUID_EXT_DTES64, CPUID_EXT_DSCPL, CPUID_EXT_VMX, CPUID_EXT_EST,
+               CPUID_EXT_TM2, CPUID_EXT_CX16, CPUID_EXT_XTPR, CPUID_EXT_PDCM */
+        .ext_features = CPUID_EXT_SSE3 | CPUID_EXT_MONITOR | CPUID_EXT_SSSE3,
+        .ext2_features = CPUID_EXT2_LM | CPUID_EXT2_SYSCALL | CPUID_EXT2_NX,
+        /* Missing: .ext3_features = CPUID_EXT3_LAHF_LM */
+        .xlevel = 0x80000008,
+        .model_id = "Intel(R) Core(TM)2 Duo CPU     T7700  @ 2.40GHz",
+    },
 #endif
     {
         .name = "qemu32",
@@ -176,6 +201,25 @@ static x86_def_t x86_defs[] = {
         .ext_features = CPUID_EXT_SSE3,
         .xlevel = 0,
         .model_id = "QEMU Virtual CPU version " QEMU_VERSION,
+    },
+    {
+        .name = "coreduo",
+        .level = 10,
+        .family = 6,
+        .model = 14,
+        .stepping = 8,
+        /* The original CPU also implements these features:
+               CPUID_DTS, CPUID_ACPI, CPUID_SS, CPUID_HT,
+               CPUID_TM, CPUID_PBE */
+        .features = PPRO_FEATURES | CPUID_VME |
+            CPUID_MTRR | CPUID_CLFLUSH | CPUID_MCA,
+        /* The original CPU also implements these ext features:
+               CPUID_EXT_VMX, CPUID_EXT_EST, CPUID_EXT_TM2, CPUID_EXT_XTPR,
+               CPUID_EXT_PDCM */
+        .ext_features = CPUID_EXT_SSE3 | CPUID_EXT_MONITOR,
+        .ext2_features = CPUID_EXT2_NX,
+        .xlevel = 0x80000008,
+        .model_id = "Genuine Intel(R) CPU           T2600  @ 2.16GHz",
     },
     {
         .name = "486",
@@ -222,11 +266,32 @@ static x86_def_t x86_defs[] = {
         .family = 6,
         .model = 2,
         .stepping = 3,
-        .features = PPRO_FEATURES | PPRO_FEATURES | CPUID_PSE36 | CPUID_VME | CPUID_MTRR | CPUID_MCA,
+        .features = PPRO_FEATURES | CPUID_PSE36 | CPUID_VME | CPUID_MTRR | CPUID_MCA,
         .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | CPUID_EXT2_MMXEXT | CPUID_EXT2_3DNOW | CPUID_EXT2_3DNOWEXT,
         .xlevel = 0x80000008,
         /* XXX: put another string ? */
         .model_id = "QEMU Virtual CPU version " QEMU_VERSION,
+    },
+    {
+        .name = "n270",
+        /* original is on level 10 */
+        .level = 5,
+        .family = 6,
+        .model = 28,
+        .stepping = 2,
+        .features = PPRO_FEATURES |
+            CPUID_MTRR | CPUID_CLFLUSH | CPUID_MCA | CPUID_VME,
+            /* Missing: CPUID_DTS | CPUID_ACPI | CPUID_SS |
+             * CPUID_HT | CPUID_TM | CPUID_PBE */
+            /* Some CPUs got no CPUID_SEP */
+        .ext_features = CPUID_EXT_MONITOR |
+            CPUID_EXT_SSE3 /* PNI */ | CPUID_EXT_SSSE3,
+            /* Missing: CPUID_EXT_DSCPL | CPUID_EXT_EST |
+             * CPUID_EXT_TM2 | CPUID_EXT_XTPR */
+        .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | CPUID_EXT2_NX,
+        /* Missing: .ext3_features = CPUID_EXT3_LAHF_LM */
+        .xlevel = 0x8000000A,
+        .model_id = "Intel(R) Atom(TM) CPU N270   @ 1.60GHz",
     },
 };
 
@@ -273,7 +338,7 @@ static int cpu_x86_find_by_name(x86_def_t *x86_cpu_def, const char *cpu_model)
             } else if (!strcmp(featurestr, "model")) {
                 char *err;
                 model = strtol(val, &err, 10);
-                if (!*val || *err || model < 0 || model > 0xf) {
+                if (!*val || *err || model < 0 || model > 0xff) {
                     fprintf(stderr, "bad numerical value %s\n", val);
                     goto error;
                 }
@@ -347,12 +412,17 @@ static int cpu_x86_register (CPUX86State *env, const char *cpu_model)
         env->cpuid_vendor2 = def->vendor2;
         env->cpuid_vendor3 = def->vendor3;
     } else {
-        env->cpuid_vendor1 = 0x756e6547; /* "Genu" */
-        env->cpuid_vendor2 = 0x49656e69; /* "ineI" */
-        env->cpuid_vendor3 = 0x6c65746e; /* "ntel" */
+        env->cpuid_vendor1 = CPUID_VENDOR_INTEL_1;
+        env->cpuid_vendor2 = CPUID_VENDOR_INTEL_2;
+        env->cpuid_vendor3 = CPUID_VENDOR_INTEL_3;
     }
     env->cpuid_level = def->level;
-    env->cpuid_version = (def->family << 8) | (def->model << 4) | def->stepping;
+    if (def->family > 0x0f)
+        env->cpuid_version = 0xf00 | ((def->family - 0x0f) << 20);
+    else
+        env->cpuid_version = def->family << 8;
+    env->cpuid_version |= ((def->model & 0xf) << 4) | ((def->model >> 4) << 16);
+    env->cpuid_version |= def->stepping;
     env->cpuid_features = def->features;
     env->pat = 0x0007040600070406ULL;
     env->cpuid_ext_features = def->ext_features;
@@ -403,7 +473,7 @@ void cpu_reset(CPUX86State *env)
     env->ldt.limit = 0xffff;
     env->ldt.flags = DESC_P_MASK | (2 << DESC_TYPE_SHIFT);
     env->tr.limit = 0xffff;
-    env->tr.flags = DESC_P_MASK | (11 < DESC_TYPE_SHIFT);
+    env->tr.flags = DESC_P_MASK | (11 << DESC_TYPE_SHIFT);
 
     cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
                            DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK | DESC_R_MASK);
@@ -433,7 +503,7 @@ void cpu_reset(CPUX86State *env)
 
 void cpu_x86_close(CPUX86State *env)
 {
-    free(env);
+    qemu_free(env);
 }
 
 /***********************************************************/
@@ -827,12 +897,12 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 /* XXX: This value should match the one returned by CPUID
  * and in exec.c */
 #if defined(USE_KQEMU)
-#define PHYS_ADDR_MASK 0xfffff000L
+#define PHYS_ADDR_MASK 0xfffff000LL
 #else
 # if defined(TARGET_X86_64)
-# define PHYS_ADDR_MASK 0xfffffff000L
+# define PHYS_ADDR_MASK 0xfffffff000LL
 # else
-# define PHYS_ADDR_MASK 0xffffff000L
+# define PHYS_ADDR_MASK 0xffffff000LL
 # endif
 #endif
 
@@ -1192,6 +1262,8 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
             page_size = 4096;
             pte = ldq_phys(pte_addr);
         }
+        if (!(pte & PG_PRESENT_MASK))
+            return -1;
     } else {
         uint32_t pde;
 
@@ -1224,3 +1296,239 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
     return paddr;
 }
 #endif /* !CONFIG_USER_ONLY */
+
+static void host_cpuid(uint32_t function, uint32_t *eax, uint32_t *ebx,
+                       uint32_t *ecx, uint32_t *edx)
+{
+#if defined(CONFIG_KVM)
+    uint32_t vec[4];
+
+#ifdef __x86_64__
+    asm volatile("cpuid"
+		 : "=a"(vec[0]), "=b"(vec[1]),
+		   "=c"(vec[2]), "=d"(vec[3])
+		 : "0"(function) : "cc");
+#else
+    asm volatile("pusha \n\t"
+		 "cpuid \n\t"
+		 "mov %%eax, 0(%1) \n\t"
+		 "mov %%ebx, 4(%1) \n\t"
+		 "mov %%ecx, 8(%1) \n\t"
+		 "mov %%edx, 12(%1) \n\t"
+		 "popa"
+		 : : "a"(function), "S"(vec)
+		 : "memory", "cc");
+#endif
+
+    if (eax)
+	*eax = vec[0];
+    if (ebx)
+	*ebx = vec[1];
+    if (ecx)
+	*ecx = vec[2];
+    if (edx)
+	*edx = vec[3];
+#endif
+}
+
+void cpu_x86_cpuid(CPUX86State *env, uint32_t index,
+                   uint32_t *eax, uint32_t *ebx,
+                   uint32_t *ecx, uint32_t *edx)
+{
+    /* test if maximum index reached */
+    if (index & 0x80000000) {
+        if (index > env->cpuid_xlevel)
+            index = env->cpuid_level;
+    } else {
+        if (index > env->cpuid_level)
+            index = env->cpuid_level;
+    }
+
+    switch(index) {
+    case 0:
+        *eax = env->cpuid_level;
+        *ebx = env->cpuid_vendor1;
+        *edx = env->cpuid_vendor2;
+        *ecx = env->cpuid_vendor3;
+
+        /* sysenter isn't supported on compatibility mode on AMD.  and syscall
+         * isn't supported in compatibility mode on Intel.  so advertise the
+         * actuall cpu, and say goodbye to migration between different vendors
+         * is you use compatibility mode. */
+        if (kvm_enabled())
+            host_cpuid(0, NULL, ebx, ecx, edx);
+        break;
+    case 1:
+        *eax = env->cpuid_version;
+        *ebx = (env->cpuid_apic_id << 24) | 8 << 8; /* CLFLUSH size in quad words, Linux wants it. */
+        *ecx = env->cpuid_ext_features;
+        *edx = env->cpuid_features;
+
+        /* "Hypervisor present" bit required for Microsoft SVVP */
+        if (kvm_enabled())
+            *ecx |= (1 << 31);
+        break;
+    case 2:
+        /* cache info: needed for Pentium Pro compatibility */
+        *eax = 1;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0x2c307d;
+        break;
+    case 4:
+        /* cache info: needed for Core compatibility */
+        switch (*ecx) {
+            case 0: /* L1 dcache info */
+                *eax = 0x0000121;
+                *ebx = 0x1c0003f;
+                *ecx = 0x000003f;
+                *edx = 0x0000001;
+                break;
+            case 1: /* L1 icache info */
+                *eax = 0x0000122;
+                *ebx = 0x1c0003f;
+                *ecx = 0x000003f;
+                *edx = 0x0000001;
+                break;
+            case 2: /* L2 cache info */
+                *eax = 0x0000143;
+                *ebx = 0x3c0003f;
+                *ecx = 0x0000fff;
+                *edx = 0x0000001;
+                break;
+            default: /* end of info */
+                *eax = 0;
+                *ebx = 0;
+                *ecx = 0;
+                *edx = 0;
+                break;
+        }
+
+        break;
+    case 5:
+        /* mwait info: needed for Core compatibility */
+        *eax = 0; /* Smallest monitor-line size in bytes */
+        *ebx = 0; /* Largest monitor-line size in bytes */
+        *ecx = CPUID_MWAIT_EMX | CPUID_MWAIT_IBE;
+        *edx = 0;
+        break;
+    case 6:
+        /* Thermal and Power Leaf */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 9:
+        /* Direct Cache Access Information Leaf */
+        *eax = 0; /* Bits 0-31 in DCA_CAP MSR */
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0xA:
+        /* Architectural Performance Monitoring Leaf */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0x80000000:
+        *eax = env->cpuid_xlevel;
+        *ebx = env->cpuid_vendor1;
+        *edx = env->cpuid_vendor2;
+        *ecx = env->cpuid_vendor3;
+        break;
+    case 0x80000001:
+        *eax = env->cpuid_features;
+        *ebx = 0;
+        *ecx = env->cpuid_ext3_features;
+        *edx = env->cpuid_ext2_features;
+
+        if (kvm_enabled()) {
+            uint32_t h_eax, h_edx;
+
+            host_cpuid(0x80000001, &h_eax, NULL, NULL, &h_edx);
+
+            /* disable CPU features that the host does not support */
+
+            /* long mode */
+            if ((h_edx & 0x20000000) == 0 /* || !lm_capable_kernel */)
+                *edx &= ~0x20000000;
+            /* syscall */
+            if ((h_edx & 0x00000800) == 0)
+                *edx &= ~0x00000800;
+            /* nx */
+            if ((h_edx & 0x00100000) == 0)
+                *edx &= ~0x00100000;
+
+            /* disable CPU features that KVM cannot support */
+
+            /* svm */
+            *ecx &= ~4UL;
+            /* 3dnow */
+            *edx &= ~0xc0000000;
+        }
+        break;
+    case 0x80000002:
+    case 0x80000003:
+    case 0x80000004:
+        *eax = env->cpuid_model[(index - 0x80000002) * 4 + 0];
+        *ebx = env->cpuid_model[(index - 0x80000002) * 4 + 1];
+        *ecx = env->cpuid_model[(index - 0x80000002) * 4 + 2];
+        *edx = env->cpuid_model[(index - 0x80000002) * 4 + 3];
+        break;
+    case 0x80000005:
+        /* cache info (L1 cache) */
+        *eax = 0x01ff01ff;
+        *ebx = 0x01ff01ff;
+        *ecx = 0x40020140;
+        *edx = 0x40020140;
+        break;
+    case 0x80000006:
+        /* cache info (L2 cache) */
+        *eax = 0;
+        *ebx = 0x42004200;
+        *ecx = 0x02008140;
+        *edx = 0;
+        break;
+    case 0x80000008:
+        /* virtual & phys address size in low 2 bytes. */
+/* XXX: This value must match the one used in the MMU code. */ 
+        if (env->cpuid_ext2_features & CPUID_EXT2_LM) {
+            /* 64 bit processor */
+#if defined(USE_KQEMU)
+            *eax = 0x00003020;	/* 48 bits virtual, 32 bits physical */
+#else
+/* XXX: The physical address space is limited to 42 bits in exec.c. */
+            *eax = 0x00003028;	/* 48 bits virtual, 40 bits physical */
+#endif
+        } else {
+#if defined(USE_KQEMU)
+            *eax = 0x00000020;	/* 32 bits physical */
+#else
+            if (env->cpuid_features & CPUID_PSE36)
+                *eax = 0x00000024; /* 36 bits physical */
+            else
+                *eax = 0x00000020; /* 32 bits physical */
+#endif
+        }
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0x8000000A:
+        *eax = 0x00000001; /* SVM Revision */
+        *ebx = 0x00000010; /* nr of ASIDs */
+        *ecx = 0;
+        *edx = 0; /* optional features */
+        break;
+    default:
+        /* reserved values: zero */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    }
+}

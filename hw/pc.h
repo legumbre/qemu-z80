@@ -40,11 +40,9 @@ void irq_info(void);
 /* APIC */
 typedef struct IOAPICState IOAPICState;
 
-#define APIC_LINT0	3
-
 int apic_init(CPUState *env);
 int apic_accept_pic_intr(CPUState *env);
-void apic_local_deliver(CPUState *env, int vector);
+void apic_deliver_pic_intr(CPUState *env, int level);
 int apic_get_interrupt(CPUState *env);
 IOAPICState *ioapic_init(void);
 void ioapic_set_irq(void *opaque, int vector, int level);
@@ -107,9 +105,16 @@ void i440fx_set_smm(PCIDevice *d, int val);
 int piix3_init(PCIBus *bus, int devfn);
 void i440fx_init_memory_mappings(PCIDevice *d);
 
+extern PCIDevice *piix4_dev;
 int piix4_init(PCIBus *bus, int devfn);
 
 /* vga.c */
+enum vga_retrace_method {
+    VGA_RETRACE_DUMB,
+    VGA_RETRACE_PRECISE
+};
+
+extern enum vga_retrace_method vga_retrace_method;
 
 #ifndef TARGET_SPARC
 #define VGA_RAM_SIZE (8192 * 1024)

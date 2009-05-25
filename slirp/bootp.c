@@ -36,7 +36,7 @@ typedef struct {
     uint8_t macaddr[6];
 } BOOTPClient;
 
-BOOTPClient bootp_clients[NB_ADDR];
+static BOOTPClient bootp_clients[NB_ADDR];
 
 const char *bootp_filename;
 
@@ -172,7 +172,8 @@ static void bootp_reply(struct bootp_t *bp)
     }
 
     if (bootp_filename)
-        snprintf(rbp->bp_file, sizeof(rbp->bp_file), "%s", bootp_filename);
+        snprintf((char *)rbp->bp_file, sizeof(rbp->bp_file), "%s",
+                 bootp_filename);
 
     dprintf("offered addr=%08x\n", ntohl(daddr.sin_addr.s_addr));
 

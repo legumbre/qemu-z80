@@ -84,9 +84,9 @@ struct CPUMIPSFPUContext {
 #define FCR0_REV 0
     /* fcsr */
     uint32_t fcr31;
-#define SET_FP_COND(num,env)     do { ((env)->fcr31) |= ((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
-#define CLEAR_FP_COND(num,env)   do { ((env)->fcr31) &= ~((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
-#define GET_FP_COND(env)         ((((env)->fcr31 >> 24) & 0xfe) | (((env)->fcr31 >> 23) & 0x1))
+#define SET_FP_COND(num,env)     do { ((env).fcr31) |= ((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
+#define CLEAR_FP_COND(num,env)   do { ((env).fcr31) &= ~((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
+#define GET_FP_COND(env)         ((((env).fcr31 >> 24) & 0xfe) | (((env).fcr31 >> 23) & 0x1))
 #define GET_FP_CAUSE(reg)        (((reg) >> 12) & 0x3f)
 #define GET_FP_ENABLE(reg)       (((reg) >>  7) & 0x1f)
 #define GET_FP_FLAGS(reg)        (((reg) >>  2) & 0x1f)
@@ -132,6 +132,7 @@ typedef struct mips_def_t mips_def_t;
 
 #define MIPS_SHADOW_SET_MAX 16
 #define MIPS_TC_MAX 5
+#define MIPS_FPU_MAX 1
 #define MIPS_DSP_ACC 4
 
 typedef struct TCState TCState;
@@ -170,21 +171,16 @@ struct TCState {
 typedef struct CPUMIPSState CPUMIPSState;
 struct CPUMIPSState {
     TCState active_tc;
+    CPUMIPSFPUContext active_fpu;
 
-    /* temporary hack for FP globals */
-#ifndef USE_HOST_FLOAT_REGS
-    fpr_t ft0;
-    fpr_t ft1;
-    fpr_t ft2;
-#endif
     CPUMIPSMVPContext *mvp;
     CPUMIPSTLBContext *tlb;
-    CPUMIPSFPUContext *fpu;
     uint32_t current_tc;
+    uint32_t current_fpu;
 
     uint32_t SEGBITS;
-    target_ulong SEGMask;
     uint32_t PABITS;
+    target_ulong SEGMask;
     target_ulong PAMask;
 
     int32_t CP0_Index;
@@ -410,11 +406,12 @@ struct CPUMIPSState {
     int32_t CP0_DESAVE;
     /* We waste some space so we can handle shadow registers like TCs. */
     TCState tcs[MIPS_SHADOW_SET_MAX];
+    CPUMIPSFPUContext fpus[MIPS_FPU_MAX];
     /* Qemu */
     int error_code;
     uint32_t hflags;    /* CPU State */
     /* TMASK defines different execution modes */
-#define MIPS_HFLAG_TMASK  0x01FF
+#define MIPS_HFLAG_TMASK  0x03FF
 #define MIPS_HFLAG_MODE   0x0007 /* execution modes                    */
     /* The KSU flags must be the lowest bits in hflags. The flag order
        must be the same as defined for CP0 Status. This allows to use
@@ -433,15 +430,16 @@ struct CPUMIPSState {
        and RSQRT.D.  */
 #define MIPS_HFLAG_COP1X  0x0080 /* COP1X instructions enabled         */
 #define MIPS_HFLAG_RE     0x0100 /* Reversed endianness                */
+#define MIPS_HFLAG_UX     0x0200 /* 64-bit user mode                   */
     /* If translation is interrupted between the branch instruction and
      * the delay slot, record what type of branch it is so that we can
      * resume translation properly.  It might be possible to reduce
      * this from three bits to two.  */
-#define MIPS_HFLAG_BMASK  0x0e00
-#define MIPS_HFLAG_B      0x0200 /* Unconditional branch               */
-#define MIPS_HFLAG_BC     0x0400 /* Conditional branch                 */
-#define MIPS_HFLAG_BL     0x0600 /* Likely branch                      */
-#define MIPS_HFLAG_BR     0x0800 /* branch to register (can't link TB) */
+#define MIPS_HFLAG_BMASK  0x1C00
+#define MIPS_HFLAG_B      0x0400 /* Unconditional branch               */
+#define MIPS_HFLAG_BC     0x0800 /* Conditional branch                 */
+#define MIPS_HFLAG_BL     0x0C00 /* Likely branch                      */
+#define MIPS_HFLAG_BR     0x1000 /* branch to register (can't link TB) */
     target_ulong btarget;        /* Jump / branch target               */
     int bcond;                   /* Branch condition (if needed)       */
 
@@ -451,17 +449,12 @@ struct CPUMIPSState {
     uint32_t CP0_TCStatus_rw_bitmask; /* Read/write bits in CP0_TCStatus */
     int insn_flags; /* Supported instruction set */
 
-#ifdef CONFIG_USER_ONLY
-    target_ulong tls_value;
-#endif
+    target_ulong tls_value; /* For usermode emulation */
 
     CPU_COMMON
 
     const mips_def_t *cpu_model;
-#ifndef CONFIG_USER_ONLY
     void *irq[8];
-#endif
-
     struct QEMUTimer *timer; /* Internal timer */
 };
 
@@ -478,7 +471,7 @@ void r4k_do_tlbr (void);
 void mips_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
 
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int unused);
+                          int unused, int size);
 
 #define CPUState CPUMIPSState
 #define cpu_init cpu_mips_init
@@ -500,7 +493,6 @@ static inline int cpu_mmu_index (CPUState *env)
     return env->hflags & MIPS_HFLAG_KSU;
 }
 
-#if defined(CONFIG_USER_ONLY)
 static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 {
     if (newsp)
@@ -508,7 +500,6 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
     env->active_tc.gpr[7] = 0;
     env->active_tc.gpr[2] = 0;
 }
-#endif
 
 #include "cpu-all.h"
 

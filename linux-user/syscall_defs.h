@@ -49,7 +49,7 @@
 #define TARGET_IOC_TYPEBITS	8
 
 #if defined(TARGET_I386) || defined(TARGET_ARM) || defined(TARGET_SH4) \
-    || defined(TARGET_M68K) || defined(TARGET_ALPHA) || defined(TARGET_CRIS)
+    || defined(TARGET_M68K) || defined(TARGET_CRIS)
 
 #define TARGET_IOC_SIZEBITS	14
 #define TARGET_IOC_DIRBITS	2
@@ -860,11 +860,14 @@ struct target_winsize {
 
 #include "termbits.h"
 
+/* Common */
 #define TARGET_MAP_SHARED	0x01		/* Share changes */
 #define TARGET_MAP_PRIVATE	0x02		/* Changes are private */
-#define TARGET_MAP_TYPE	0x0f		/* Mask for type of mapping */
-#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
+#define TARGET_MAP_TYPE		0x0f		/* Mask for type of mapping */
+
+/* Target specific */
 #if defined(TARGET_MIPS)
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
 #define TARGET_MAP_ANONYMOUS	0x0800		/* don't use a file */
 #define TARGET_MAP_GROWSDOWN	0x1000		/* stack-like segment */
 #define TARGET_MAP_DENYWRITE	0x2000		/* ETXTBSY */
@@ -873,18 +876,34 @@ struct target_winsize {
 #define TARGET_MAP_NORESERVE	0x0400		/* don't check for reservations */
 #define TARGET_MAP_POPULATE	0x10000		/* populate (prefault) pagetables */
 #define TARGET_MAP_NONBLOCK	0x20000		/* do not block on IO */
-#else
+#elif defined(TARGET_PPC)
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
 #define TARGET_MAP_ANONYMOUS	0x20		/* don't use a file */
 #define TARGET_MAP_GROWSDOWN	0x0100		/* stack-like segment */
 #define TARGET_MAP_DENYWRITE	0x0800		/* ETXTBSY */
 #define TARGET_MAP_EXECUTABLE	0x1000		/* mark it as an executable */
-#if defined(TARGET_PPC)
 #define TARGET_MAP_LOCKED	0x0080		/* pages are locked */
 #define TARGET_MAP_NORESERVE	0x0040		/* don't check for reservations */
+#define TARGET_MAP_POPULATE	0x8000		/* populate (prefault) pagetables */
+#define TARGET_MAP_NONBLOCK	0x10000		/* do not block on IO */
+#elif defined(TARGET_ALPHA)
+#define TARGET_MAP_ANONYMOUS	0x10		/* don't use a file */
+#define TARGET_MAP_FIXED	0x100		/* Interpret addr exactly */
+#define TARGET_MAP_GROWSDOWN	0x01000		/* stack-like segment */
+#define TARGET_MAP_DENYWRITE	0x02000		/* ETXTBSY */
+#define TARGET_MAP_EXECUTABLE	0x04000		/* mark it as an executable */
+#define TARGET_MAP_LOCKED	0x08000		/* lock the mapping */
+#define TARGET_MAP_NORESERVE	0x10000		/* no check for reservations */
+#define TARGET_MAP_POPULATE	0x20000		/* pop (prefault) pagetables */
+#define TARGET_MAP_NONBLOCK	0x40000		/* do not block on IO */
 #else
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
+#define TARGET_MAP_ANONYMOUS	0x20		/* don't use a file */
+#define TARGET_MAP_GROWSDOWN	0x0100		/* stack-like segment */
+#define TARGET_MAP_DENYWRITE	0x0800		/* ETXTBSY */
+#define TARGET_MAP_EXECUTABLE	0x1000		/* mark it as an executable */
 #define TARGET_MAP_LOCKED	0x2000		/* pages are locked */
 #define TARGET_MAP_NORESERVE	0x4000		/* don't check for reservations */
-#endif
 #define TARGET_MAP_POPULATE	0x8000		/* populate (prefault) pagetables */
 #define TARGET_MAP_NONBLOCK	0x10000		/* do not block on IO */
 #endif
@@ -1570,7 +1589,8 @@ struct target_statfs64 {
 	uint32_t	f_namelen;
 	uint32_t	f_spare[6];
 };
-#elif defined(TARGET_PPC64) && !defined(TARGET_ABI32)
+#elif (defined(TARGET_PPC64) || defined(TARGET_X86_64) || \
+       defined(TARGET_SPARC64)) && !defined(TARGET_ABI32)
 struct target_statfs {
 	abi_long f_type;
 	abi_long f_bsize;
@@ -1728,6 +1748,25 @@ struct target_statfs64 {
 #define TARGET_O_DIRECTORY	0x10000	/* must be a directory */
 #define TARGET_O_NOFOLLOW	0x20000	/* don't follow links */
 #define TARGET_O_NOATIME	0x40000
+#define TARGET_O_NDELAY	TARGET_O_NONBLOCK
+#elif defined(TARGET_ALPHA)
+#define TARGET_O_ACCMODE	0x0003
+#define TARGET_O_RDONLY	0x0000
+#define TARGET_O_WRONLY	0x0001
+#define TARGET_O_RDWR		0x0002
+#define TARGET_O_APPEND	0x0008
+#define TARGET_O_SYNC		0x4000
+#define TARGET_O_NONBLOCK	0x0004
+#define TARGET_O_CREAT         0x0200	/* not fcntl */
+#define TARGET_O_TRUNC		0x0400	/* not fcntl */
+#define TARGET_O_EXCL		0x0800	/* not fcntl */
+#define TARGET_O_NOCTTY	0x1000	/* not fcntl */
+#define TARGET_FASYNC		0x2000	/* fcntl, for BSD compatibility */
+#define TARGET_O_LARGEFILE	0x0000	/* not necessary, always 64-bit */
+#define TARGET_O_DIRECT	0x80000	/* direct disk access hint */
+#define TARGET_O_DIRECTORY	0x8000	/* must be a directory */
+#define TARGET_O_NOFOLLOW	0x10000	/* don't follow links */
+#define TARGET_O_NOATIME	0x100000
 #define TARGET_O_NDELAY	TARGET_O_NONBLOCK
 #else
 #define TARGET_O_ACCMODE          0003
@@ -1922,6 +1961,10 @@ struct target_eabi_flock64 {
 #define TARGET_VFAT_IOCTL_READDIR_BOTH    TARGET_IORU('r', 1)
 #define TARGET_VFAT_IOCTL_READDIR_SHORT   TARGET_IORU('r', 2)
 
+#define TARGET_MTIOCTOP        TARGET_IOW('m', 1, struct mtop)
+#define TARGET_MTIOCGET        TARGET_IOR('m', 2, struct mtget)
+#define TARGET_MTIOCPOS        TARGET_IOR('m', 3, struct mtpos)
+
 struct target_sysinfo {
     abi_long uptime;                /* Seconds since boot */
     abi_ulong loads[3];             /* 1, 5, and 15 minute load averages */
@@ -1937,6 +1980,21 @@ struct target_sysinfo {
     abi_ulong freehigh;             /* Available high memory size */
     unsigned int mem_unit;          /* Memory unit size in bytes */
     char _f[20-2*sizeof(abi_long)-sizeof(int)]; /* Padding: libc5 uses this.. */
+};
+
+struct linux_dirent {
+    long            d_ino;
+    unsigned long   d_off;
+    unsigned short  d_reclen;
+    char            d_name[256]; /* We must not include limits.h! */
+};
+
+struct linux_dirent64 {
+    uint64_t        d_ino;
+    int64_t         d_off;
+    unsigned short  d_reclen;
+    unsigned char   d_type;
+    char            d_name[256];
 };
 
 #include "socket.h"

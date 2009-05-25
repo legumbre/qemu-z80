@@ -31,6 +31,7 @@
 #include "disas.h"
 #include "tcg-op.h"
 
+#include "helper.h"
 #define GEN_HELPER 1
 #include "helper.h"
 
@@ -223,7 +224,7 @@ typedef void (gen_mov_func_idx)(TCGv v, uint16_t ofs);
 
 static inline void gen_movb_v_HLmem(TCGv v)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_HL(addr);
     tcg_gen_qemu_ld8u(v, addr, MEM_INDEX);
     tcg_temp_free(addr);
@@ -231,7 +232,7 @@ static inline void gen_movb_v_HLmem(TCGv v)
 
 static inline void gen_movb_HLmem_v(TCGv v)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_HL(addr);
     tcg_gen_qemu_st8(v, addr, MEM_INDEX);
     tcg_temp_free(addr);
@@ -239,7 +240,7 @@ static inline void gen_movb_HLmem_v(TCGv v)
 
 static inline void gen_movb_v_IXmem(TCGv v, uint16_t ofs)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_IX(addr);
     tcg_gen_addi_tl(addr, addr, ofs);
     tcg_gen_ext16u_tl(addr, addr);
@@ -249,7 +250,7 @@ static inline void gen_movb_v_IXmem(TCGv v, uint16_t ofs)
 
 static inline void gen_movb_v_IYmem(TCGv v, uint16_t ofs)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_IY(addr);
     tcg_gen_addi_tl(addr, addr, ofs);
     tcg_gen_ext16u_tl(addr, addr);
@@ -259,7 +260,7 @@ static inline void gen_movb_v_IYmem(TCGv v, uint16_t ofs)
 
 static inline void gen_movb_IXmem_v(TCGv v, uint16_t ofs)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_IX(addr);
     tcg_gen_addi_tl(addr, addr, ofs);
     tcg_gen_ext16u_tl(addr, addr);
@@ -269,7 +270,7 @@ static inline void gen_movb_IXmem_v(TCGv v, uint16_t ofs)
 
 static inline void gen_movb_IYmem_v(TCGv v, uint16_t ofs)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_IY(addr);
     tcg_gen_addi_tl(addr, addr, ofs);
     tcg_gen_ext16u_tl(addr, addr);
@@ -279,7 +280,7 @@ static inline void gen_movb_IYmem_v(TCGv v, uint16_t ofs)
 
 static inline void gen_pushw(TCGv v)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_SP(addr);
     tcg_gen_subi_i32(addr, addr, 2);
     tcg_gen_ext16u_i32(addr, addr);
@@ -290,7 +291,7 @@ static inline void gen_pushw(TCGv v)
 
 static inline void gen_popw(TCGv v)
 {
-    TCGv addr = tcg_temp_new(TCG_TYPE_TL);
+    TCGv addr = tcg_temp_new();
     gen_movw_v_SP(addr);
     tcg_gen_qemu_ld16u(v, addr, MEM_INDEX);
     tcg_gen_addi_i32(addr, addr, 2);
@@ -730,8 +731,8 @@ static inline void gen_retcc(DisasContext *s, int cc,
 
 static inline void gen_ex(int regpair1, int regpair2)
 {
-    TCGv tmp1 = tcg_temp_new(TCG_TYPE_TL);
-    TCGv tmp2 = tcg_temp_new(TCG_TYPE_TL);
+    TCGv tmp1 = tcg_temp_new();
+    TCGv tmp2 = tcg_temp_new();
     gen_movw_v_reg(tmp1, regpair1);
     gen_movw_v_reg(tmp2, regpair2);
     gen_movw_reg_v(regpair2, tmp1);
@@ -1665,19 +1666,16 @@ next_byte:
 
 void z80_translate_init(void)
 {
-    cpu_env = tcg_global_reg_new(TCG_TYPE_PTR, TCG_AREG0, "env");
+    cpu_env = tcg_global_reg_new_ptr(TCG_AREG0, "env");
 
 #if TARGET_LONG_BITS > HOST_LONG_BITS
-    cpu_T[0] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
-                                  offsetof(CPUState, t0), "T0");
-    cpu_T[1] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
-                                  offsetof(CPUState, t1), "T1");
-    cpu_T[2] = tcg_global_mem_new(TCG_TYPE_I32, TCG_AREG0,
-                                  offsetof(CPUState, t2), "T2");
+    cpu_T[0] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t0), "T0");
+    cpu_T[1] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t1), "T1");
+    cpu_T[2] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t2), "T2");
 #else
-    cpu_T[0] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG1, "T0");
-    cpu_T[1] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG2, "T1");
-    cpu_T[2] = tcg_global_reg_new(TCG_TYPE_I32, TCG_AREG3, "T2");
+    cpu_T[0] = tcg_global_reg_new_i32(TCG_AREG1, "T0");
+    cpu_T[1] = tcg_global_reg_new_i32(TCG_AREG2, "T1");
+    cpu_T[2] = tcg_global_reg_new_i32(TCG_AREG3, "T2");
 #endif
 }
 
@@ -1820,14 +1818,14 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     return 0;
 }
 
-int gen_intermediate_code(CPUState *env, TranslationBlock *tb)
+void gen_intermediate_code(CPUState *env, TranslationBlock *tb)
 {
-    return gen_intermediate_code_internal(env, tb, 0);
+    gen_intermediate_code_internal(env, tb, 0);
 }
 
-int gen_intermediate_code_pc(CPUState *env, TranslationBlock *tb)
+void gen_intermediate_code_pc(CPUState *env, TranslationBlock *tb)
 {
-    return gen_intermediate_code_internal(env, tb, 1);
+    gen_intermediate_code_internal(env, tb, 1);
 }
 
 void gen_pc_load(CPUState *env, TranslationBlock *tb,

@@ -155,7 +155,7 @@ void HELPER(debug)(void)
     cpu_loop_exit();
 }
 
-void HELPER(raise_exception)(int exception_index)
+void HELPER(raise_exception)(uint32_t exception_index)
 {
     raise_exception(exception_index);
 }
@@ -829,7 +829,7 @@ void HELPER(decb_T0_cc)(void)
 /* when an interrupt occurs, iff1 and iff2 are reset, disabling interrupts */
 /* when an NMI occurs, iff1 is reset. iff2 is left unchanged */
 
-void HELPER(imode)(int imode)
+void HELPER(imode)(uint32_t imode)
 {
     env->imode = imode;
 }

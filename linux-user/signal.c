@@ -31,7 +31,7 @@
 
 //#define DEBUG_SIGNAL
 
-struct target_sigaltstack target_sigaltstack_used = {
+static struct target_sigaltstack target_sigaltstack_used = {
     .ss_sp = 0,
     .ss_size = 0,
     .ss_flags = TARGET_SS_DISABLE,
@@ -154,7 +154,8 @@ void host_to_target_sigset(target_sigset_t *d, const sigset_t *s)
         d->sig[i] = tswapl(d1.sig[i]);
 }
 
-void target_to_host_sigset_internal(sigset_t *d, const target_sigset_t *s)
+static void target_to_host_sigset_internal(sigset_t *d,
+                                           const target_sigset_t *s)
 {
     int i;
     sigemptyset(d);
@@ -324,7 +325,7 @@ static inline void free_sigqueue(CPUState *env, struct sigqueue *q)
 }
 
 /* abort execution with signal */
-void __attribute((noreturn)) force_sig(int sig)
+static void __attribute((noreturn)) force_sig(int sig)
 {
     int host_sig;
     host_sig = target_to_host_signal(sig);
@@ -547,10 +548,6 @@ int do_sigaction(int sig, const struct target_sigaction *act,
     }
     return ret;
 }
-
-#ifndef offsetof
-#define offsetof(type, field) ((size_t) &((type *)0)->field)
-#endif
 
 static inline int copy_siginfo_to_user(target_siginfo_t *tinfo,
                                        const target_siginfo_t *info)
@@ -2755,7 +2752,7 @@ static void setup_rt_frame(int sig, struct target_sigaction *ka,
     /* Create the ucontext.  */
     err |= __put_user(0, &frame->uc.uc_flags);
     err |= __put_user(0, (unsigned long *)&frame->uc.uc_link);
-    err |= __put_user((void *)target_sigaltstack_used.ss_sp,
+    err |= __put_user((unsigned long)target_sigaltstack_used.ss_sp,
 		      &frame->uc.uc_stack.ss_sp);
     err |= __put_user(sas_ss_flags(regs->gregs[15]),
 		      &frame->uc.uc_stack.ss_flags);
@@ -2982,11 +2979,11 @@ static void setup_frame(int sig, struct target_sigaction *ka,
 	setup_sigcontext(&frame->sc, env);
 
 	/* Move the stack and setup the arguments for the handler.  */
-	env->regs[R_SP] = (uint32_t) frame;
+	env->regs[R_SP] = (uint32_t) (unsigned long) frame;
 	env->regs[10] = sig;
 	env->pc = (unsigned long) ka->_sa_handler;
 	/* Link SRP so the guest returns through the trampoline.  */
-	env->pregs[PR_SRP] = (uint32_t) &frame->retcode[0];
+	env->pregs[PR_SRP] = (uint32_t) (unsigned long) &frame->retcode[0];
 
 	unlock_user_struct(frame, frame_addr, 1);
 	return;
@@ -3026,9 +3023,6 @@ long do_sigreturn(CPUState *env)
 	sigprocmask(SIG_SETMASK, &set, NULL);
 
 	restore_sigcontext(&frame->sc, env);
-	/* Compensate for the syscall return path advancing brk.  */
-	env->pc -= 2;
-
 	unlock_user_struct(frame, frame_addr, 0);
 	return env->regs[10];
   badframe:

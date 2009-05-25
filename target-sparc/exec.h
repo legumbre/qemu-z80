@@ -5,8 +5,6 @@
 
 register struct CPUSPARCState *env asm(AREG0);
 
-#define FT0 (env->ft0)
-#define FT1 (env->ft1)
 #define DT0 (env->dt0)
 #define DT1 (env->dt1)
 #define QT0 (env->qt0)
@@ -23,9 +21,11 @@ static inline void regs_to_env(void)
 {
 }
 
-int cpu_sparc_handle_mmu_fault(CPUState *env1, target_ulong address, int rw,
-                               int mmu_idx, int is_softmmu);
+/* op_helper.c */
 void do_interrupt(CPUState *env);
+
+/* cpu-exec.c */
+void cpu_loop_exit(void);
 
 static inline int cpu_halted(CPUState *env1) {
     if (!env1->halted)

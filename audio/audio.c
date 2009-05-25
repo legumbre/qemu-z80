@@ -54,7 +54,7 @@ static struct {
     struct fixed_settings fixed_out;
     struct fixed_settings fixed_in;
     union {
-        int hz;
+        int hertz;
         int64_t ticks;
     } period;
     int plive;
@@ -84,7 +84,7 @@ static struct {
         }
     },
 
-    { 0 },                      /* period */
+    { 250 },                    /* period */
     0,                          /* plive */
     0                           /* log_to_monitor */
 };
@@ -211,11 +211,11 @@ static char *audio_alloc_prefix (const char *s)
         size_t i;
         char *u = r + sizeof (qemu_prefix) - 1;
 
-        strcpy (r, qemu_prefix);
-        strcat (r, s);
+        pstrcpy (r, len + sizeof (qemu_prefix), qemu_prefix);
+        pstrcat (r, len + sizeof (qemu_prefix), s);
 
         for (i = 0; i < len; ++i) {
-            u[i] = toupper (u[i]);
+            u[i] = qemu_toupper(u[i]);
         }
     }
     return r;
@@ -430,7 +430,7 @@ static void audio_process_options (const char *prefix,
 {
     char *optname;
     const char qemu_prefix[] = "QEMU_";
-    size_t preflen;
+    size_t preflen, optlen;
 
     if (audio_bug (AUDIO_FUNC, !prefix)) {
         dolog ("prefix = NULL\n");
@@ -458,21 +458,22 @@ static void audio_process_options (const char *prefix,
         /* len of opt->name + len of prefix + size of qemu_prefix
          * (includes trailing zero) + zero + underscore (on behalf of
          * sizeof) */
-        optname = qemu_malloc (len + preflen + sizeof (qemu_prefix) + 1);
+        optlen = len + preflen + sizeof (qemu_prefix) + 1;
+        optname = qemu_malloc (optlen);
         if (!optname) {
             dolog ("Could not allocate memory for option name `%s'\n",
                    opt->name);
             continue;
         }
 
-        strcpy (optname, qemu_prefix);
+        pstrcpy (optname, optlen, qemu_prefix);
 
         /* copy while upper-casing, including trailing zero */
         for (i = 0; i <= preflen; ++i) {
-            optname[i + sizeof (qemu_prefix) - 1] = toupper (prefix[i]);
+            optname[i + sizeof (qemu_prefix) - 1] = qemu_toupper(prefix[i]);
         }
-        strcat (optname, "_");
-        strcat (optname, opt->name);
+        pstrcat (optname, optlen, "_");
+        pstrcat (optname, optlen, opt->name);
 
         def = 1;
         switch (opt->tag) {
@@ -1519,7 +1520,7 @@ static struct audio_option audio_options[] = {
      "Number of voices for ADC", NULL, 0},
 
     /* Misc */
-    {"TIMER_PERIOD", AUD_OPT_INT, &conf.period.hz,
+    {"TIMER_PERIOD", AUD_OPT_INT, &conf.period.hertz,
      "Timer period in HZ (0 - use lowest possible)", NULL, 0},
 
     {"PLIVE", AUD_OPT_BOOL, &conf.plive,
@@ -1780,16 +1781,16 @@ AudioState *AUD_init (void)
     if (done) {
         VMChangeStateEntry *e;
 
-        if (conf.period.hz <= 0) {
-            if (conf.period.hz < 0) {
+        if (conf.period.hertz <= 0) {
+            if (conf.period.hertz < 0) {
                 dolog ("warning: Timer period is negative - %d "
                        "treating as zero\n",
-                       conf.period.hz);
+                       conf.period.hertz);
             }
             conf.period.ticks = 1;
         }
         else {
-            conf.period.ticks = ticks_per_sec / conf.period.hz;
+            conf.period.ticks = ticks_per_sec / conf.period.hertz;
         }
 
         e = qemu_add_vm_change_state_handler (audio_vm_change_state_handler, s);

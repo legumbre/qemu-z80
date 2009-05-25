@@ -111,8 +111,8 @@ static uint32_t pflash_read (pflash_t *pfl, target_ulong offset, int width)
     else if (pfl->width == 4)
         boff = boff >> 2;
 
-    DPRINTF("%s: reading offset " TARGET_FMT_lx " under cmd %02x\n",
-            __func__, boff, pfl->cmd);
+    DPRINTF("%s: reading offset " TARGET_FMT_lx " under cmd %02x width %d\n",
+            __func__, offset, pfl->cmd, width);
 
     switch (pfl->cmd) {
     case 0x00:
@@ -205,7 +205,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
     cmd = value;
     offset -= pfl->base;
 
-    DPRINTF("%s: offset " TARGET_FMT_lx " %08x %d wcycle 0x%x\n",
+    DPRINTF("%s: writing offset " TARGET_FMT_lx " value %08x width %d wcycle 0x%x\n",
             __func__, offset, value, width, pfl->wcycle);
 
     /* Set the device in I/O access mode */
@@ -267,7 +267,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
         case 0x20: /* Block erase */
         case 0x28:
             if (cmd == 0xd0) { /* confirm */
-                pfl->wcycle = 1;
+                pfl->wcycle = 0;
                 pfl->status |= 0x80;
             } else if (cmd == 0xff) { /* read array mode */
                 goto reset_flash;
@@ -276,8 +276,8 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
 
             break;
         case 0xe8:
-            DPRINTF("%s: block write of %x bytes\n", __func__, cmd);
-            pfl->counter = cmd;
+            DPRINTF("%s: block write of %x bytes\n", __func__, value);
+            pfl->counter = value;
             pfl->wcycle++;
             break;
         case 0x60:
@@ -381,7 +381,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
 
  error_flash:
     printf("%s: Unimplemented flash cmd sequence "
-           "(offset " TARGET_FMT_lx ", wcycle 0x%x cmd 0x%x value 0x%x\n",
+           "(offset " TARGET_FMT_lx ", wcycle 0x%x cmd 0x%x value 0x%x)\n",
            __func__, offset, pfl->wcycle, pfl->cmd, value);
 
  reset_flash:
@@ -583,7 +583,7 @@ pflash_t *pflash_cfi01_register(target_phys_addr_t base, ram_addr_t off,
     pfl->cfi_table[0x28] = 0x02;
     pfl->cfi_table[0x29] = 0x00;
     /* Max number of bytes in multi-bytes write */
-    pfl->cfi_table[0x2A] = 0x04;
+    pfl->cfi_table[0x2A] = 0x0B;
     pfl->cfi_table[0x2B] = 0x00;
     /* Number of erase block regions (uniform) */
     pfl->cfi_table[0x2C] = 0x01;

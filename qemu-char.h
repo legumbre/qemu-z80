@@ -1,6 +1,7 @@
 #ifndef QEMU_CHAR_H
 #define QEMU_CHAR_H
 
+#include "sys-queue.h"
 /* character device */
 
 #define CHR_EVENT_BREAK 0 /* serial break char */
@@ -27,6 +28,17 @@ typedef struct {
 #define CHR_IOCTL_PP_EPP_READ         9
 #define CHR_IOCTL_PP_EPP_WRITE_ADDR  10
 #define CHR_IOCTL_PP_EPP_WRITE       11
+#define CHR_IOCTL_PP_DATA_DIR        12
+
+#define CHR_IOCTL_SERIAL_SET_TIOCM   13
+#define CHR_IOCTL_SERIAL_GET_TIOCM   14
+
+#define CHR_TIOCM_CTS	0x020
+#define CHR_TIOCM_CAR	0x040
+#define CHR_TIOCM_DSR	0x100
+#define CHR_TIOCM_RI	0x080
+#define CHR_TIOCM_DTR	0x002
+#define CHR_TIOCM_RTS	0x004
 
 typedef void IOEventHandler(void *opaque, int event);
 
@@ -44,9 +56,12 @@ struct CharDriverState {
     void *opaque;
     int focus;
     QEMUBH *bh;
+    char *label;
+    char *filename;
+    TAILQ_ENTRY(CharDriverState) next;
 };
 
-CharDriverState *qemu_chr_open(const char *filename);
+CharDriverState *qemu_chr_open(const char *label, const char *filename);
 void qemu_chr_close(CharDriverState *chr);
 void qemu_chr_printf(CharDriverState *s, const char *fmt, ...);
 int qemu_chr_write(CharDriverState *s, const uint8_t *buf, int len);
@@ -61,6 +76,9 @@ void qemu_chr_reset(CharDriverState *s);
 int qemu_chr_can_read(CharDriverState *s);
 void qemu_chr_read(CharDriverState *s, uint8_t *buf, int len);
 void qemu_chr_accept_input(CharDriverState *s);
+void qemu_chr_info(void);
+
+extern int term_escape_char;
 
 /* async I/O support */
 

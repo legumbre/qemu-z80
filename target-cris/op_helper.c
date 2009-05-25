@@ -61,7 +61,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
     D(fprintf(logfile, "%s pc=%x tpc=%x ra=%x\n", __func__, 
 	     env->pc, env->debug1, retaddr));
     ret = cpu_cris_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
-    if (__builtin_expect(ret, 0)) {
+    if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
             pc = (unsigned long)retaddr;
@@ -91,18 +91,23 @@ void helper_raise_exception(uint32_t index)
 void helper_tlb_flush_pid(uint32_t pid)
 {
 #if !defined(CONFIG_USER_ONLY)
-	cris_mmu_flush_pid(env, pid);
+	pid &= 0xff;
+	if (pid != (env->pregs[PR_PID] & 0xff))
+		cris_mmu_flush_pid(env, env->pregs[PR_PID]);
+#endif
+}
+
+void helper_spc_write(uint32_t new_spc)
+{
+#if !defined(CONFIG_USER_ONLY)
+	tlb_flush_page(env, env->pregs[PR_SPC]);
+	tlb_flush_page(env, new_spc);
 #endif
 }
 
 void helper_dump(uint32_t a0, uint32_t a1, uint32_t a2)
 {
 	(fprintf(logfile, "%s: a0=%x a1=%x\n", __func__, a0, a1)); 
-}
-
-void helper_dummy(void)
-{
-
 }
 
 /* Used by the tlb decoder.  */
@@ -239,20 +244,11 @@ void helper_rfn(void)
     env->pregs[PR_CCS] |= M_FLAG;
 }
 
-void helper_store(uint32_t a0)
-{
-	if (env->pregs[PR_CCS] & P_FLAG )
-	{
-		cpu_abort(env, "cond_store_failed! pc=%x a0=%x\n",
-			  env->pc, a0);
-	}
-}
-
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int is_asi)
+                          int is_asi, int size)
 {
-	D(printf("%s addr=%x w=%d ex=%d asi=%d\n", 
-		__func__, addr, is_write, is_exec, is_asi));
+	D(printf("%s addr=%x w=%d ex=%d asi=%d, size=%d\n",
+		__func__, addr, is_write, is_exec, is_asi, size));
 }
 
 static void evaluate_flags_writeback(uint32_t flags)

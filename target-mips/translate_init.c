@@ -63,7 +63,7 @@ enum mips_mmu_types {
 };
 
 struct mips_def_t {
-    const unsigned char *name;
+    const char *name;
     int32_t CP0_PRid;
     int32_t CP0_Config0;
     int32_t CP0_Config1;
@@ -95,7 +95,7 @@ struct mips_def_t {
 
 /*****************************************************************************/
 /* MIPS CPU definitions */
-static mips_def_t mips_defs[] =
+static const mips_def_t mips_defs[] =
 {
     {
         .name = "4Kc",
@@ -417,7 +417,7 @@ static mips_def_t mips_defs[] =
 #endif
 };
 
-static const mips_def_t *cpu_mips_find_by_name (const unsigned char *name)
+static const mips_def_t *cpu_mips_find_by_name (const char *name)
 {
     int i;
 
@@ -489,17 +489,20 @@ static void mmu_init (CPUMIPSState *env, const mips_def_t *def)
 
 static void fpu_init (CPUMIPSState *env, const mips_def_t *def)
 {
-    env->fpu = qemu_mallocz(sizeof(CPUMIPSFPUContext));
+    int i;
 
-    env->fpu->fcr0 = def->CP1_fcr0;
-#ifdef CONFIG_USER_ONLY
-    if (env->CP0_Config1 & (1 << CP0C1_FP))
-        env->hflags |= MIPS_HFLAG_FPU;
+    for (i = 0; i < MIPS_FPU_MAX; i++)
+        env->fpus[i].fcr0 = def->CP1_fcr0;
+
+    memcpy(&env->active_fpu, &env->fpus[0], sizeof(env->active_fpu));
+    if (env->user_mode_only) {
+        if (env->CP0_Config1 & (1 << CP0C1_FP))
+            env->hflags |= MIPS_HFLAG_FPU;
 #ifdef TARGET_MIPS64
-    if (env->fpu->fcr0 & (1 << FCR0_F64))
-        env->hflags |= MIPS_HFLAG_F64;
+        if (env->active_fpu.fcr0 & (1 << FCR0_F64))
+            env->hflags |= MIPS_HFLAG_F64;
 #endif
-#endif
+    }
 }
 
 static void mvp_init (CPUMIPSState *env, const mips_def_t *def)
@@ -512,15 +515,15 @@ static void mvp_init (CPUMIPSState *env, const mips_def_t *def)
        implemented, 5 TCs implemented. */
     env->mvp->CP0_MVPConf0 = (1 << CP0MVPC0_M) | (1 << CP0MVPC0_TLBS) |
                              (0 << CP0MVPC0_GS) | (1 << CP0MVPC0_PCP) |
-#ifndef CONFIG_USER_ONLY
-                             /* Usermode has no TLB support */
-                             (env->tlb->nb_tlb << CP0MVPC0_PTLBE) |
-#endif
 // TODO: actually do 2 VPEs.
 //                             (1 << CP0MVPC0_TCA) | (0x1 << CP0MVPC0_PVPE) |
 //                             (0x04 << CP0MVPC0_PTC);
                              (1 << CP0MVPC0_TCA) | (0x0 << CP0MVPC0_PVPE) |
                              (0x04 << CP0MVPC0_PTC);
+    /* Usermode has no TLB support */
+    if (!env->user_mode_only)
+        env->mvp->CP0_MVPConf0 |= (env->tlb->nb_tlb << CP0MVPC0_PTLBE);
+
     /* Allocatable CP1 have media extensions, allocatable CP1 have FP support,
        no UDI implemented, no CP2 implemented, 1 CP1 implemented. */
     env->mvp->CP0_MVPConf1 = (1 << CP0MVPC1_CIM) | (1 << CP0MVPC1_CIF) |
@@ -569,7 +572,8 @@ static int cpu_mips_register (CPUMIPSState *env, const mips_def_t *def)
     env->insn_flags = def->insn_flags;
 
 #ifndef CONFIG_USER_ONLY
-    mmu_init(env, def);
+    if (!env->user_mode_only)
+        mmu_init(env, def);
 #endif
     fpu_init(env, def);
     mvp_init(env, def);

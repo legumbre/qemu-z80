@@ -19,6 +19,7 @@
  */
 #include "exec.h"
 #include "host-utils.h"
+#include "helper.h"
 
 #include "helper_regs.h"
 #include "op_helper.h"
@@ -60,33 +61,27 @@ void do_raise_exception (uint32_t exception)
     do_raise_exception_err(exception, 0);
 }
 
-void cpu_dump_EA (target_ulong EA);
-void do_print_mem_EA (target_ulong EA)
-{
-    cpu_dump_EA(EA);
-}
-
 /*****************************************************************************/
 /* Registers load and stores */
-void do_load_cr (void)
+target_ulong helper_load_cr (void)
 {
-    T0 = (env->crf[0] << 28) |
-        (env->crf[1] << 24) |
-        (env->crf[2] << 20) |
-        (env->crf[3] << 16) |
-        (env->crf[4] << 12) |
-        (env->crf[5] << 8) |
-        (env->crf[6] << 4) |
-        (env->crf[7] << 0);
+    return (env->crf[0] << 28) |
+           (env->crf[1] << 24) |
+           (env->crf[2] << 20) |
+           (env->crf[3] << 16) |
+           (env->crf[4] << 12) |
+           (env->crf[5] << 8) |
+           (env->crf[6] << 4) |
+           (env->crf[7] << 0);
 }
 
-void do_store_cr (uint32_t mask)
+void helper_store_cr (target_ulong val, uint32_t mask)
 {
     int i, sh;
 
     for (i = 0, sh = 7; i < 8; i++, sh--) {
         if (mask & (1 << sh))
-            env->crf[i] = (T0 >> (sh * 4)) & 0xFUL;
+            env->crf[i] = (val >> (sh * 4)) & 0xFUL;
     }
 }
 
@@ -119,337 +114,128 @@ void ppc_store_dump_spr (int sprn, target_ulong val)
 
 /*****************************************************************************/
 /* Fixed point operations helpers */
-void do_adde (void)
-{
-    T2 = T0;
-    T0 += T1 + xer_ca;
-    if (likely(!((uint32_t)T0 < (uint32_t)T2 ||
-                 (xer_ca == 1 && (uint32_t)T0 == (uint32_t)T2)))) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-
 #if defined(TARGET_PPC64)
-void do_adde_64 (void)
-{
-    T2 = T0;
-    T0 += T1 + xer_ca;
-    if (likely(!((uint64_t)T0 < (uint64_t)T2 ||
-                 (xer_ca == 1 && (uint64_t)T0 == (uint64_t)T2)))) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-#endif
 
-void do_addmeo (void)
+/* multiply high word */
+uint64_t helper_mulhd (uint64_t arg1, uint64_t arg2)
 {
-    T1 = T0;
-    T0 += xer_ca + (-1);
-    xer_ov = ((uint32_t)T1 & ((uint32_t)T1 ^ (uint32_t)T0)) >> 31;
-    xer_so |= xer_ov;
-    if (likely(T1 != 0))
-        xer_ca = 1;
-    else
-        xer_ca = 0;
+    uint64_t tl, th;
+
+    muls64(&tl, &th, arg1, arg2);
+    return th;
 }
 
-#if defined(TARGET_PPC64)
-void do_addmeo_64 (void)
+/* multiply high word unsigned */
+uint64_t helper_mulhdu (uint64_t arg1, uint64_t arg2)
 {
-    T1 = T0;
-    T0 += xer_ca + (-1);
-    xer_ov = ((uint64_t)T1 & ((uint64_t)T1 ^ (uint64_t)T0)) >> 63;
-    xer_so |= xer_ov;
-    if (likely(T1 != 0))
-        xer_ca = 1;
-    else
-        xer_ca = 0;
-}
-#endif
+    uint64_t tl, th;
 
-void do_divwo (void)
-{
-    if (likely(!(((int32_t)T0 == INT32_MIN && (int32_t)T1 == (int32_t)-1) ||
-                 (int32_t)T1 == 0))) {
-        xer_ov = 0;
-        T0 = (int32_t)T0 / (int32_t)T1;
-    } else {
-        xer_ov = 1;
-        T0 = UINT32_MAX * ((uint32_t)T0 >> 31);
-    }
-    xer_so |= xer_ov;
+    mulu64(&tl, &th, arg1, arg2);
+    return th;
 }
 
-#if defined(TARGET_PPC64)
-void do_divdo (void)
-{
-    if (likely(!(((int64_t)T0 == INT64_MIN && (int64_t)T1 == (int64_t)-1LL) ||
-                 (int64_t)T1 == 0))) {
-        xer_ov = 0;
-        T0 = (int64_t)T0 / (int64_t)T1;
-    } else {
-        xer_ov = 1;
-        T0 = UINT64_MAX * ((uint64_t)T0 >> 63);
-    }
-    xer_so |= xer_ov;
-}
-#endif
-
-void do_divwuo (void)
-{
-    if (likely((uint32_t)T1 != 0)) {
-        xer_ov = 0;
-        T0 = (uint32_t)T0 / (uint32_t)T1;
-    } else {
-        xer_ov = 1;
-        xer_so = 1;
-        T0 = 0;
-    }
-}
-
-#if defined(TARGET_PPC64)
-void do_divduo (void)
-{
-    if (likely((uint64_t)T1 != 0)) {
-        xer_ov = 0;
-        T0 = (uint64_t)T0 / (uint64_t)T1;
-    } else {
-        xer_ov = 1;
-        xer_so = 1;
-        T0 = 0;
-    }
-}
-#endif
-
-void do_mullwo (void)
-{
-    int64_t res = (int64_t)T0 * (int64_t)T1;
-
-    if (likely((int32_t)res == res)) {
-        xer_ov = 0;
-    } else {
-        xer_ov = 1;
-        xer_so = 1;
-    }
-    T0 = (int32_t)res;
-}
-
-#if defined(TARGET_PPC64)
-void do_mulldo (void)
+uint64_t helper_mulldo (uint64_t arg1, uint64_t arg2)
 {
     int64_t th;
     uint64_t tl;
 
-    muls64(&tl, &th, T0, T1);
-    T0 = (int64_t)tl;
+    muls64(&tl, (uint64_t *)&th, arg1, arg2);
     /* If th != 0 && th != -1, then we had an overflow */
     if (likely((uint64_t)(th + 1) <= 1)) {
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     } else {
-        xer_ov = 1;
+        env->xer |= (1 << XER_OV) | (1 << XER_SO);
     }
-    xer_so |= xer_ov;
+    return (int64_t)tl;
 }
 #endif
 
-void do_nego (void)
+target_ulong helper_cntlzw (target_ulong t)
 {
-    if (likely((int32_t)T0 != INT32_MIN)) {
-        xer_ov = 0;
-        T0 = -(int32_t)T0;
-    } else {
-        xer_ov = 1;
-        xer_so = 1;
-    }
+    return clz32(t);
 }
 
 #if defined(TARGET_PPC64)
-void do_nego_64 (void)
+target_ulong helper_cntlzd (target_ulong t)
 {
-    if (likely((int64_t)T0 != INT64_MIN)) {
-        xer_ov = 0;
-        T0 = -(int64_t)T0;
-    } else {
-        xer_ov = 1;
-        xer_so = 1;
-    }
-}
-#endif
-
-void do_subfe (void)
-{
-    T0 = T1 + ~T0 + xer_ca;
-    if (likely((uint32_t)T0 >= (uint32_t)T1 &&
-               (xer_ca == 0 || (uint32_t)T0 != (uint32_t)T1))) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-
-#if defined(TARGET_PPC64)
-void do_subfe_64 (void)
-{
-    T0 = T1 + ~T0 + xer_ca;
-    if (likely((uint64_t)T0 >= (uint64_t)T1 &&
-               (xer_ca == 0 || (uint64_t)T0 != (uint64_t)T1))) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-#endif
-
-void do_subfmeo (void)
-{
-    T1 = T0;
-    T0 = ~T0 + xer_ca - 1;
-    xer_ov = ((uint32_t)~T1 & ((uint32_t)~T1 ^ (uint32_t)T0)) >> 31;
-    xer_so |= xer_ov;
-    if (likely((uint32_t)T1 != UINT32_MAX))
-        xer_ca = 1;
-    else
-        xer_ca = 0;
-}
-
-#if defined(TARGET_PPC64)
-void do_subfmeo_64 (void)
-{
-    T1 = T0;
-    T0 = ~T0 + xer_ca - 1;
-    xer_ov = ((uint64_t)~T1 & ((uint64_t)~T1 ^ (uint64_t)T0)) >> 63;
-    xer_so |= xer_ov;
-    if (likely((uint64_t)T1 != UINT64_MAX))
-        xer_ca = 1;
-    else
-        xer_ca = 0;
-}
-#endif
-
-void do_subfzeo (void)
-{
-    T1 = T0;
-    T0 = ~T0 + xer_ca;
-    xer_ov = (((uint32_t)~T1 ^ UINT32_MAX) &
-              ((uint32_t)(~T1) ^ (uint32_t)T0)) >> 31;
-    xer_so |= xer_ov;
-    if (likely((uint32_t)T0 >= (uint32_t)~T1)) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-
-#if defined(TARGET_PPC64)
-void do_subfzeo_64 (void)
-{
-    T1 = T0;
-    T0 = ~T0 + xer_ca;
-    xer_ov = (((uint64_t)~T1 ^  UINT64_MAX) &
-              ((uint64_t)(~T1) ^ (uint64_t)T0)) >> 63;
-    xer_so |= xer_ov;
-    if (likely((uint64_t)T0 >= (uint64_t)~T1)) {
-        xer_ca = 0;
-    } else {
-        xer_ca = 1;
-    }
-}
-#endif
-
-void do_cntlzw (void)
-{
-    T0 = clz32(T0);
-}
-
-#if defined(TARGET_PPC64)
-void do_cntlzd (void)
-{
-    T0 = clz64(T0);
+    return clz64(t);
 }
 #endif
 
 /* shift right arithmetic helper */
-void do_sraw (void)
+target_ulong helper_sraw (target_ulong value, target_ulong shift)
 {
     int32_t ret;
 
-    if (likely(!(T1 & 0x20UL))) {
-        if (likely((uint32_t)T1 != 0)) {
-            ret = (int32_t)T0 >> (T1 & 0x1fUL);
-            if (likely(ret >= 0 || ((int32_t)T0 & ((1 << T1) - 1)) == 0)) {
-                xer_ca = 0;
+    if (likely(!(shift & 0x20))) {
+        if (likely((uint32_t)shift != 0)) {
+            shift &= 0x1f;
+            ret = (int32_t)value >> shift;
+            if (likely(ret >= 0 || (value & ((1 << shift) - 1)) == 0)) {
+                env->xer &= ~(1 << XER_CA);
             } else {
-                xer_ca = 1;
+                env->xer |= (1 << XER_CA);
             }
         } else {
-            ret = T0;
-            xer_ca = 0;
+            ret = (int32_t)value;
+            env->xer &= ~(1 << XER_CA);
         }
     } else {
-        ret = UINT32_MAX * ((uint32_t)T0 >> 31);
-        if (likely(ret >= 0 || ((uint32_t)T0 & ~0x80000000UL) == 0)) {
-            xer_ca = 0;
+        ret = (int32_t)value >> 31;
+        if (ret) {
+            env->xer |= (1 << XER_CA);
         } else {
-            xer_ca = 1;
+            env->xer &= ~(1 << XER_CA);
         }
     }
-    T0 = ret;
+    return (target_long)ret;
 }
 
 #if defined(TARGET_PPC64)
-void do_srad (void)
+target_ulong helper_srad (target_ulong value, target_ulong shift)
 {
     int64_t ret;
 
-    if (likely(!(T1 & 0x40UL))) {
-        if (likely((uint64_t)T1 != 0)) {
-            ret = (int64_t)T0 >> (T1 & 0x3FUL);
-            if (likely(ret >= 0 || ((int64_t)T0 & ((1 << T1) - 1)) == 0)) {
-                xer_ca = 0;
+    if (likely(!(shift & 0x40))) {
+        if (likely((uint64_t)shift != 0)) {
+            shift &= 0x3f;
+            ret = (int64_t)value >> shift;
+            if (likely(ret >= 0 || (value & ((1 << shift) - 1)) == 0)) {
+                env->xer &= ~(1 << XER_CA);
             } else {
-                xer_ca = 1;
+                env->xer |= (1 << XER_CA);
             }
         } else {
-            ret = T0;
-            xer_ca = 0;
+            ret = (int64_t)value;
+            env->xer &= ~(1 << XER_CA);
         }
     } else {
-        ret = UINT64_MAX * ((uint64_t)T0 >> 63);
-        if (likely(ret >= 0 || ((uint64_t)T0 & ~0x8000000000000000ULL) == 0)) {
-            xer_ca = 0;
+        ret = (int64_t)value >> 63;
+        if (ret) {
+            env->xer |= (1 << XER_CA);
         } else {
-            xer_ca = 1;
+            env->xer &= ~(1 << XER_CA);
         }
     }
-    T0 = ret;
+    return ret;
 }
 #endif
 
-void do_popcntb (void)
+target_ulong helper_popcntb (target_ulong val)
 {
-    uint32_t ret;
-    int i;
-
-    ret = 0;
-    for (i = 0; i < 32; i += 8)
-        ret |= ctpop8((T0 >> i) & 0xFF) << i;
-    T0 = ret;
+    val = (val & 0x55555555) + ((val >>  1) & 0x55555555);
+    val = (val & 0x33333333) + ((val >>  2) & 0x33333333);
+    val = (val & 0x0f0f0f0f) + ((val >>  4) & 0x0f0f0f0f);
+    return val;
 }
 
 #if defined(TARGET_PPC64)
-void do_popcntb_64 (void)
+target_ulong helper_popcntb_64 (target_ulong val)
 {
-    uint64_t ret;
-    int i;
-
-    ret = 0;
-    for (i = 0; i < 64; i += 8)
-        ret |= ctpop8((T0 >> i) & 0xFF) << i;
-    T0 = ret;
+    val = (val & 0x5555555555555555ULL) + ((val >>  1) & 0x5555555555555555ULL);
+    val = (val & 0x3333333333333333ULL) + ((val >>  2) & 0x3333333333333333ULL);
+    val = (val & 0x0f0f0f0f0f0f0f0fULL) + ((val >>  4) & 0x0f0f0f0f0f0f0f0fULL);
+    return val;
 }
 #endif
 
@@ -1356,27 +1142,32 @@ void do_fsel (void)
         FT0 = FT2;
 }
 
-void do_fcmpu (void)
+uint32_t helper_fcmpu (void)
 {
+    uint32_t ret = 0;
+
     if (unlikely(float64_is_signaling_nan(FT0) ||
                  float64_is_signaling_nan(FT1))) {
         /* sNaN comparison */
         fload_invalid_op_excp(POWERPC_EXCP_FP_VXSNAN);
     } else {
         if (float64_lt(FT0, FT1, &env->fp_status)) {
-            T0 = 0x08UL;
+            ret = 0x08UL;
         } else if (!float64_le(FT0, FT1, &env->fp_status)) {
-            T0 = 0x04UL;
+            ret = 0x04UL;
         } else {
-            T0 = 0x02UL;
+            ret = 0x02UL;
         }
     }
     env->fpscr &= ~(0x0F << FPSCR_FPRF);
-    env->fpscr |= T0 << FPSCR_FPRF;
+    env->fpscr |= ret << FPSCR_FPRF;
+    return ret;
 }
 
-void do_fcmpo (void)
+uint32_t helper_fcmpo (void)
 {
+    uint32_t ret = 0;
+
     if (unlikely(float64_is_nan(FT0) ||
                  float64_is_nan(FT1))) {
         if (float64_is_signaling_nan(FT0) ||
@@ -1390,15 +1181,16 @@ void do_fcmpo (void)
         }
     } else {
         if (float64_lt(FT0, FT1, &env->fp_status)) {
-            T0 = 0x08UL;
+            ret = 0x08UL;
         } else if (!float64_le(FT0, FT1, &env->fp_status)) {
-            T0 = 0x04UL;
+            ret = 0x04UL;
         } else {
-            T0 = 0x02UL;
+            ret = 0x02UL;
         }
     }
     env->fpscr &= ~(0x0F << FPSCR_FPRF);
-    env->fpscr |= T0 << FPSCR_FPRF;
+    env->fpscr |= ret << FPSCR_FPRF;
+    return ret;
 }
 
 #if !defined (CONFIG_USER_ONLY)
@@ -1492,14 +1284,13 @@ void do_POWER_abso (void)
 {
     if ((int32_t)T0 == INT32_MIN) {
         T0 = INT32_MAX;
-        xer_ov = 1;
+        env->xer |= (1 << XER_OV) | (1 << XER_SO);
     } else if ((int32_t)T0 < 0) {
         T0 = -T0;
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     } else {
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     }
-    xer_so |= xer_ov;
 }
 
 void do_POWER_clcs (void)
@@ -1552,19 +1343,18 @@ void do_POWER_divo (void)
         (int32_t)T1 == 0) {
         T0 = UINT32_MAX * ((uint32_t)T0 >> 31);
         env->spr[SPR_MQ] = 0;
-        xer_ov = 1;
+        env->xer |= (1 << XER_OV) | (1 << XER_SO);
     } else {
         tmp = ((uint64_t)T0 << 32) | env->spr[SPR_MQ];
         env->spr[SPR_MQ] = tmp % T1;
         tmp /= (int32_t)T1;
         if (tmp > (int64_t)INT32_MAX || tmp < (int64_t)INT32_MIN) {
-            xer_ov = 1;
+            env->xer |= (1 << XER_OV) | (1 << XER_SO);
         } else {
-            xer_ov = 0;
+            env->xer &= ~(1 << XER_OV);
         }
         T0 = tmp;
     }
-    xer_so |= xer_ov;
 }
 
 void do_POWER_divs (void)
@@ -1585,13 +1375,12 @@ void do_POWER_divso (void)
         (int32_t)T1 == 0) {
         T0 = UINT32_MAX * ((uint32_t)T0 >> 31);
         env->spr[SPR_MQ] = 0;
-        xer_ov = 1;
+        env->xer |= (1 << XER_OV) | (1 << XER_SO);
     } else {
         T0 = (int32_t)T0 / (int32_t)T1;
         env->spr[SPR_MQ] = (int32_t)T0 % (int32_t)T1;
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     }
-    xer_so |= xer_ov;
 }
 
 void do_POWER_dozo (void)
@@ -1601,14 +1390,13 @@ void do_POWER_dozo (void)
         T0 = T1 - T0;
         if (((uint32_t)(~T2) ^ (uint32_t)T1 ^ UINT32_MAX) &
             ((uint32_t)(~T2) ^ (uint32_t)T0) & (1UL << 31)) {
-            xer_ov = 1;
-            xer_so = 1;
+            env->xer |= (1 << XER_OV) | (1 << XER_SO);
         } else {
-            xer_ov = 0;
+            env->xer &= ~(1 << XER_OV);
         }
     } else {
         T0 = 0;
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     }
 }
 
@@ -1635,10 +1423,9 @@ void do_POWER_mulo (void)
     env->spr[SPR_MQ] = tmp >> 32;
     T0 = tmp;
     if (tmp >> 32 != ((uint64_t)T0 >> 16) * ((uint64_t)T1 >> 16)) {
-        xer_ov = 1;
-        xer_so = 1;
+        env->xer |= (1 << XER_OV) | (1 << XER_SO);
     } else {
-        xer_ov = 0;
+        env->xer &= ~(1 << XER_OV);
     }
 }
 
@@ -1718,18 +1505,6 @@ void do_op_602_mfrom (void)
 
 /*****************************************************************************/
 /* Embedded PowerPC specific helpers */
-void do_405_check_sat (void)
-{
-    if (!likely((((uint32_t)T1 ^ (uint32_t)T2) >> 31) ||
-                !(((uint32_t)T0 ^ (uint32_t)T2) >> 31))) {
-        /* Saturate result */
-        if (T2 >> 31) {
-            T0 = INT32_MIN;
-        } else {
-            T0 = INT32_MAX;
-        }
-    }
-}
 
 /* XXX: to be improved to check access rights when in user-mode */
 void do_load_dcr (void)
@@ -1850,22 +1625,28 @@ static always_inline uint32_t word_reverse (uint32_t val)
 }
 
 #define MASKBITS 16 // Random value - to be fixed (implementation dependant)
-void do_brinc (void)
+target_ulong helper_brinc (target_ulong arg1, target_ulong arg2)
 {
     uint32_t a, b, d, mask;
 
     mask = UINT32_MAX >> (32 - MASKBITS);
-    a = T0 & mask;
-    b = T1 & mask;
+    a = arg1 & mask;
+    b = arg2 & mask;
     d = word_reverse(1 + word_reverse(a | ~b));
-    T0 = (T0 & ~mask) | (d & b);
+    return (arg1 & ~mask) | (d & b);
 }
 
-#define DO_SPE_OP2(name)                                                      \
-void do_ev##name (void)                                                       \
-{                                                                             \
-    T0_64 = ((uint64_t)_do_e##name(T0_64 >> 32, T1_64 >> 32) << 32) |         \
-        (uint64_t)_do_e##name(T0_64, T1_64);                                  \
+uint32_t helper_cntlsw32 (uint32_t val)
+{
+    if (val & 0x80000000)
+        return clz32(~val);
+    else
+        return clz32(val);
+}
+
+uint32_t helper_cntlzw32 (uint32_t val)
+{
+    return clz32(val);
 }
 
 #define DO_SPE_OP1(name)                                                      \
@@ -1875,110 +1656,11 @@ void do_ev##name (void)                                                       \
         (uint64_t)_do_e##name(T0_64);                                         \
 }
 
-/* Fixed-point vector arithmetic */
-static always_inline uint32_t _do_eabs (uint32_t val)
-{
-    if ((val & 0x80000000) && val != 0x80000000)
-        val -= val;
-
-    return val;
-}
-
-static always_inline uint32_t _do_eaddw (uint32_t op1, uint32_t op2)
-{
-    return op1 + op2;
-}
-
-static always_inline int _do_ecntlsw (uint32_t val)
-{
-    if (val & 0x80000000)
-        return clz32(~val);
-    else
-        return clz32(val);
-}
-
-static always_inline int _do_ecntlzw (uint32_t val)
-{
-    return clz32(val);
-}
-
-static always_inline uint32_t _do_eneg (uint32_t val)
-{
-    if (val != 0x80000000)
-        val -= val;
-
-    return val;
-}
-
-static always_inline uint32_t _do_erlw (uint32_t op1, uint32_t op2)
-{
-    return rotl32(op1, op2);
-}
-
-static always_inline uint32_t _do_erndw (uint32_t val)
-{
-    return (val + 0x000080000000) & 0xFFFF0000;
-}
-
-static always_inline uint32_t _do_eslw (uint32_t op1, uint32_t op2)
-{
-    /* No error here: 6 bits are used */
-    return op1 << (op2 & 0x3F);
-}
-
-static always_inline int32_t _do_esrws (int32_t op1, uint32_t op2)
-{
-    /* No error here: 6 bits are used */
-    return op1 >> (op2 & 0x3F);
-}
-
-static always_inline uint32_t _do_esrwu (uint32_t op1, uint32_t op2)
-{
-    /* No error here: 6 bits are used */
-    return op1 >> (op2 & 0x3F);
-}
-
-static always_inline uint32_t _do_esubfw (uint32_t op1, uint32_t op2)
-{
-    return op2 - op1;
-}
-
-/* evabs */
-DO_SPE_OP1(abs);
-/* evaddw */
-DO_SPE_OP2(addw);
-/* evcntlsw */
-DO_SPE_OP1(cntlsw);
-/* evcntlzw */
-DO_SPE_OP1(cntlzw);
-/* evneg */
-DO_SPE_OP1(neg);
-/* evrlw */
-DO_SPE_OP2(rlw);
-/* evrnd */
-DO_SPE_OP1(rndw);
-/* evslw */
-DO_SPE_OP2(slw);
-/* evsrws */
-DO_SPE_OP2(srws);
-/* evsrwu */
-DO_SPE_OP2(srwu);
-/* evsubfw */
-DO_SPE_OP2(subfw);
-
-/* evsel is a little bit more complicated... */
-static always_inline uint32_t _do_esel (uint32_t op1, uint32_t op2, int n)
-{
-    if (n)
-        return op1;
-    else
-        return op2;
-}
-
-void do_evsel (void)
-{
-    T0_64 = ((uint64_t)_do_esel(T0_64 >> 32, T1_64 >> 32, T0 >> 3) << 32) |
-        (uint64_t)_do_esel(T0_64, T1_64, (T0 >> 2) & 1);
+#define DO_SPE_OP2(name)                                                      \
+void do_ev##name (void)                                                       \
+{                                                                             \
+    T0_64 = ((uint64_t)_do_e##name(T0_64 >> 32, T1_64 >> 32) << 32) |         \
+        (uint64_t)_do_e##name(T0_64, T1_64);                                  \
 }
 
 /* Fixed-point vector comparisons */
@@ -1994,41 +1676,6 @@ static always_inline uint32_t _do_evcmp_merge (int t0, int t1)
 {
     return (t0 << 3) | (t1 << 2) | ((t0 | t1) << 1) | (t0 & t1);
 }
-static always_inline int _do_ecmpeq (uint32_t op1, uint32_t op2)
-{
-    return op1 == op2 ? 1 : 0;
-}
-
-static always_inline int _do_ecmpgts (int32_t op1, int32_t op2)
-{
-    return op1 > op2 ? 1 : 0;
-}
-
-static always_inline int _do_ecmpgtu (uint32_t op1, uint32_t op2)
-{
-    return op1 > op2 ? 1 : 0;
-}
-
-static always_inline int _do_ecmplts (int32_t op1, int32_t op2)
-{
-    return op1 < op2 ? 1 : 0;
-}
-
-static always_inline int _do_ecmpltu (uint32_t op1, uint32_t op2)
-{
-    return op1 < op2 ? 1 : 0;
-}
-
-/* evcmpeq */
-DO_SPE_CMP(cmpeq);
-/* evcmpgts */
-DO_SPE_CMP(cmpgts);
-/* evcmpgtu */
-DO_SPE_CMP(cmpgtu);
-/* evcmplts */
-DO_SPE_CMP(cmplts);
-/* evcmpltu */
-DO_SPE_CMP(cmpltu);
 
 /* Single precision floating-point conversions from/to integer */
 static always_inline uint32_t _do_efscfsi (int32_t val)

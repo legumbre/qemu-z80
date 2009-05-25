@@ -34,6 +34,10 @@
 #include <termios.h>
 #endif
 
+#ifdef __OpenBSD__
+#define resize_term resizeterm
+#endif
+
 #define FONT_HEIGHT 16
 #define FONT_WIDTH 8
 
@@ -56,7 +60,7 @@ static void curses_update(DisplayState *ds, int x, int y, int w, int h)
 
 static void curses_calc_pad(void)
 {
-    if (is_graphic_console()) {
+    if (is_fixedsize_console()) {
         width = gwidth;
         height = gheight;
     } else {
@@ -346,8 +350,6 @@ void curses_display_init(DisplayState *ds, int full_screen)
     atexit(curses_atexit);
 
 #ifndef _WIN32
-    signal(SIGINT, SIG_DFL);
-    signal(SIGQUIT, SIG_DFL);
 #if defined(SIGWINCH) && defined(KEY_RESIZE)
     /* some curses implementations provide a handler, but we
      * want to be sure this is handled regardless of the library */

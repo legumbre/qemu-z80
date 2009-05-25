@@ -236,7 +236,7 @@ static i2c_interface *mixer_i2c;
 /* Wolfson 8750 I2C address */
 #define MP_WM_ADDR              0x34
 
-const char audio_name[] = "mv88w8618";
+static const char audio_name[] = "mv88w8618";
 
 typedef struct musicpal_audio_state {
     uint32_t base;
@@ -1509,8 +1509,9 @@ static void musicpal_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine musicpal_machine = {
-    "musicpal",
-    "Marvell 88w8618 / MusicPal (ARM926EJ-S)",
-    musicpal_init,
-    MP_RAM_DEFAULT_SIZE + MP_SRAM_SIZE + MP_FLASH_SIZE_MAX + RAMSIZE_FIXED
+    .name = "musicpal",
+    .desc = "Marvell 88w8618 / MusicPal (ARM926EJ-S)",
+    .init = musicpal_init,
+    .ram_require = MP_RAM_DEFAULT_SIZE + MP_SRAM_SIZE +
+            MP_FLASH_SIZE_MAX + RAMSIZE_FIXED,
 };

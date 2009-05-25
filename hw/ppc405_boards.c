@@ -29,9 +29,7 @@
 #include "sysemu.h"
 #include "block.h"
 #include "boards.h"
-
-extern int loglevel;
-extern FILE *logfile;
+#include "qemu-log.h"
 
 #define BIOS_FILENAME "ppc405_rom.bin"
 #undef BIOS_SIZE
@@ -357,10 +355,10 @@ static void ref405ep_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine ref405ep_machine = {
-    "ref405ep",
-    "ref405ep",
-    ref405ep_init,
-    (128 * 1024 * 1024 + 4096 + 512 * 1024 + BIOS_SIZE) | RAMSIZE_FIXED,
+    .name = "ref405ep",
+    .desc = "ref405ep",
+    .init = ref405ep_init,
+    .ram_require = (128 * 1024 * 1024 + 4096 + 512 * 1024 + BIOS_SIZE) | RAMSIZE_FIXED,
 };
 
 /*****************************************************************************/

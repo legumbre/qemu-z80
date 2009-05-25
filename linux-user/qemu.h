@@ -199,8 +199,7 @@ int get_osversion(void);
 void fork_start(void);
 void fork_end(int child);
 
-extern int loglevel;
-extern FILE *logfile;
+#include "qemu-log.h"
 
 /* strace.c */
 void print_syscall(int num,
@@ -247,6 +246,9 @@ void mmap_unlock(void);
 void mmap_fork_start(void);
 void mmap_fork_end(int child);
 #endif
+
+/* main.c */
+extern unsigned long x86_stack_size;
 
 /* user access */
 

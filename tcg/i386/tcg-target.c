@@ -21,7 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
+
+#ifndef NDEBUG
+static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%eax",
     "%ecx",
     "%edx",
@@ -31,8 +33,9 @@ const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%esi",
     "%edi",
 };
+#endif
 
-int tcg_target_reg_alloc_order[] = {
+static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_EAX,
     TCG_REG_EDX,
     TCG_REG_ECX,
@@ -42,8 +45,8 @@ int tcg_target_reg_alloc_order[] = {
     TCG_REG_EBP,
 };
 
-const int tcg_target_call_iarg_regs[3] = { TCG_REG_EAX, TCG_REG_EDX, TCG_REG_ECX };
-const int tcg_target_call_oarg_regs[2] = { TCG_REG_EAX, TCG_REG_EDX };
+static const int tcg_target_call_iarg_regs[3] = { TCG_REG_EAX, TCG_REG_EDX, TCG_REG_ECX };
+static const int tcg_target_call_oarg_regs[2] = { TCG_REG_EAX, TCG_REG_EDX };
 
 static uint8_t *tb_ret_addr;
 
@@ -80,7 +83,7 @@ static inline int tcg_target_get_call_iarg_regs_count(int flags)
 }
 
 /* parse target specific constraints */
-int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
+static int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
 {
     const char *ct_str;
 
@@ -360,22 +363,22 @@ static void tcg_out_brcond2(TCGContext *s,
     case TCG_COND_LT:
         tcg_out_brcond(s, TCG_COND_LT, args[1], args[3], const_args[3], args[5]);
         tcg_out_jxx(s, JCC_JNE, label_next);
-        tcg_out_brcond(s, TCG_COND_LT, args[0], args[2], const_args[2], args[5]);
+        tcg_out_brcond(s, TCG_COND_LTU, args[0], args[2], const_args[2], args[5]);
         break;
     case TCG_COND_LE:
         tcg_out_brcond(s, TCG_COND_LT, args[1], args[3], const_args[3], args[5]);
         tcg_out_jxx(s, JCC_JNE, label_next);
-        tcg_out_brcond(s, TCG_COND_LE, args[0], args[2], const_args[2], args[5]);
+        tcg_out_brcond(s, TCG_COND_LEU, args[0], args[2], const_args[2], args[5]);
         break;
     case TCG_COND_GT:
         tcg_out_brcond(s, TCG_COND_GT, args[1], args[3], const_args[3], args[5]);
         tcg_out_jxx(s, JCC_JNE, label_next);
-        tcg_out_brcond(s, TCG_COND_GT, args[0], args[2], const_args[2], args[5]);
+        tcg_out_brcond(s, TCG_COND_GTU, args[0], args[2], const_args[2], args[5]);
         break;
     case TCG_COND_GE:
         tcg_out_brcond(s, TCG_COND_GT, args[1], args[3], const_args[3], args[5]);
         tcg_out_jxx(s, JCC_JNE, label_next);
-        tcg_out_brcond(s, TCG_COND_GE, args[0], args[2], const_args[2], args[5]);
+        tcg_out_brcond(s, TCG_COND_GEU, args[0], args[2], const_args[2], args[5]);
         break;
     case TCG_COND_LTU:
         tcg_out_brcond(s, TCG_COND_LTU, args[1], args[3], const_args[3], args[5]);
@@ -404,15 +407,8 @@ static void tcg_out_brcond2(TCGContext *s,
 }
 
 #if defined(CONFIG_SOFTMMU)
-extern void __ldb_mmu(void);
-extern void __ldw_mmu(void);
-extern void __ldl_mmu(void);
-extern void __ldq_mmu(void);
 
-extern void __stb_mmu(void);
-extern void __stw_mmu(void);
-extern void __stl_mmu(void);
-extern void __stq_mmu(void);
+#include "../../softmmu_defs.h"
 
 static void *qemu_ld_helpers[4] = {
     __ldb_mmu,

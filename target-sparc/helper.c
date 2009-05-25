@@ -28,27 +28,9 @@
 #include "cpu.h"
 #include "exec-all.h"
 #include "qemu-common.h"
-#include "helper.h"
 
 //#define DEBUG_MMU
 //#define DEBUG_FEATURES
-//#define DEBUG_PCALL
-
-typedef struct sparc_def_t sparc_def_t;
-
-struct sparc_def_t {
-    const char *name;
-    target_ulong iu_version;
-    uint32_t fpu_version;
-    uint32_t mmu_version;
-    uint32_t mmu_bm;
-    uint32_t mmu_ctpr_mask;
-    uint32_t mmu_cxr_mask;
-    uint32_t mmu_sfsr_mask;
-    uint32_t mmu_trcr_mask;
-    uint32_t features;
-    uint32_t nwindows;
-};
 
 static int cpu_sparc_find_by_name(sparc_def_t *cpu_def, const char *cpu_model);
 
@@ -56,7 +38,7 @@ static int cpu_sparc_find_by_name(sparc_def_t *cpu_def, const char *cpu_model);
 
 /* thread support */
 
-spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
+static spinlock_t global_cpu_lock = SPIN_LOCK_UNLOCKED;
 
 void cpu_lock(void)
 {
@@ -136,7 +118,7 @@ static int get_physical_address(CPUState *env, target_phys_addr_t *physical,
 
     if ((env->mmuregs[0] & MMU_E) == 0) { /* MMU disabled */
         // Boot mode: instruction fetches are taken from PROM
-        if (rw == 2 && (env->mmuregs[0] & env->mmu_bm)) {
+        if (rw == 2 && (env->mmuregs[0] & env->def->mmu_bm)) {
             *physical = env->prom_addr | (address & 0x7ffffULL);
             *prot = PAGE_READ | PAGE_EXEC;
             return 0;
@@ -449,6 +431,7 @@ static int get_physical_address_data(CPUState *env,
 #ifdef DEBUG_MMU
     printf("DMISS at 0x%" PRIx64 "\n", address);
 #endif
+    env->dmmuregs[6] = (address & ~0x1fffULL) | (env->dmmuregs[1] & 0x1fff);
     env->exception_index = TT_DMISS;
     return 1;
 }
@@ -507,6 +490,7 @@ static int get_physical_address_code(CPUState *env,
 #ifdef DEBUG_MMU
     printf("TMISS at 0x%" PRIx64 "\n", address);
 #endif
+    env->immuregs[6] = (address & ~0x1fffULL) | (env->dmmuregs[1] & 0x1fff);
     env->exception_index = TT_TMISS;
     return 1;
 }
@@ -653,232 +637,6 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 }
 #endif
 
-#ifdef TARGET_SPARC64
-#ifdef DEBUG_PCALL
-static const char * const excp_names[0x50] = {
-    [TT_TFAULT] = "Instruction Access Fault",
-    [TT_TMISS] = "Instruction Access MMU Miss",
-    [TT_CODE_ACCESS] = "Instruction Access Error",
-    [TT_ILL_INSN] = "Illegal Instruction",
-    [TT_PRIV_INSN] = "Privileged Instruction",
-    [TT_NFPU_INSN] = "FPU Disabled",
-    [TT_FP_EXCP] = "FPU Exception",
-    [TT_TOVF] = "Tag Overflow",
-    [TT_CLRWIN] = "Clean Windows",
-    [TT_DIV_ZERO] = "Division By Zero",
-    [TT_DFAULT] = "Data Access Fault",
-    [TT_DMISS] = "Data Access MMU Miss",
-    [TT_DATA_ACCESS] = "Data Access Error",
-    [TT_DPROT] = "Data Protection Error",
-    [TT_UNALIGNED] = "Unaligned Memory Access",
-    [TT_PRIV_ACT] = "Privileged Action",
-    [TT_EXTINT | 0x1] = "External Interrupt 1",
-    [TT_EXTINT | 0x2] = "External Interrupt 2",
-    [TT_EXTINT | 0x3] = "External Interrupt 3",
-    [TT_EXTINT | 0x4] = "External Interrupt 4",
-    [TT_EXTINT | 0x5] = "External Interrupt 5",
-    [TT_EXTINT | 0x6] = "External Interrupt 6",
-    [TT_EXTINT | 0x7] = "External Interrupt 7",
-    [TT_EXTINT | 0x8] = "External Interrupt 8",
-    [TT_EXTINT | 0x9] = "External Interrupt 9",
-    [TT_EXTINT | 0xa] = "External Interrupt 10",
-    [TT_EXTINT | 0xb] = "External Interrupt 11",
-    [TT_EXTINT | 0xc] = "External Interrupt 12",
-    [TT_EXTINT | 0xd] = "External Interrupt 13",
-    [TT_EXTINT | 0xe] = "External Interrupt 14",
-    [TT_EXTINT | 0xf] = "External Interrupt 15",
-};
-#endif
-
-void do_interrupt(CPUState *env)
-{
-    int intno = env->exception_index;
-
-#ifdef DEBUG_PCALL
-    if (loglevel & CPU_LOG_INT) {
-        static int count;
-        const char *name;
-
-        if (intno < 0 || intno >= 0x180 || (intno > 0x4f && intno < 0x80))
-            name = "Unknown";
-        else if (intno >= 0x100)
-            name = "Trap Instruction";
-        else if (intno >= 0xc0)
-            name = "Window Fill";
-        else if (intno >= 0x80)
-            name = "Window Spill";
-        else {
-            name = excp_names[intno];
-            if (!name)
-                name = "Unknown";
-        }
-
-        fprintf(logfile, "%6d: %s (v=%04x) pc=%016" PRIx64 " npc=%016" PRIx64
-                " SP=%016" PRIx64 "\n",
-                count, name, intno,
-                env->pc,
-                env->npc, env->regwptr[6]);
-        cpu_dump_state(env, logfile, fprintf, 0);
-#if 0
-        {
-            int i;
-            uint8_t *ptr;
-
-            fprintf(logfile, "       code=");
-            ptr = (uint8_t *)env->pc;
-            for(i = 0; i < 16; i++) {
-                fprintf(logfile, " %02x", ldub(ptr + i));
-            }
-            fprintf(logfile, "\n");
-        }
-#endif
-        count++;
-    }
-#endif
-#if !defined(CONFIG_USER_ONLY)
-    if (env->tl == MAXTL) {
-        cpu_abort(env, "Trap 0x%04x while trap level is MAXTL, Error state",
-                  env->exception_index);
-        return;
-    }
-#endif
-    env->tsptr->tstate = ((uint64_t)GET_CCR(env) << 32) |
-        ((env->asi & 0xff) << 24) | ((env->pstate & 0xf3f) << 8) |
-        GET_CWP64(env);
-    env->tsptr->tpc = env->pc;
-    env->tsptr->tnpc = env->npc;
-    env->tsptr->tt = intno;
-    change_pstate(PS_PEF | PS_PRIV | PS_AG);
-
-    if (intno == TT_CLRWIN)
-        cpu_set_cwp(env, cpu_cwp_dec(env, env->cwp - 1));
-    else if ((intno & 0x1c0) == TT_SPILL)
-        cpu_set_cwp(env, cpu_cwp_dec(env, env->cwp - env->cansave - 2));
-    else if ((intno & 0x1c0) == TT_FILL)
-        cpu_set_cwp(env, cpu_cwp_inc(env, env->cwp + 1));
-    env->tbr &= ~0x7fffULL;
-    env->tbr |= ((env->tl > 1) ? 1 << 14 : 0) | (intno << 5);
-    if (env->tl < MAXTL - 1) {
-        env->tl++;
-    } else {
-        env->pstate |= PS_RED;
-        if (env->tl != MAXTL)
-            env->tl++;
-    }
-    env->tsptr = &env->ts[env->tl];
-    env->pc = env->tbr;
-    env->npc = env->pc + 4;
-    env->exception_index = 0;
-}
-#else
-#ifdef DEBUG_PCALL
-static const char * const excp_names[0x80] = {
-    [TT_TFAULT] = "Instruction Access Fault",
-    [TT_ILL_INSN] = "Illegal Instruction",
-    [TT_PRIV_INSN] = "Privileged Instruction",
-    [TT_NFPU_INSN] = "FPU Disabled",
-    [TT_WIN_OVF] = "Window Overflow",
-    [TT_WIN_UNF] = "Window Underflow",
-    [TT_UNALIGNED] = "Unaligned Memory Access",
-    [TT_FP_EXCP] = "FPU Exception",
-    [TT_DFAULT] = "Data Access Fault",
-    [TT_TOVF] = "Tag Overflow",
-    [TT_EXTINT | 0x1] = "External Interrupt 1",
-    [TT_EXTINT | 0x2] = "External Interrupt 2",
-    [TT_EXTINT | 0x3] = "External Interrupt 3",
-    [TT_EXTINT | 0x4] = "External Interrupt 4",
-    [TT_EXTINT | 0x5] = "External Interrupt 5",
-    [TT_EXTINT | 0x6] = "External Interrupt 6",
-    [TT_EXTINT | 0x7] = "External Interrupt 7",
-    [TT_EXTINT | 0x8] = "External Interrupt 8",
-    [TT_EXTINT | 0x9] = "External Interrupt 9",
-    [TT_EXTINT | 0xa] = "External Interrupt 10",
-    [TT_EXTINT | 0xb] = "External Interrupt 11",
-    [TT_EXTINT | 0xc] = "External Interrupt 12",
-    [TT_EXTINT | 0xd] = "External Interrupt 13",
-    [TT_EXTINT | 0xe] = "External Interrupt 14",
-    [TT_EXTINT | 0xf] = "External Interrupt 15",
-    [TT_TOVF] = "Tag Overflow",
-    [TT_CODE_ACCESS] = "Instruction Access Error",
-    [TT_DATA_ACCESS] = "Data Access Error",
-    [TT_DIV_ZERO] = "Division By Zero",
-    [TT_NCP_INSN] = "Coprocessor Disabled",
-};
-#endif
-
-void do_interrupt(CPUState *env)
-{
-    int cwp, intno = env->exception_index;
-
-#ifdef DEBUG_PCALL
-    if (loglevel & CPU_LOG_INT) {
-        static int count;
-        const char *name;
-
-        if (intno < 0 || intno >= 0x100)
-            name = "Unknown";
-        else if (intno >= 0x80)
-            name = "Trap Instruction";
-        else {
-            name = excp_names[intno];
-            if (!name)
-                name = "Unknown";
-        }
-
-        fprintf(logfile, "%6d: %s (v=%02x) pc=%08x npc=%08x SP=%08x\n",
-                count, name, intno,
-                env->pc,
-                env->npc, env->regwptr[6]);
-        cpu_dump_state(env, logfile, fprintf, 0);
-#if 0
-        {
-            int i;
-            uint8_t *ptr;
-
-            fprintf(logfile, "       code=");
-            ptr = (uint8_t *)env->pc;
-            for(i = 0; i < 16; i++) {
-                fprintf(logfile, " %02x", ldub(ptr + i));
-            }
-            fprintf(logfile, "\n");
-        }
-#endif
-        count++;
-    }
-#endif
-#if !defined(CONFIG_USER_ONLY)
-    if (env->psret == 0) {
-        cpu_abort(env, "Trap 0x%02x while interrupts disabled, Error state",
-                  env->exception_index);
-        return;
-    }
-#endif
-    env->psret = 0;
-    cwp = cpu_cwp_dec(env, env->cwp - 1);
-    cpu_set_cwp(env, cwp);
-    env->regwptr[9] = env->pc;
-    env->regwptr[10] = env->npc;
-    env->psrps = env->psrs;
-    env->psrs = 1;
-    env->tbr = (env->tbr & TBR_BASE_MASK) | (intno << 4);
-    env->pc = env->tbr;
-    env->npc = env->pc + 4;
-    env->exception_index = 0;
-}
-#endif
-
-void memcpy32(target_ulong *dst, const target_ulong *src)
-{
-    dst[0] = src[0];
-    dst[1] = src[1];
-    dst[2] = src[2];
-    dst[3] = src[3];
-    dst[4] = src[4];
-    dst[5] = src[5];
-    dst[6] = src[6];
-    dst[7] = src[7];
-}
-
 void cpu_reset(CPUSPARCState *env)
 {
     tlb_flush(env, 1);
@@ -900,13 +658,12 @@ void cpu_reset(CPUSPARCState *env)
 #ifdef TARGET_SPARC64
     env->pstate = PS_PRIV;
     env->hpstate = HS_PRIV;
-    env->pc = 0x1fff0000000ULL;
-    env->tsptr = &env->ts[env->tl];
+    env->tsptr = &env->ts[env->tl & MAXTL_MASK];
 #else
-    env->pc = 0;
     env->mmuregs[0] &= ~(MMU_E | MMU_NF);
-    env->mmuregs[0] |= env->mmu_bm;
+    env->mmuregs[0] |= env->def->mmu_bm;
 #endif
+    env->pc = 0;
     env->npc = env->pc + 4;
 #endif
 }
@@ -918,20 +675,23 @@ static int cpu_sparc_register(CPUSPARCState *env, const char *cpu_model)
     if (cpu_sparc_find_by_name(def, cpu_model) < 0)
         return -1;
 
-    env->features = def->features;
+    env->def = qemu_mallocz(sizeof(*def));
+    memcpy(env->def, def, sizeof(*def));
+#if defined(CONFIG_USER_ONLY)
+    if ((env->def->features & CPU_FEATURE_FLOAT))
+        env->def->features |= CPU_FEATURE_FLOAT128;
+#endif
     env->cpu_model_str = cpu_model;
     env->version = def->iu_version;
     env->fsr = def->fpu_version;
     env->nwindows = def->nwindows;
 #if !defined(TARGET_SPARC64)
-    env->mmu_bm = def->mmu_bm;
-    env->mmu_ctpr_mask = def->mmu_ctpr_mask;
-    env->mmu_cxr_mask = def->mmu_cxr_mask;
-    env->mmu_sfsr_mask = def->mmu_sfsr_mask;
-    env->mmu_trcr_mask = def->mmu_trcr_mask;
     env->mmuregs[0] |= def->mmu_version;
     cpu_sparc_set_id(env, 0);
 #else
+    env->mmu_version = def->mmu_version;
+    env->maxtl = def->maxtl;
+    env->version |= def->maxtl << 8;
     env->version |= def->nwindows - 1;
 #endif
     return 0;
@@ -939,6 +699,7 @@ static int cpu_sparc_register(CPUSPARCState *env, const char *cpu_model)
 
 static void cpu_sparc_close(CPUSPARCState *env)
 {
+    free(env->def);
     free(env);
 }
 
@@ -973,137 +734,159 @@ static const sparc_def_t sparc_defs[] = {
 #ifdef TARGET_SPARC64
     {
         .name = "Fujitsu Sparc64",
-        .iu_version = ((0x04ULL << 48) | (0x02ULL << 32) | (0ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x04ULL << 48) | (0x02ULL << 32) | (0ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 4,
+        .maxtl = 4,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Fujitsu Sparc64 III",
-        .iu_version = ((0x04ULL << 48) | (0x03ULL << 32) | (0ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x04ULL << 48) | (0x03ULL << 32) | (0ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 5,
+        .maxtl = 4,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Fujitsu Sparc64 IV",
-        .iu_version = ((0x04ULL << 48) | (0x04ULL << 32) | (0ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x04ULL << 48) | (0x04ULL << 32) | (0ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Fujitsu Sparc64 V",
-        .iu_version = ((0x04ULL << 48) | (0x05ULL << 32) | (0x51ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x04ULL << 48) | (0x05ULL << 32) | (0x51ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "TI UltraSparc I",
-        .iu_version = ((0x17ULL << 48) | (0x10ULL << 32) | (0x40ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x17ULL << 48) | (0x10ULL << 32) | (0x40ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "TI UltraSparc II",
-        .iu_version = ((0x17ULL << 48) | (0x11ULL << 32) | (0x20ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x17ULL << 48) | (0x11ULL << 32) | (0x20ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "TI UltraSparc IIi",
-        .iu_version = ((0x17ULL << 48) | (0x12ULL << 32) | (0x91ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x17ULL << 48) | (0x12ULL << 32) | (0x91ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "TI UltraSparc IIe",
-        .iu_version = ((0x17ULL << 48) | (0x13ULL << 32) | (0x14ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x17ULL << 48) | (0x13ULL << 32) | (0x14ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Sun UltraSparc III",
-        .iu_version = ((0x3eULL << 48) | (0x14ULL << 32) | (0x34ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x14ULL << 32) | (0x34ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Sun UltraSparc III Cu",
-        .iu_version = ((0x3eULL << 48) | (0x15ULL << 32) | (0x41ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x15ULL << 32) | (0x41ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_3,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Sun UltraSparc IIIi",
-        .iu_version = ((0x3eULL << 48) | (0x16ULL << 32) | (0x34ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x16ULL << 32) | (0x34ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Sun UltraSparc IV",
-        .iu_version = ((0x3eULL << 48) | (0x18ULL << 32) | (0x31ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x18ULL << 32) | (0x31ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_4,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "Sun UltraSparc IV+",
-        .iu_version = ((0x3eULL << 48) | (0x19ULL << 32) | (0x22ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x19ULL << 32) | (0x22ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_12,
         .nwindows = 8,
-        .features = CPU_DEFAULT_FEATURES,
+        .maxtl = 5,
+        .features = CPU_DEFAULT_FEATURES | CPU_FEATURE_CMT,
     },
     {
         .name = "Sun UltraSparc IIIi+",
-        .iu_version = ((0x3eULL << 48) | (0x22ULL << 32) | (0ULL << 24)
-                       | (MAXTL << 8)),
+        .iu_version = ((0x3eULL << 48) | (0x22ULL << 32) | (0ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_us_3,
         .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
-        .name = "NEC UltraSparc I",
-        .iu_version = ((0x22ULL << 48) | (0x10ULL << 32) | (0x40ULL << 24)
-                       | (MAXTL << 8)),
+        .name = "Sun UltraSparc T1",
+        // defined in sparc_ifu_fdp.v and ctu.h
+        .iu_version = ((0x3eULL << 48) | (0x23ULL << 32) | (0x02ULL << 24)),
         .fpu_version = 0x00000000,
-        .mmu_version = 0,
+        .mmu_version = mmu_sun4v,
         .nwindows = 8,
+        .maxtl = 6,
+        .features = CPU_DEFAULT_FEATURES | CPU_FEATURE_HYPV | CPU_FEATURE_CMT
+        | CPU_FEATURE_GL,
+    },
+    {
+        .name = "Sun UltraSparc T2",
+        // defined in tlu_asi_ctl.v and n2_revid_cust.v
+        .iu_version = ((0x3eULL << 48) | (0x24ULL << 32) | (0x02ULL << 24)),
+        .fpu_version = 0x00000000,
+        .mmu_version = mmu_sun4v,
+        .nwindows = 8,
+        .maxtl = 6,
+        .features = CPU_DEFAULT_FEATURES | CPU_FEATURE_HYPV | CPU_FEATURE_CMT
+        | CPU_FEATURE_GL,
+    },
+    {
+        .name = "NEC UltraSparc I",
+        .iu_version = ((0x22ULL << 48) | (0x10ULL << 32) | (0x40ULL << 24)),
+        .fpu_version = 0x00000000,
+        .mmu_version = mmu_us_12,
+        .nwindows = 8,
+        .maxtl = 5,
         .features = CPU_DEFAULT_FEATURES,
     },
 #else
@@ -1415,6 +1198,9 @@ static const char * const feature_name[] = {
     "vis1",
     "vis2",
     "fsmuld",
+    "hypv",
+    "cmt",
+    "gl",
 };
 
 static void print_features(FILE *f,
@@ -1563,11 +1349,14 @@ void sparc_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
                        sparc_defs[i].features, "+");
         (*cpu_fprintf)(f, "\n");
     }
-    (*cpu_fprintf)(f, "CPU feature flags (+/-): ");
-    print_features(f, cpu_fprintf, -1, NULL);
+    (*cpu_fprintf)(f, "Default CPU feature flags (use '-' to remove): ");
+    print_features(f, cpu_fprintf, CPU_DEFAULT_FEATURES, NULL);
     (*cpu_fprintf)(f, "\n");
-    (*cpu_fprintf)(f, "Numerical features (=): iu_version fpu_version "
-                   "mmu_version nwindows\n");
+    (*cpu_fprintf)(f, "Available CPU feature flags (use '+' to add): ");
+    print_features(f, cpu_fprintf, ~CPU_DEFAULT_FEATURES, NULL);
+    (*cpu_fprintf)(f, "\n");
+    (*cpu_fprintf)(f, "Numerical features (use '=' to set): iu_version "
+                   "fpu_version mmu_version nwindows\n");
 }
 
 #define GET_FLAG(a,b) ((env->psr & a)?b:'-')
@@ -1621,36 +1410,5 @@ void cpu_dump_state(CPUState *env, FILE *f,
                 env->psrs?'S':'-', env->psrps?'P':'-',
                 env->psret?'E':'-', env->wim);
 #endif
-    cpu_fprintf(f, "fsr: 0x%08x\n", GET_FSR32(env));
+    cpu_fprintf(f, "fsr: 0x%08x\n", env->fsr);
 }
-
-#ifdef TARGET_SPARC64
-#if !defined(CONFIG_USER_ONLY)
-#include "qemu-common.h"
-#include "hw/irq.h"
-#include "qemu-timer.h"
-#endif
-
-void helper_tick_set_count(void *opaque, uint64_t count)
-{
-#if !defined(CONFIG_USER_ONLY)
-    ptimer_set_count(opaque, -count);
-#endif
-}
-
-uint64_t helper_tick_get_count(void *opaque)
-{
-#if !defined(CONFIG_USER_ONLY)
-    return -ptimer_get_count(opaque);
-#else
-    return 0;
-#endif
-}
-
-void helper_tick_set_limit(void *opaque, uint64_t limit)
-{
-#if !defined(CONFIG_USER_ONLY)
-    ptimer_set_limit(opaque, -limit, 0);
-#endif
-}
-#endif

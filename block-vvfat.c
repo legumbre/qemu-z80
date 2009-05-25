@@ -93,7 +93,6 @@ static inline void array_free(array_t* array)
 
 /* does not automatically grow */
 static inline void* array_get(array_t* array,unsigned int index) {
-    assert(index >= 0);
     assert(index < array->next);
     return array->pointer + index * array->item_size;
 }
@@ -102,7 +101,7 @@ static inline int array_ensure_allocated(array_t* array, int index)
 {
     if((index + 1) * array->item_size > array->size) {
 	int new_size = (index + 32) * array->item_size;
-	array->pointer = realloc(array->pointer, new_size);
+	array->pointer = qemu_realloc(array->pointer, new_size);
 	if (!array->pointer)
 	    return -1;
 	array->size = new_size;
@@ -128,7 +127,7 @@ static inline void* array_get_next(array_t* array) {
 static inline void* array_insert(array_t* array,unsigned int index,unsigned int count) {
     if((array->next+count)*array->item_size>array->size) {
 	int increment=count*array->item_size;
-	array->pointer=realloc(array->pointer,array->size+increment);
+	array->pointer=qemu_realloc(array->pointer,array->size+increment);
 	if(!array->pointer)
 	    return 0;
 	array->size+=increment;
@@ -195,7 +194,6 @@ static int array_remove(array_t* array,int index)
 static int array_index(array_t* array, void* pointer)
 {
     size_t offset = (char*)pointer - array->pointer;
-    assert(offset >= 0);
     assert((offset % array->item_size) == 0);
     assert(offset/array->item_size < array->next);
     return offset/array->item_size;
@@ -627,7 +625,7 @@ static inline direntry_t* create_short_and_long_name(BDRVVVFATState* s,
 
     entry=array_get_next(&(s->directory));
     memset(entry->name,0x20,11);
-    strncpy((char*)entry->name,filename,i);
+    memcpy(entry->name, filename, i);
 
     if(j > 0)
 	for (i = 0; i < 3 && filename[j+1+i]; i++)
@@ -892,7 +890,6 @@ static int init_directories(BDRVVVFATState* s,
     s->path = mapping->path;
 
     for (i = 0, cluster = 0; i < s->mapping.next; i++) {
-	int j;
 	/* MS-DOS expects the FAT to be 0 for the root directory
 	 * (except for the media byte). */
 	/* LATER TODO: still true for FAT32? */
@@ -925,19 +922,24 @@ static int init_directories(BDRVVVFATState* s,
 
 	assert(mapping->begin < mapping->end);
 
-	/* fix fat for entry */
-	if (fix_fat) {
-	    for(j = mapping->begin; j < mapping->end - 1; j++)
-		fat_set(s, j, j+1);
-	    fat_set(s, mapping->end - 1, s->max_fat_value);
-	}
-
 	/* next free cluster */
 	cluster = mapping->end;
 
 	if(cluster > s->cluster_count) {
-	    fprintf(stderr,"Directory does not fit in FAT%d\n",s->fat_type);
-	    return -1;
+	    fprintf(stderr,"Directory does not fit in FAT%d (capacity %s)\n",
+		    s->fat_type,
+		    s->fat_type == 12 ? s->sector_count == 2880 ? "1.44 MB"
+								: "2.88 MB"
+				      : "504MB");
+	    return -EINVAL;
+	}
+
+	/* fix fat for entry */
+	if (fix_fat) {
+	    int j;
+	    for(j = mapping->begin; j < mapping->end - 1; j++)
+		fat_set(s, j, j+1);
+	    fat_set(s, mapping->end - 1, s->max_fat_value);
 	}
     }
 
@@ -1054,7 +1056,7 @@ DLOG(if (stderr == NULL) {
 
     i = strrchr(dirname, ':') - dirname;
     assert(i >= 3);
-    if (dirname[i-2] == ':' && isalpha(dirname[i-1]))
+    if (dirname[i-2] == ':' && qemu_isalpha(dirname[i-1]))
 	/* workaround for DOS drive names */
 	dirname += i-1;
     else
@@ -1410,7 +1412,12 @@ static void schedule_mkdir(BDRVVVFATState* s, uint32_t cluster, char* path)
 }
 
 typedef struct {
-    unsigned char name[1024];
+    /*
+     * Since the sequence number is at most 0x3f, and the filename
+     * length is at most 13 times the sequence number, the maximal
+     * filename length is 0x3f * 13 bytes.
+     */
+    unsigned char name[0x3f * 13 + 1];
     int checksum, len;
     int sequence_number;
 } long_file_name;
@@ -1435,6 +1442,7 @@ static int parse_long_name(long_file_name* lfn,
 	lfn->sequence_number = pointer[0] & 0x3f;
 	lfn->checksum = pointer[13];
 	lfn->name[0] = 0;
+	lfn->name[lfn->sequence_number * 13] = 0;
     } else if ((pointer[0] & 0x3f) != --lfn->sequence_number)
 	return -1;
     else if (pointer[13] != lfn->checksum)
@@ -1729,7 +1737,7 @@ static int check_directory_consistency(BDRVVVFATState *s,
     char path2[PATH_MAX];
 
     assert(path_len < PATH_MAX); /* len was tested before! */
-    strcpy(path2, path);
+    pstrcpy(path2, sizeof(path2), path);
     path2[path_len] = '/';
     path2[path_len + 1] = '\0';
 
@@ -1803,7 +1811,8 @@ DLOG(fprintf(stderr, "check direntry %d: \n", i); print_direntry(direntries + i)
 		fprintf(stderr, "Name too long: %s/%s\n", path, lfn.name);
 		goto fail;
 	    }
-	    strcpy(path2 + path_len + 1, (char*)lfn.name);
+            pstrcpy(path2 + path_len + 1, sizeof(path2) - path_len - 1,
+                    (char*)lfn.name);
 
 	    if (is_directory(direntries + i)) {
 		if (begin_of_direntry(direntries + i) == 0) {
@@ -2232,7 +2241,6 @@ static int commit_one_file(BDRVVVFATState* s,
 
 	assert((size - offset == 0 && fat_eof(s, c)) ||
 		(size > offset && c >=2 && !fat_eof(s, c)));
-	assert(size >= 0);
 
 	ret = vvfat_read(s->bs, cluster2sector(s, c),
 	    (uint8_t*)cluster, (rest_size + 0x1ff) / 0x200);
@@ -2369,8 +2377,9 @@ static int handle_renames_and_mkdirs(BDRVVVFATState* s)
 
 			    assert(!strncmp(m->path, mapping->path, l2));
 
-			    strcpy(new_path, mapping->path);
-			    strcpy(new_path + l1, m->path + l2);
+                            pstrcpy(new_path, l + diff + 1, mapping->path);
+                            pstrcpy(new_path + l1, l + diff + 1 - l1,
+                                    m->path + l2);
 
 			    schedule_rename(s, m->begin, new_path);
 			}

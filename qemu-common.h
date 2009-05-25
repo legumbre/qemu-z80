@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <strings.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <time.h>
@@ -29,6 +30,7 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#define WINVER 0x0501  /* needed for ipv6 bits */
 #include <windows.h>
 #define fsync _commit
 #define lseek _lseeki64
@@ -70,6 +72,13 @@ typedef void QEMUBHFunc(void *opaque);
 
 QEMUBH *qemu_bh_new(QEMUBHFunc *cb, void *opaque);
 void qemu_bh_schedule(QEMUBH *bh);
+/* Bottom halfs that are scheduled from a bottom half handler are instantly
+ * invoked.  This can create an infinite loop if a bottom half handler
+ * schedules itself.  qemu_bh_schedule_idle() avoids this infinite loop by
+ * ensuring that the bottom half isn't executed until the next main loop
+ * iteration.
+ */
+void qemu_bh_schedule_idle(QEMUBH *bh);
 void qemu_bh_cancel(QEMUBH *bh);
 void qemu_bh_delete(QEMUBH *bh);
 int qemu_bh_poll(void);
@@ -86,10 +95,28 @@ int strstart(const char *str, const char *val, const char **ptr);
 int stristart(const char *str, const char *val, const char **ptr);
 time_t mktimegm(struct tm *tm);
 
+#define qemu_isalnum(c)		isalnum((unsigned char)(c))
+#define qemu_isalpha(c)		isalpha((unsigned char)(c))
+#define qemu_iscntrl(c)		iscntrl((unsigned char)(c))
+#define qemu_isdigit(c)		isdigit((unsigned char)(c))
+#define qemu_isgraph(c)		isgraph((unsigned char)(c))
+#define qemu_islower(c)		islower((unsigned char)(c))
+#define qemu_isprint(c)		isprint((unsigned char)(c))
+#define qemu_ispunct(c)		ispunct((unsigned char)(c))
+#define qemu_isspace(c)		isspace((unsigned char)(c))
+#define qemu_isupper(c)		isupper((unsigned char)(c))
+#define qemu_isxdigit(c)	isxdigit((unsigned char)(c))
+#define qemu_tolower(c)		tolower((unsigned char)(c))
+#define qemu_toupper(c)		toupper((unsigned char)(c))
+#define qemu_isascii(c)		isascii((unsigned char)(c))
+#define qemu_toascii(c)		toascii((unsigned char)(c))
+
 void *qemu_malloc(size_t size);
+void *qemu_realloc(void *ptr, size_t size);
 void *qemu_mallocz(size_t size);
 void qemu_free(void *ptr);
 char *qemu_strdup(const char *str);
+char *qemu_strndup(const char *str, size_t size);
 
 void *get_mmap_addr(unsigned long size);
 
@@ -115,6 +142,7 @@ typedef int (*DMA_transfer_handler) (void *opaque, int nchan, int pos, int size)
 /* A load of opaque types so that device init declarations don't have to
    pull in all the real definitions.  */
 typedef struct NICInfo NICInfo;
+typedef struct HCIInfo HCIInfo;
 typedef struct AudioState AudioState;
 typedef struct BlockDriverState BlockDriverState;
 typedef struct DisplayState DisplayState;
@@ -136,5 +164,8 @@ struct pcmcia_card_s;
 /* CPU save/load.  */
 void cpu_save(QEMUFile *f, void *opaque);
 int cpu_load(QEMUFile *f, void *opaque, int version_id);
+
+/* Force QEMU to stop what it's doing and service IO */
+void qemu_service_io(void);
 
 #endif

@@ -73,7 +73,8 @@ endif
 PROGS=$(QEMU_PROG)
 
 # We require -O2 to avoid the stack setup prologue in EXIT_TB
-OP_CFLAGS := -Wall -O2 -g -fno-strict-aliasing
+OP_CFLAGS := -O2 -g -fno-strict-aliasing
+OP_CFLAGS += -Wall -Wundef -Wendif-labels -Wwrite-strings
 
 # cc-option
 # Usage: OP_CFLAGS+=$(call cc-option, -falign-functions=0, -malign-functions=0)
@@ -121,10 +122,12 @@ ifeq ($(ARCH),sparc)
 endif
 
 ifeq ($(ARCH),sparc64)
-  CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
   OP_CFLAGS+=-mcpu=ultrasparc -m64 -fno-delayed-branch -ffixed-i0
   ifneq ($(CONFIG_SOLARIS),yes)
-    OP_CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
+    CFLAGS+=-ffixed-g5 -ffixed-g6 -ffixed-g7
+    OP_CFLAGS+=-ffixed-g5 -ffixed-g6 -ffixed-g7
+  else
+    CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
   endif
 endif
 
@@ -179,6 +182,9 @@ OP_CFLAGS+=-I/opt/SUNWspro/prod/include/cc
 CFLAGS+=-I/opt/SUNWspro/prod/include/cc
 endif
 endif
+
+kvm.o: CFLAGS+=$(KVM_CFLAGS)
+kvm-all.o: CFLAGS+=$(KVM_CFLAGS)
 
 all: $(PROGS)
 
@@ -351,6 +357,10 @@ ifeq ($(ARCH),ppc)
 LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
 endif
 
+ifeq ($(ARCH),ppc64)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
 ifeq ($(ARCH),s390)
 LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
 endif
@@ -396,6 +406,12 @@ LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH)el.ld
 endif
 endif
 
+# profiling code
+ifdef TARGET_GPROF
+LDFLAGS+=-p
+CFLAGS+=-p
+endif
+
 OBJS= main.o syscall.o strace.o mmap.o signal.o path.o thunk.o \
       elfload.o linuxload.o uaccess.o
 LIBS+= $(AIOLIBS)
@@ -420,7 +436,7 @@ OBJS+= m68k-sim.o m68k-semi.o
 endif
 
 ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o
+OBJS+=gdbstub.o gdbstub-xml.o
 endif
 
 OBJS+= libqemu.a
@@ -458,7 +474,7 @@ OBJS= main.o commpage.o machload.o mmap.o signal.o syscall.o thunk.o
 OBJS+= libqemu.a
 
 ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o
+OBJS+=gdbstub.o gdbstub-xml.o
 endif
 
 # Note: this is a workaround. The real fix is to avoid compiling
@@ -472,10 +488,119 @@ $(QEMU_PROG): $(OBJS)
 endif #CONFIG_DARWIN_USER
 
 #########################################################
+# BSD user emulator target
+
+ifdef CONFIG_BSD_USER
+
+VPATH+=:$(SRC_PATH)/bsd-user
+CPPFLAGS+=-I$(SRC_PATH)/bsd-user -I$(SRC_PATH)/bsd-user/$(TARGET_ARCH)
+
+ifdef CONFIG_STATIC
+LDFLAGS+=-static
+endif
+
+ifeq ($(ARCH),i386)
+ifdef TARGET_GPROF
+USE_I386_LD=y
+endif
+ifdef CONFIG_STATIC
+USE_I386_LD=y
+endif
+ifdef USE_I386_LD
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+else
+# WARNING: this LDFLAGS is _very_ tricky : qemu is an ELF shared object
+# that the kernel ELF loader considers as an executable. I think this
+# is the simplest way to make it self virtualizable!
+LDFLAGS+=-Wl,-shared
+endif
+endif
+
+ifeq ($(ARCH),x86_64)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),ppc)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),ppc64)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),s390)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),sparc)
+# -static is used to avoid g1/g3 usage by the dynamic linker
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld -static
+endif
+
+ifeq ($(ARCH),sparc64)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),alpha)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),ia64)
+LDFLAGS+=-Wl,-G0 -Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),arm)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),m68k)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),mips)
+ifeq ($(WORDS_BIGENDIAN),yes)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+else
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH)el.ld
+endif
+endif
+
+ifeq ($(ARCH),mips64)
+ifeq ($(WORDS_BIGENDIAN),yes)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+else
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH)el.ld
+endif
+endif
+
+OBJS= main.o bsdload.o elfload.o mmap.o path.o signal.o strace.o syscall.o
+OBJS+= uaccess.o
+
+OBJS+= libqemu.a
+
+ifdef CONFIG_GDBSTUB
+OBJS+=gdbstub.o
+endif
+
+# Note: this is a workaround. The real fix is to avoid compiling
+# cpu_signal_handler() in cpu-exec.c.
+signal.o: signal.c
+	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+
+$(QEMU_PROG): $(OBJS) ../libqemu_user.a
+	$(CC) $(LDFLAGS) -o $@ $^  $(LIBS)
+
+endif #CONFIG_BSD_USER
+
+#########################################################
 # System emulator target
 ifndef CONFIG_USER_ONLY
 
 OBJS=vl.o osdep.o monitor.o pci.o loader.o isa_mmio.o machine.o
+OBJS+=fw_cfg.o
+ifdef CONFIG_KVM
+OBJS+=kvm.o kvm-all.o
+endif
 ifdef CONFIG_WIN32
 OBJS+=block-raw-win32.o
 else
@@ -489,11 +614,17 @@ endif
 ifdef CONFIG_ESD
 LIBS += -lesd
 endif
+ifdef CONFIG_PA
+LIBS += -lpulse-simple
+endif
 ifdef CONFIG_DSOUND
 LIBS += -lole32 -ldxguid
 endif
 ifdef CONFIG_FMOD
 LIBS += $(CONFIG_FMOD_LIB)
+endif
+ifdef CONFIG_OSS
+LIBS += $(CONFIG_OSS_LIB)
 endif
 
 SOUND_HW = sb16.o es1370.o
@@ -513,6 +644,10 @@ endif
 ifdef CONFIG_VNC_TLS
 CPPFLAGS += $(CONFIG_VNC_TLS_CFLAGS)
 LIBS += $(CONFIG_VNC_TLS_LIBS)
+endif
+
+ifdef CONFIG_BLUEZ
+LIBS += $(CONFIG_BLUEZ_LIBS)
 endif
 
 # SCSI layer
@@ -600,17 +735,17 @@ OBJS+= pxa2xx_lcd.o pxa2xx_mmci.o pxa2xx_pcmcia.o pxa2xx_keypad.o
 OBJS+= pflash_cfi01.o gumstix.o
 OBJS+= zaurus.o ide.o serial.o nand.o ecc.o spitz.o tosa.o tc6393xb.o
 OBJS+= omap1.o omap_lcdc.o omap_dma.o omap_clk.o omap_mmc.o omap_i2c.o
-OBJS+= omap2.o omap_dss.o
+OBJS+= omap2.o omap_dss.o soc_dma.o
 OBJS+= palm.o tsc210x.o
 OBJS+= nseries.o blizzard.o onenand.o vga.o cbus.o tusb6010.o usb-musb.o
-OBJS+= tsc2005.o
+OBJS+= tsc2005.o bt-hci-csr.o
 OBJS+= mst_fpga.o mainstone.o
 OBJS+= musicpal.o pflash_cfi02.o
 CPPFLAGS += -DHAS_AUDIO
 endif
 ifeq ($(TARGET_BASE_ARCH), sh4)
 OBJS+= shix.o r2d.o sh7750.o sh7750_regnames.o tc58128.o
-OBJS+= sh_timer.o ptimer.o sh_serial.o sh_intc.o
+OBJS+= sh_timer.o ptimer.o sh_serial.o sh_intc.o sm501.o serial.o
 endif
 ifeq ($(TARGET_BASE_ARCH), m68k)
 OBJS+= an5206.o mcf5206.o ptimer.o mcf_uart.o mcf_intc.o mcf5208.o mcf_fec.o
@@ -621,7 +756,7 @@ OBJS+= zx_spectrum.o zx_video.o dma.o
 OBJS+= serial.o i8259.o
 endif
 ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o
+OBJS+=gdbstub.o gdbstub-xml.o
 endif
 ifdef CONFIG_COCOA
 COCOA_LIBS=-F/System/Library/Frameworks -framework Cocoa -framework IOKit
@@ -665,9 +800,17 @@ main.o: CFLAGS+=-p
 endif
 
 $(QEMU_PROG): $(OBJS) ../libqemu_common.a libqemu.a
-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(CURSES_LIBS) $(BRLAPI_LIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(CURSES_LIBS) $(BRLAPI_LIBS) $(VDE_LIBS)
 
 endif # !CONFIG_USER_ONLY
+
+gdbstub-xml.c: $(TARGET_XML_FILES) feature_to_c.sh
+	rm -f $@
+ifeq ($(TARGET_XML_FILES),)
+	echo > $@
+else
+	$(SHELL) $(SRC_PATH)/feature_to_c.sh $@ $(TARGET_XML_FILES)
+endif
 
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<

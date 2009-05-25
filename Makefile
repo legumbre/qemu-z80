@@ -2,15 +2,15 @@
 
 include config-host.mak
 
-.PHONY: all clean distclean dvi info install install-doc tar tarbin \
-	speed test html dvi info
+.PHONY: all clean cscope distclean dvi html info install install-doc \
+	recurse-all speed tar tarbin test
 
 VPATH=$(SRC_PATH):$(SRC_PATH)/hw
 
 CFLAGS += $(OS_CFLAGS) $(ARCH_CFLAGS)
 LDFLAGS += $(OS_LDFLAGS) $(ARCH_LDFLAGS)
 
-CPPFLAGS += -I. -I$(SRC_PATH) -MMD -MP
+CPPFLAGS += -I. -I$(SRC_PATH) -MMD -MP -MT $@
 CPPFLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 LIBS=
 ifdef CONFIG_STATIC
@@ -24,7 +24,15 @@ endif
 
 LIBS+=$(AIOLIBS)
 
-all: $(TOOLS) $(DOCS) recurse-all 
+ifdef CONFIG_SOLARIS
+LIBS+=-lsocket -lnsl -lresolv
+endif
+
+ifdef CONFIG_WIN32
+LIBS+=-lwinmm -lws2_32 -liphlpapi
+endif
+
+all: $(TOOLS) $(DOCS) recurse-all
 
 SUBDIR_RULES=$(patsubst %,subdir-%, $(TARGET_DIRS))
 
@@ -42,7 +50,14 @@ recurse-all: $(SUBDIR_RULES)
 BLOCK_OBJS=cutils.o qemu-malloc.o
 BLOCK_OBJS+=block-cow.o block-qcow.o aes.o block-vmdk.o block-cloop.o
 BLOCK_OBJS+=block-dmg.o block-bochs.o block-vpc.o block-vvfat.o
-BLOCK_OBJS+=block-qcow2.o block-parallels.o
+BLOCK_OBJS+=block-qcow2.o block-parallels.o block-nbd.o
+BLOCK_OBJS+=nbd.o block.o aio.o
+
+ifdef CONFIG_WIN32
+BLOCK_OBJS += block-raw-win32.o
+else
+BLOCK_OBJS += block-raw-posix.o
+endif
 
 ######################################################################
 # libqemu_common.a: Target independent part of system emulation. The
@@ -52,7 +67,6 @@ BLOCK_OBJS+=block-qcow2.o block-parallels.o
 
 OBJS=$(BLOCK_OBJS)
 OBJS+=readline.o console.o
-OBJS+=block.o
 
 OBJS+=irq.o
 OBJS+=i2c.o smbus.o smbus_eeprom.o max7310.o max111x.o wm8750.o
@@ -60,8 +74,12 @@ OBJS+=ssd0303.o ssd0323.o ads7846.o stellaris_input.o twl92230.o
 OBJS+=tmp105.o lm832x.o
 OBJS+=scsi-disk.o cdrom.o
 OBJS+=scsi-generic.o
-OBJS+=usb.o usb-hub.o usb-linux.o usb-hid.o usb-msd.o usb-wacom.o usb-serial.o
+OBJS+=usb.o usb-hub.o usb-linux.o usb-hid.o usb-msd.o usb-wacom.o
+OBJS+=usb-serial.o usb-net.o
 OBJS+=sd.o ssi-sd.o
+OBJS+=bt.o bt-host.o bt-vhci.o bt-l2cap.o bt-sdp.o bt-hci.o bt-hid.o usb-bt.o
+OBJS+=buffered_file.o migration.o migration-tcp.o net.o qemu-sockets.o
+OBJS+=qemu-char.o aio.o net-checksum.o savevm.o
 
 ifdef CONFIG_BRLAPI
 OBJS+= baum.o
@@ -70,6 +88,8 @@ endif
 
 ifdef CONFIG_WIN32
 OBJS+=tap-win32.o
+else
+OBJS+=migration-exec.o
 endif
 
 AUDIO_OBJS = audio.o noaudio.o wavaudio.o mixeng.o
@@ -97,6 +117,11 @@ ifdef CONFIG_ESD
 AUDIO_PT = yes
 AUDIO_PT_INT = yes
 AUDIO_OBJS += esdaudio.o
+endif
+ifdef CONFIG_PA
+AUDIO_PT = yes
+AUDIO_PT_INT = yes
+AUDIO_OBJS += paaudio.o
 endif
 ifdef AUDIO_PT
 LDFLAGS += -pthread
@@ -127,6 +152,8 @@ tcp_subr.o tcp_timer.o udp.o bootp.o debug.o tftp.o
 OBJS+=$(addprefix slirp/, $(SLIRP_OBJS))
 endif
 
+LIBS+=$(VDE_LIBS)
+
 cocoa.o: cocoa.m
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
@@ -138,6 +165,9 @@ vnc.o: vnc.c keymaps.c sdl_keysym.h vnchextile.h d3des.c d3des.h
 
 curses.o: curses.c keymaps.c curses_keys.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
+
+bt-host.o: bt-host.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(CONFIG_BLUEZ_CFLAGS) -c -o $@ $<
 
 audio/sdlaudio.o: audio/sdlaudio.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SDL_CFLAGS) -c -o $@ $<
@@ -154,26 +184,15 @@ libqemu_user.a: $(USER_OBJS)
 	rm -f $@ 
 	$(AR) rcs $@ $(USER_OBJS)
 
-QEMU_IMG_BLOCK_OBJS = $(BLOCK_OBJS)
-ifdef CONFIG_WIN32
-QEMU_IMG_BLOCK_OBJS += qemu-img-block-raw-win32.o
-else
-QEMU_IMG_BLOCK_OBJS += qemu-img-block-raw-posix.o
-endif
-
 ######################################################################
 
-qemu-img$(EXESUF): qemu-img.o qemu-img-block.o $(QEMU_IMG_BLOCK_OBJS)
+qemu-img$(EXESUF): qemu-img.o qemu-tool.o osdep.o $(BLOCK_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lz $(LIBS)
-
-qemu-img-%.o: %.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DQEMU_IMG -c -o $@ $<
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
-qemu-nbd$(EXESUF):  qemu-nbd.o nbd.o qemu-img-block.o \
-		    $(QEMU_IMG_BLOCK_OBJS)
+qemu-nbd$(EXESUF):  qemu-nbd.o qemu-tool.o osdep.o $(BLOCK_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lz $(LIBS)
 
 # dyngen host tool
@@ -220,7 +239,7 @@ endif
 	mkdir -p "$(DESTDIR)$(datadir)"
 	set -e; for x in bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
 		video.x openbios-sparc32 openbios-sparc64 pxe-ne2k_pci.bin \
-		pxe-rtl8139.bin pxe-pcnet.bin zx-rom.bin ; do \
+		pxe-rtl8139.bin pxe-pcnet.bin pxe-e1000.bin zx-rom; do \
 		$(INSTALL) -m 644 $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
 	done
 ifndef CONFIG_WIN32
@@ -242,7 +261,7 @@ TAGS:
 
 cscope:
 	rm -f ./cscope.*
-	find . -name "*.[ch]" -print > ./cscope.files
+	find . -name "*.[ch]" -print | sed 's,^\./,,' > ./cscope.files
 	cscope -b
 
 # documentation
@@ -272,6 +291,8 @@ info: qemu-doc.info qemu-tech.info
 dvi: qemu-doc.dvi qemu-tech.dvi
 
 html: qemu-doc.html qemu-tech.html
+
+qemu-doc.dvi qemu-doc.html qemu-doc.info: qemu-img.texi qemu-nbd.texi
 
 VERSION ?= $(shell cat VERSION)
 FILE = qemu-$(VERSION)
@@ -330,6 +351,7 @@ tarbin:
         $(datadir)/pxe-ne2k_pci.bin \
 	$(datadir)/pxe-rtl8139.bin \
         $(datadir)/pxe-pcnet.bin \
+	$(datadir)/pxe-e1000.bin \
 	$(docdir)/qemu-doc.html \
 	$(docdir)/qemu-tech.html \
 	$(mandir)/man1/qemu.1 $(mandir)/man1/qemu-img.1

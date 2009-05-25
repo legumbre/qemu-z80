@@ -31,6 +31,7 @@
 #include "devices.h"
 #include "flash.h"
 #include "hw.h"
+#include "bt.h"
 
 /* Nokia N8x0 support */
 struct n800_s {
@@ -50,6 +51,7 @@ struct n800_s {
     struct tusb_s *usb;
     void *retu;
     void *tahvo;
+    void *nand;
 };
 
 /* GPIO pins */
@@ -57,7 +59,7 @@ struct n800_s {
 #define N800_MMC2_WP_GPIO		8
 #define N800_UNKNOWN_GPIO0		9	/* out */
 #define N810_MMC2_VIOSD_GPIO		9
-#define N800_UNKNOWN_GPIO1		10	/* out */
+#define N810_HEADSET_AMP_GPIO		10
 #define N800_CAM_TURN_GPIO		12
 #define N810_GPS_RESET_GPIO		12
 #define N800_BLIZZARD_POWERDOWN_GPIO	15
@@ -82,7 +84,7 @@ struct n800_s {
 #define N8X0_MMC_CS_GPIO		96
 #define N8X0_WLAN_PWR_GPIO		97
 #define N8X0_BT_HOST_WKUP_GPIO		98
-#define N800_UNKNOWN_GPIO3		101	/* out */
+#define N810_SPEAKER_AMP_GPIO		101
 #define N810_KB_LOCK_GPIO		102
 #define N800_TSC_TS_GPIO		103
 #define N810_TSC_TS_GPIO		106
@@ -96,10 +98,12 @@ struct n800_s {
 #define N800_UNKNOWN_GPIO4		112	/* out */
 #define N810_SLEEPX_LED_GPIO		112
 #define N800_TSC_RESET_GPIO		118	/* ? */
+#define N810_AIC33_RESET_GPIO		118
 #define N800_TSC_UNKNOWN_GPIO		119	/* out */
 #define N8X0_TMP105_GPIO		125
 
 /* Config */
+#define BT_UART				0
 #define XLDR_LL_UART			1
 
 /* Addresses on the I2C bus 0 */
@@ -116,6 +120,8 @@ struct n800_s {
 #define N8X0_ONENAND_CS			0
 #define N8X0_USB_ASYNC_CS		1
 #define N8X0_USB_SYNC_CS		4
+
+#define N8X0_BD_ADDR			0x00, 0x1a, 0x89, 0x9e, 0x3e, 0x81
 
 static void n800_mmc_cs_cb(void *opaque, int line, int level)
 {
@@ -134,14 +140,42 @@ static void n8x0_gpio_setup(struct n800_s *s)
     qemu_irq_lower(omap2_gpio_in_get(s->cpu->gpif, N800_BAT_COVER_GPIO)[0]);
 }
 
+#define MAEMO_CAL_HEADER(...)				\
+    'C',  'o',  'n',  'F',  0x02, 0x00, 0x04, 0x00,	\
+    __VA_ARGS__,					\
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+static const uint8_t n8x0_cal_wlan_mac[] = {
+    MAEMO_CAL_HEADER('w', 'l', 'a', 'n', '-', 'm', 'a', 'c')
+    0x1c, 0x00, 0x00, 0x00, 0x47, 0xd6, 0x69, 0xb3,
+    0x30, 0x08, 0xa0, 0x83, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
+    0x89, 0x00, 0x00, 0x00, 0x9e, 0x00, 0x00, 0x00,
+    0x5d, 0x00, 0x00, 0x00, 0xc1, 0x00, 0x00, 0x00,
+};
+
+static const uint8_t n8x0_cal_bt_id[] = {
+    MAEMO_CAL_HEADER('b', 't', '-', 'i', 'd', 0, 0, 0)
+    0x0a, 0x00, 0x00, 0x00, 0xa3, 0x4b, 0xf6, 0x96,
+    0xa8, 0xeb, 0xb2, 0x41, 0x00, 0x00, 0x00, 0x00,
+    N8X0_BD_ADDR,
+};
+
 static void n8x0_nand_setup(struct n800_s *s)
 {
+    char *otp_region;
+
     /* Either ec40xx or ec48xx are OK for the ID */
     omap_gpmc_attach(s->cpu->gpmc, N8X0_ONENAND_CS, 0, onenand_base_update,
                     onenand_base_unmap,
-                    onenand_init(0xec4800, 1,
-                            omap2_gpio_in_get(s->cpu->gpif,
-                                    N8X0_ONENAND_GPIO)[0]));
+                    (s->nand = onenand_init(0xec4800, 1,
+                                            omap2_gpio_in_get(s->cpu->gpif,
+                                                    N8X0_ONENAND_GPIO)[0])));
+    otp_region = onenand_raw_otp(s->nand);
+
+    memcpy(otp_region + 0x000, n8x0_cal_wlan_mac, sizeof(n8x0_cal_wlan_mac));
+    memcpy(otp_region + 0x800, n8x0_cal_bt_id, sizeof(n8x0_cal_bt_id));
+    /* XXX: in theory should also update the OOB for both pages */
 }
 
 static void n8x0_i2c_setup(struct n800_s *s)
@@ -707,6 +741,20 @@ static void n8x0_cbus_setup(struct n800_s *s)
     cbus_attach(cbus, s->tahvo = tahvo_init(tahvo_irq, 1));
 }
 
+static void n8x0_uart_setup(struct n800_s *s)
+{
+    CharDriverState *radio = uart_hci_init(
+                    omap2_gpio_in_get(s->cpu->gpif,
+                            N8X0_BT_HOST_WKUP_GPIO)[0]);
+
+    omap2_gpio_out_set(s->cpu->gpif, N8X0_BT_RESET_GPIO,
+                    csrhci_pins_get(radio)[csrhci_pin_reset]);
+    omap2_gpio_out_set(s->cpu->gpif, N8X0_BT_WKUP_GPIO,
+                    csrhci_pins_get(radio)[csrhci_pin_wakeup]);
+
+    omap_uart_attach(s->cpu->uart[BT_UART], radio);
+}
+
 static void n8x0_usb_power_cb(void *opaque, int line, int level)
 {
     struct n800_s *s = opaque;
@@ -1047,6 +1095,8 @@ static struct omap_partition_info_s {
     { 0, 0, 0, 0 }
 };
 
+static bdaddr_t n8x0_bd_addr = {{ N8X0_BD_ADDR }};
+
 static int n8x0_atag_setup(void *p, int model)
 {
     uint8_t *b;
@@ -1066,7 +1116,7 @@ static int n8x0_atag_setup(void *p, int model)
 #if 0
     stw_raw(w ++, OMAP_TAG_SERIAL_CONSOLE);	/* u16 tag */
     stw_raw(w ++, 4);				/* u16 len */
-    stw_raw(w ++, XLDR_LL_UART);		/* u8 console_uart */
+    stw_raw(w ++, XLDR_LL_UART + 1);		/* u8 console_uart */
     stw_raw(w ++, 115200);			/* u32 console_speed */
 #endif
 
@@ -1110,8 +1160,8 @@ static int n8x0_atag_setup(void *p, int model)
     stb_raw(b ++, N8X0_BT_WKUP_GPIO);		/* u8 bt_wakeup_gpio */
     stb_raw(b ++, N8X0_BT_HOST_WKUP_GPIO);	/* u8 host_wakeup_gpio */
     stb_raw(b ++, N8X0_BT_RESET_GPIO);		/* u8 reset_gpio */
-    stb_raw(b ++, 1);				/* u8 bt_uart */
-    memset(b, 0, 6);				/* u8 bd_addr[6] */
+    stb_raw(b ++, BT_UART + 1);			/* u8 bt_uart */
+    memcpy(b, &n8x0_bd_addr, 6);		/* u8 bd_addr[6] */
     b += 6;
     stb_raw(b ++, 0x02);			/* u8 bt_sysclk (38.4) */
     w = (void *) b;
@@ -1270,6 +1320,7 @@ static void n8x0_init(ram_addr_t ram_size, const char *boot_device,
     n8x0_spi_setup(s);
     n8x0_dss_setup(s, ds);
     n8x0_cbus_setup(s);
+    n8x0_uart_setup(s);
     if (usb_enabled)
         n8x0_usb_setup(s);
 
@@ -1353,15 +1404,17 @@ static void n810_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine n800_machine = {
-    "n800",
-    "Nokia N800 tablet aka. RX-34 (OMAP2420)",
-    n800_init,
-    (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) | RAMSIZE_FIXED,
+    .name = "n800",
+    .desc = "Nokia N800 tablet aka. RX-34 (OMAP2420)",
+    .init = n800_init,
+    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) |
+            RAMSIZE_FIXED,
 };
 
 QEMUMachine n810_machine = {
-    "n810",
-    "Nokia N810 tablet aka. RX-44 (OMAP2420)",
-    n810_init,
-    (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) | RAMSIZE_FIXED,
+    .name = "n810",
+    .desc = "Nokia N810 tablet aka. RX-44 (OMAP2420)",
+    .init = n810_init,
+    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) |
+            RAMSIZE_FIXED,
 };

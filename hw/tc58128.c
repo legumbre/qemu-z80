@@ -26,7 +26,7 @@ static tc58128_dev tc58128_devs[2];
 
 #define FLASH_SIZE (16*1024*1024)
 
-void init_dev(tc58128_dev * dev, char *filename)
+static void init_dev(tc58128_dev * dev, const char *filename)
 {
     int ret, blocks;
 
@@ -58,7 +58,7 @@ void init_dev(tc58128_dev * dev, char *filename)
     }
 }
 
-void handle_command(tc58128_dev * dev, uint8_t command)
+static void handle_command(tc58128_dev * dev, uint8_t command)
 {
     switch (command) {
     case 0xff:
@@ -86,7 +86,7 @@ void handle_command(tc58128_dev * dev, uint8_t command)
     }
 }
 
-void handle_address(tc58128_dev * dev, uint8_t data)
+static void handle_address(tc58128_dev * dev, uint8_t data)
 {
     switch (dev->state) {
     case READ1:
@@ -119,7 +119,7 @@ void handle_address(tc58128_dev * dev, uint8_t data)
     }
 }
 
-uint8_t handle_read(tc58128_dev * dev)
+static uint8_t handle_read(tc58128_dev * dev)
 {
 #if 0
     if (dev->address % 0x100000 == 0)
@@ -131,9 +131,9 @@ uint8_t handle_read(tc58128_dev * dev)
 /* We never mark the device as busy, so interrupts cannot be triggered
    XXXXX */
 
-int tc58128_cb(uint16_t porta, uint16_t portb,
-	       uint16_t * periph_pdtra, uint16_t * periph_portadir,
-	       uint16_t * periph_pdtrb, uint16_t * periph_portbdir)
+static int tc58128_cb(uint16_t porta, uint16_t portb,
+                      uint16_t * periph_pdtra, uint16_t * periph_portadir,
+                      uint16_t * periph_pdtrb, uint16_t * periph_portbdir)
 {
     int dev;
 
@@ -175,7 +175,7 @@ static sh7750_io_device tc58128 = {
     tc58128_cb			/* Callback */
 };
 
-int tc58128_init(struct SH7750State *s, char *zone1, char *zone2)
+int tc58128_init(struct SH7750State *s, const char *zone1, const char *zone2)
 {
     init_dev(&tc58128_devs[0], zone1);
     init_dev(&tc58128_devs[1], zone2);

@@ -104,9 +104,6 @@ struct BlockDriverState {
     BlockDriver *drv; /* NULL means no media */
     void *opaque;
 
-    int boot_sector_enabled;
-    uint8_t boot_sector_data[512];
-
     char filename[1024];
     char backing_file[1024]; /* if non zero, the image is a diff of
                                 this file image */
@@ -145,6 +142,6 @@ void *qemu_aio_get(BlockDriverState *bs, BlockDriverCompletionFunc *cb,
                    void *opaque);
 void qemu_aio_release(void *p);
 
-BlockDriverState *bdrv_first;
+extern BlockDriverState *bdrv_first;
 
 #endif /* BLOCK_INT_H */

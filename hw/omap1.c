@@ -24,6 +24,7 @@
 #include "sysemu.h"
 #include "qemu-timer.h"
 #include "qemu-char.h"
+#include "soc_dma.h"
 /* We use pc-style serial ports.  */
 #include "pc.h"
 
@@ -663,6 +664,7 @@ struct omap_mpu_timer_s {
     uint32_t val;
     int64_t time;
     QEMUTimer *timer;
+    QEMUBH *tick;
     int64_t rate;
     int it_ena;
 
@@ -707,21 +709,15 @@ static inline void omap_timer_update(struct omap_mpu_timer_s *timer)
          * ticks.  */
         if (expires > (ticks_per_sec >> 10) || timer->ar)
             qemu_mod_timer(timer->timer, timer->time + expires);
-        else {
-            timer->val = 0;
-            timer->st = 0;
-            if (timer->it_ena)
-                /* Edge-triggered irq */
-                qemu_irq_pulse(timer->irq);
-        }
+        else
+            qemu_bh_schedule(timer->tick);
     } else
         qemu_del_timer(timer->timer);
 }
 
-static void omap_timer_tick(void *opaque)
+static void omap_timer_fire(void *opaque)
 {
-    struct omap_mpu_timer_s *timer = (struct omap_mpu_timer_s *) opaque;
-    omap_timer_sync(timer);
+    struct omap_mpu_timer_s *timer = opaque;
 
     if (!timer->ar) {
         timer->val = 0;
@@ -731,6 +727,14 @@ static void omap_timer_tick(void *opaque)
     if (timer->it_ena)
         /* Edge-triggered irq */
         qemu_irq_pulse(timer->irq);
+}
+
+static void omap_timer_tick(void *opaque)
+{
+    struct omap_mpu_timer_s *timer = (struct omap_mpu_timer_s *) opaque;
+
+    omap_timer_sync(timer);
+    omap_timer_fire(timer);
     omap_timer_update(timer);
 }
 
@@ -834,6 +838,7 @@ struct omap_mpu_timer_s *omap_mpu_timer_init(target_phys_addr_t base,
     s->clk = clk;
     s->base = base;
     s->timer = qemu_new_timer(vm_clock, omap_timer_tick, s);
+    s->tick = qemu_bh_new(omap_timer_fire, s);
     omap_mpu_timer_reset(s);
     omap_timer_clk_setup(s);
 
@@ -1982,6 +1987,8 @@ struct omap_uart_s {
     SerialState *serial; /* TODO */
     struct omap_target_agent_s *ta;
     target_phys_addr_t base;
+    omap_clk fclk;
+    qemu_irq irq;
 
     uint8_t eblr;
     uint8_t syscontrol;
@@ -2006,8 +2013,11 @@ struct omap_uart_s *omap_uart_init(target_phys_addr_t base,
     struct omap_uart_s *s = (struct omap_uart_s *)
             qemu_mallocz(sizeof(struct omap_uart_s));
 
+    s->base = base;
+    s->fclk = fclk;
+    s->irq = irq;
     s->serial = serial_mm_init(base, 2, irq, omap_clk_getrate(fclk)/16,
-                               chr ?: qemu_chr_open("null"), 1);
+                               chr ?: qemu_chr_open("null", "null"), 1);
 
     return s;
 }
@@ -2107,11 +2117,18 @@ struct omap_uart_s *omap2_uart_init(struct omap_target_agent_s *ta,
                     omap_uart_writefn, s);
 
     s->ta = ta;
-    s->base = base;
 
     cpu_register_physical_memory(s->base + 0x20, 0x100, iomemtype);
 
     return s;
+}
+
+void omap_uart_attach(struct omap_uart_s *s, CharDriverState *chr)
+{
+    /* TODO: Should reuse or destroy current s->serial */
+    s->serial = serial_mm_init(s->base, 2, s->irq,
+                    omap_clk_getrate(s->fclk) / 16,
+                    chr ?: qemu_chr_open("null", "null"), 1);
 }
 
 /* MPU Clock/Reset/Power Mode Control */
@@ -3477,7 +3494,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
 
     switch (offset) {
     case 0x00:	/* SECONDS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC SEC_REG <-- %02x\n", value);
 #endif
         s->ti -= s->current_tm.tm_sec;
@@ -3485,7 +3502,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x04:	/* MINUTES_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC MIN_REG <-- %02x\n", value);
 #endif
         s->ti -= s->current_tm.tm_min * 60;
@@ -3493,7 +3510,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x08:	/* HOURS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC HRS_REG <-- %02x\n", value);
 #endif
         s->ti -= s->current_tm.tm_hour * 3600;
@@ -3505,7 +3522,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x0c:	/* DAYS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC DAY_REG <-- %02x\n", value);
 #endif
         s->ti -= s->current_tm.tm_mday * 86400;
@@ -3513,7 +3530,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x10:	/* MONTHS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC MTH_REG <-- %02x\n", value);
 #endif
         memcpy(&new_tm, &s->current_tm, sizeof(new_tm));
@@ -3532,7 +3549,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x14:	/* YEARS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC YRS_REG <-- %02x\n", value);
 #endif
         memcpy(&new_tm, &s->current_tm, sizeof(new_tm));
@@ -3554,7 +3571,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;	/* Ignored */
 
     case 0x20:	/* ALARM_SECONDS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM SEC_REG <-- %02x\n", value);
 #endif
         s->alarm_tm.tm_sec = omap_rtc_bin(value);
@@ -3562,7 +3579,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x24:	/* ALARM_MINUTES_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM MIN_REG <-- %02x\n", value);
 #endif
         s->alarm_tm.tm_min = omap_rtc_bin(value);
@@ -3570,7 +3587,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x28:	/* ALARM_HOURS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM HRS_REG <-- %02x\n", value);
 #endif
         if (s->pm_am)
@@ -3583,7 +3600,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x2c:	/* ALARM_DAYS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM DAY_REG <-- %02x\n", value);
 #endif
         s->alarm_tm.tm_mday = omap_rtc_bin(value);
@@ -3591,7 +3608,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x30:	/* ALARM_MONTHS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM MON_REG <-- %02x\n", value);
 #endif
         s->alarm_tm.tm_mon = omap_rtc_bin(value);
@@ -3599,7 +3616,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x34:	/* ALARM_YEARS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("ALM YRS_REG <-- %02x\n", value);
 #endif
         s->alarm_tm.tm_year = omap_rtc_bin(value);
@@ -3607,7 +3624,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x40:	/* RTC_CTRL_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC CONTROL <-- %02x\n", value);
 #endif
         s->pm_am = (value >> 3) & 1;
@@ -3619,7 +3636,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x44:	/* RTC_STATUS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC STATUSL <-- %02x\n", value);
 #endif
         s->status &= ~((value & 0xc0) ^ 0x80);
@@ -3627,14 +3644,14 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x48:	/* RTC_INTERRUPTS_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC INTRS <-- %02x\n", value);
 #endif
         s->interrupts = value;
         return;
 
     case 0x4c:	/* RTC_COMP_LSB_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC COMPLSB <-- %02x\n", value);
 #endif
         s->comp_reg &= 0xff00;
@@ -3642,7 +3659,7 @@ static void omap_rtc_write(void *opaque, target_phys_addr_t addr,
         return;
 
     case 0x50:	/* RTC_COMP_MSB_REG */
-#if ALMDEBUG
+#ifdef ALMDEBUG
         printf("RTC COMPMSB <-- %02x\n", value);
 #endif
         s->comp_reg &= 0x00ff;
@@ -4703,6 +4720,12 @@ struct omap_mpu_state_s *omap310_mpu_init(unsigned long sdram_size,
     s->port[tipb     ].addr_valid = omap_validate_tipb_addr;
     s->port[local    ].addr_valid = omap_validate_local_addr;
     s->port[tipb_mpui].addr_valid = omap_validate_tipb_mpui_addr;
+
+    /* Register SDRAM and SRAM DMA ports for fast transfers.  */
+    soc_dma_port_add_mem_ram(s->dma,
+                    emiff_base, OMAP_EMIFF_BASE, s->sdram_size);
+    soc_dma_port_add_mem_ram(s->dma,
+                    imif_base, OMAP_IMIF_BASE, s->sram_size);
 
     s->timer[0] = omap_mpu_timer_init(0xfffec500,
                     s->irq[0][OMAP_INT_TIMER1],

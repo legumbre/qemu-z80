@@ -21,7 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
+
+#ifndef NDEBUG
+static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%rax",
     "%rcx",
     "%rdx",
@@ -39,8 +41,9 @@ const char *tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r14",
     "%r15",
 };
+#endif
 
-int tcg_target_reg_alloc_order[] = {
+static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_RDI,
     TCG_REG_RSI,
     TCG_REG_RDX,
@@ -59,7 +62,7 @@ int tcg_target_reg_alloc_order[] = {
     TCG_REG_R15,
 };
 
-const int tcg_target_call_iarg_regs[6] = { 
+static const int tcg_target_call_iarg_regs[6] = {
     TCG_REG_RDI,
     TCG_REG_RSI,
     TCG_REG_RDX,
@@ -68,7 +71,7 @@ const int tcg_target_call_iarg_regs[6] = {
     TCG_REG_R9,
 };
 
-const int tcg_target_call_oarg_regs[2] = { 
+static const int tcg_target_call_oarg_regs[2] = {
     TCG_REG_RAX, 
     TCG_REG_RDX 
 };
@@ -108,7 +111,7 @@ static inline int tcg_target_get_call_iarg_regs_count(int flags)
 }
 
 /* parse target specific constraints */
-int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
+static int target_parse_constraint(TCGArgConstraint *ct, const char **pct_str)
 {
     const char *ct_str;
 
@@ -382,6 +385,12 @@ static inline void tgen_arithi32(TCGContext *s, int c, int r0, int32_t val)
     if (val == (int8_t)val) {
         tcg_out_modrm(s, 0x83, c, r0);
         tcg_out8(s, val);
+    } else if (c == ARITH_AND && val == 0xffu) {
+        /* movzbl */
+        tcg_out_modrm(s, 0xb6 | P_EXT | P_REXB, r0, r0);
+    } else if (c == ARITH_AND && val == 0xffffu) {
+        /* movzwl */
+        tcg_out_modrm(s, 0xb7 | P_EXT, r0, r0);
     } else {
         tcg_out_modrm(s, 0x81, c, r0);
         tcg_out32(s, val);
@@ -393,6 +402,15 @@ static inline void tgen_arithi64(TCGContext *s, int c, int r0, int64_t val)
     if (val == (int8_t)val) {
         tcg_out_modrm(s, 0x83 | P_REXW, c, r0);
         tcg_out8(s, val);
+    } else if (c == ARITH_AND && val == 0xffu) {
+        /* movzbl */
+        tcg_out_modrm(s, 0xb6 | P_EXT | P_REXW, r0, r0);
+    } else if (c == ARITH_AND && val == 0xffffu) {
+        /* movzwl */
+        tcg_out_modrm(s, 0xb7 | P_EXT | P_REXW, r0, r0);
+    } else if (c == ARITH_AND && val == 0xffffffffu) {
+        /* 32-bit mov zero extends */
+        tcg_out_modrm(s, 0x8b, r0, r0);
     } else if (val == (int32_t)val) {
         tcg_out_modrm(s, 0x81 | P_REXW, c, r0);
         tcg_out32(s, val);
@@ -404,7 +422,7 @@ static inline void tgen_arithi64(TCGContext *s, int c, int r0, int64_t val)
     }
 }
 
-void tcg_out_addi(TCGContext *s, int reg, tcg_target_long val)
+static void tcg_out_addi(TCGContext *s, int reg, tcg_target_long val)
 {
     if (val != 0)
         tgen_arithi64(s, ARITH_ADD, reg, val);
@@ -467,16 +485,8 @@ static void tcg_out_brcond(TCGContext *s, int cond,
 }
 
 #if defined(CONFIG_SOFTMMU)
-extern void __ldb_mmu(void);
-extern void __ldw_mmu(void);
-extern void __ldl_mmu(void);
-extern void __ldq_mmu(void);
 
-extern void __stb_mmu(void);
-extern void __stw_mmu(void);
-extern void __stl_mmu(void);
-extern void __stq_mmu(void);
-
+#include "../../softmmu_defs.h"
 
 static void *qemu_ld_helpers[4] = {
     __ldb_mmu,
@@ -1078,6 +1088,22 @@ static inline void tcg_out_op(TCGContext *s, int opc, const TCGArg *args,
         tcg_out_modrm(s, 0xf7 | P_REXW, 3, args[0]);
         break;
 
+    case INDEX_op_ext8s_i32:
+        tcg_out_modrm(s, 0xbe | P_EXT | P_REXB, args[0], args[1]);
+        break;
+    case INDEX_op_ext16s_i32:
+        tcg_out_modrm(s, 0xbf | P_EXT, args[0], args[1]);
+        break;
+    case INDEX_op_ext8s_i64:
+        tcg_out_modrm(s, 0xbe | P_EXT | P_REXW, args[0], args[1]);
+        break;
+    case INDEX_op_ext16s_i64:
+        tcg_out_modrm(s, 0xbf | P_EXT | P_REXW, args[0], args[1]);
+        break;
+    case INDEX_op_ext32s_i64:
+        tcg_out_modrm(s, 0x63 | P_REXW, args[0], args[1]);
+        break;
+
     case INDEX_op_qemu_ld8u:
         tcg_out_qemu_ld(s, args, 0);
         break;
@@ -1235,6 +1261,12 @@ static const TCGTargetOpDef x86_64_op_defs[] = {
 
     { INDEX_op_neg_i32, { "r", "0" } },
     { INDEX_op_neg_i64, { "r", "0" } },
+
+    { INDEX_op_ext8s_i32, { "r", "r"} },
+    { INDEX_op_ext16s_i32, { "r", "r"} },
+    { INDEX_op_ext8s_i64, { "r", "r"} },
+    { INDEX_op_ext16s_i64, { "r", "r"} },
+    { INDEX_op_ext32s_i64, { "r", "r"} },
 
     { INDEX_op_qemu_ld8u, { "r", "L" } },
     { INDEX_op_qemu_ld8s, { "r", "L" } },

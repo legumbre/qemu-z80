@@ -26,12 +26,10 @@
 #include "qemu-timer.h"
 #include "sysemu.h"
 #include "nvram.h"
+#include "qemu-log.h"
 
 //#define PPC_DEBUG_IRQ
 //#define PPC_DEBUG_TB
-
-extern FILE *logfile;
-extern int loglevel;
 
 static void cpu_ppc_tb_stop (CPUState *env);
 static void cpu_ppc_tb_start (CPUState *env);
@@ -808,10 +806,12 @@ clk_setup_cb cpu_ppc_tb_init (CPUState *env, uint32_t freq)
 }
 
 /* Specific helpers for POWER & PowerPC 601 RTC */
-clk_setup_cb cpu_ppc601_rtc_init (CPUState *env)
+#if 0
+static clk_setup_cb cpu_ppc601_rtc_init (CPUState *env)
 {
     return cpu_ppc_tb_init(env, 7812500);
 }
+#endif
 
 void cpu_ppc601_store_rtcu (CPUState *env, uint32_t value)
 {
@@ -1305,7 +1305,7 @@ uint32_t NVRAM_get_lword (nvram_t *nvram, uint32_t addr)
 }
 
 void NVRAM_set_string (nvram_t *nvram, uint32_t addr,
-                       const unsigned char *str, uint32_t max)
+                       const char *str, uint32_t max)
 {
     int i;
 
@@ -1345,7 +1345,7 @@ static uint16_t NVRAM_crc_update (uint16_t prev, uint16_t value)
     return tmp;
 }
 
-uint16_t NVRAM_compute_crc (nvram_t *nvram, uint32_t start, uint32_t count)
+static uint16_t NVRAM_compute_crc (nvram_t *nvram, uint32_t start, uint32_t count)
 {
     uint32_t i;
     uint16_t crc = 0xFFFF;
@@ -1366,7 +1366,7 @@ uint16_t NVRAM_compute_crc (nvram_t *nvram, uint32_t start, uint32_t count)
 #define CMDLINE_ADDR 0x017ff000
 
 int PPC_NVRAM_set_params (nvram_t *nvram, uint16_t NVRAM_size,
-                          const unsigned char *arch,
+                          const char *arch,
                           uint32_t RAM_size, int boot_device,
                           uint32_t kernel_image, uint32_t kernel_size,
                           const char *cmdline,
@@ -1387,7 +1387,7 @@ int PPC_NVRAM_set_params (nvram_t *nvram, uint16_t NVRAM_size,
     NVRAM_set_lword(nvram,  0x3C, kernel_size);
     if (cmdline) {
         /* XXX: put the cmdline in NVRAM too ? */
-        strcpy(phys_ram_base + CMDLINE_ADDR, cmdline);
+        strcpy((char *)(phys_ram_base + CMDLINE_ADDR), cmdline);
         NVRAM_set_lword(nvram,  0x40, CMDLINE_ADDR);
         NVRAM_set_lword(nvram,  0x44, strlen(cmdline));
     } else {

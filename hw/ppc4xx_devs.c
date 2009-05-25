@@ -25,9 +25,7 @@
 #include "ppc.h"
 #include "ppc4xx.h"
 #include "sysemu.h"
-
-extern int loglevel;
-extern FILE *logfile;
+#include "qemu-log.h"
 
 //#define DEBUG_MMIO
 //#define DEBUG_UNASSIGNED
@@ -35,7 +33,7 @@ extern FILE *logfile;
 
 /*****************************************************************************/
 /* Generic PowerPC 4xx processor instanciation */
-CPUState *ppc4xx_init (const unsigned char *cpu_model,
+CPUState *ppc4xx_init (const char *cpu_model,
                        clk_setup_t *cpu_clk, clk_setup_t *tb_clk,
                        uint32_t sysclk)
 {

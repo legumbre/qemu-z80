@@ -20,17 +20,8 @@
  */
 #include "dyngen-exec.h"
 
-#if 1
 register struct CPUCRISState *env asm(AREG0);
-/* This is only used for tb lookup.  */
-register uint32_t T0 asm(AREG1);
-register uint32_t T1 asm(AREG2);
-#else
-struct CPUCRISState *env;
-/* This is only used for tb lookup.  */
-uint32_t T0;
-uint32_t T1;
-#endif
+
 #include "cpu.h"
 #include "exec-all.h"
 
@@ -46,7 +37,6 @@ static inline void regs_to_env(void)
 
 int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
                               int mmu_idx, int is_softmmu);
-void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr);
 
 #if !defined(CONFIG_USER_ONLY)
 #include "softmmu_exec.h"

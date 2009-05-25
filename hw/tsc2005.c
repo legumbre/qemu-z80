@@ -23,6 +23,7 @@
 #include "hw.h"
 #include "qemu-timer.h"
 #include "console.h"
+#include "devices.h"
 
 #define TSC_CUT_RESOLUTION(value, p)	((value) >> (16 - (p ? 12 : 10)))
 
@@ -319,7 +320,7 @@ static void tsc2005_reset(struct tsc2005_state_s *s)
     tsc2005_pin_update(s);
 }
 
-uint8_t tsc2005_txrx_word(void *opaque, uint8_t value)
+static uint8_t tsc2005_txrx_word(void *opaque, uint8_t value)
 {
     struct tsc2005_state_s *s = opaque;
     uint32_t ret = 0;
@@ -520,8 +521,6 @@ static int tsc2005_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
-static int tsc2005_iid = 0;
-
 void *tsc2005_init(qemu_irq pintdav)
 {
     struct tsc2005_state_s *s;
@@ -551,8 +550,7 @@ void *tsc2005_init(qemu_irq pintdav)
                     "QEMU TSC2005-driven Touchscreen");
 
     qemu_register_reset((void *) tsc2005_reset, s);
-    register_savevm("tsc2005", tsc2005_iid ++, 0,
-                    tsc2005_save, tsc2005_load, s);
+    register_savevm("tsc2005", -1, 0, tsc2005_save, tsc2005_load, s);
 
     return s;
 }

@@ -30,6 +30,12 @@
 
 #define D(x)
 
+/* Advertisement control register. */
+#define ADVERTISE_10HALF        0x0020  /* Try for 10mbps half-duplex  */
+#define ADVERTISE_10FULL        0x0040  /* Try for 10mbps full-duplex  */
+#define ADVERTISE_100HALF       0x0080  /* Try for 100mbps half-duplex */
+#define ADVERTISE_100FULL       0x0100  /* Try for 100mbps full-duplex */
+
 /* 
  * The MDIO extensions in the TDK PHY model were reversed engineered from the 
  * linux driver (PHYID and Diagnostics reg).
@@ -78,9 +84,12 @@ static unsigned int tdk_read(struct qemu_phy *phy, unsigned int req)
 			int speed_100 = 0;
 
 			/* Are we advertising 100 half or 100 duplex ? */
-			speed_100 = !!(phy->regs[4] & 0x180);
+			speed_100 = !!(phy->regs[4] & ADVERTISE_100HALF);
+			speed_100 |= !!(phy->regs[4] & ADVERTISE_100FULL);
+
 			/* Are we advertising 10 duplex or 100 duplex ? */
-			duplex = !!(phy->regs[4] & 0x180);
+			duplex = !!(phy->regs[4] & ADVERTISE_100FULL);
+			duplex |= !!(phy->regs[4] & ADVERTISE_10FULL);
 			r = (speed_100 << 10) | (duplex << 11);
 		}
 		break;
@@ -313,18 +322,44 @@ struct fs_eth
 	uint8_t macaddr[2][6];
 	uint32_t regs[FS_ETH_MAX_REGS];
 
-	unsigned char rx_fifo[1536];
-	int rx_fifo_len;
-	int rx_fifo_pos;
-
 	struct etraxfs_dma_client *dma_out;
 	struct etraxfs_dma_client *dma_in;
 
 	/* MDIO bus.  */
 	struct qemu_mdio mdio_bus;
+	unsigned int phyaddr;
+	int duplex_mismatch;
+
 	/* PHY.	 */
 	struct qemu_phy phy;
 };
+
+static void eth_validate_duplex(struct fs_eth *eth)
+{
+	struct qemu_phy *phy;
+	unsigned int phy_duplex;
+	unsigned int mac_duplex;
+	int new_mm = 0;
+
+	phy = eth->mdio_bus.devs[eth->phyaddr];
+	phy_duplex = !!(phy->read(phy, 18) & (1 << 11));
+	mac_duplex = !!(eth->regs[RW_REC_CTRL] & 128);
+
+	if (mac_duplex != phy_duplex)
+		new_mm = 1;
+
+	if (eth->regs[RW_GEN_CTRL] & 1) {
+		if (new_mm != eth->duplex_mismatch) {
+			if (new_mm)
+				printf("HW: WARNING "
+				       "ETH duplex mismatch MAC=%d PHY=%d\n",
+				       mac_duplex, phy_duplex);
+			else
+				printf("HW: ETH duplex ok.\n");
+		}
+		eth->duplex_mismatch = new_mm;
+	}
+}
 
 static uint32_t eth_rinvalid (void *opaque, target_phys_addr_t addr)
 {
@@ -418,9 +453,16 @@ eth_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 			/* Attach an MDIO/PHY abstraction.  */
 			if (value & 2)
 				eth->mdio_bus.mdio = value & 1;
-			if (eth->mdio_bus.mdc != (value & 4))
+			if (eth->mdio_bus.mdc != (value & 4)) {
 				mdio_cycle(&eth->mdio_bus);
+				eth_validate_duplex(eth);
+			}
 			eth->mdio_bus.mdc = !!(value & 4);
+			break;
+
+		case RW_REC_CTRL:
+			eth->regs[addr] = value;
+			eth_validate_duplex(eth);
 			break;
 
 		default:
@@ -477,15 +519,7 @@ static int eth_match_groupaddr(struct fs_eth *eth, const unsigned char *sa)
 
 static int eth_can_receive(void *opaque)
 {
-	struct fs_eth *eth = opaque;
-	int r;
-
-	r = eth->rx_fifo_len == 0;
-	if (!r) {
-		/* TODO: signal fifo overrun.  */
-		printf("PACKET LOSS!\n");
-	}
-	return r;
+	return 1;
 }
 
 static void eth_receive(void *opaque, const uint8_t *buf, int size)
@@ -510,38 +544,8 @@ static void eth_receive(void *opaque, const uint8_t *buf, int size)
 	    && !eth_match_groupaddr(eth, buf))
 		return;
 
-	if (size > sizeof(eth->rx_fifo)) {
-		/* TODO: signal error.	*/
-	} else if (eth->rx_fifo_len) {
-		/* FIFO overrun.  */
-	} else {
-		memcpy(eth->rx_fifo, buf, size);
-		/* +4, HW passes the CRC to sw.	 */
-		eth->rx_fifo_len = size + 4;
-		eth->rx_fifo_pos = 0;
-	}
-}
-
-static void eth_rx_pull(void *opaque)
-{
-	struct fs_eth *eth = opaque;
-	int len;
-	if (eth->rx_fifo_len) {		
-		D(printf("%s %d\n", __func__, eth->rx_fifo_len));
-#if 0
-		{
-			int i;
-			for (i = 0; i < 32; i++)
-				printf("%2.2x", eth->rx_fifo[i]);
-			printf("\n");
-		}
-#endif
-		len = etraxfs_dmac_input(eth->dma_in,
-					 eth->rx_fifo + eth->rx_fifo_pos, 
-					 eth->rx_fifo_len, 1);
-		eth->rx_fifo_len -= len;
-		eth->rx_fifo_pos += len;
-	}
+	/* FIXME: Find another way to pass on the fake csum.  */
+	etraxfs_dmac_input(eth->dma_in, (void *)buf, size + 4, 1);
 }
 
 static int eth_tx_push(void *opaque, unsigned char *buf, int len)
@@ -582,7 +586,7 @@ void *etraxfs_eth_init(NICInfo *nd, CPUState *env,
 	dma[0].client.push = eth_tx_push;
 	dma[0].client.opaque = eth;
 	dma[1].client.opaque = eth;
-	dma[1].client.pull = eth_rx_pull;
+	dma[1].client.pull = NULL;
 
 	eth->env = env;
 	eth->base = base;
@@ -591,8 +595,9 @@ void *etraxfs_eth_init(NICInfo *nd, CPUState *env,
 	eth->dma_in = dma + 1;
 
 	/* Connect the phy.  */
+	eth->phyaddr = 1;
 	tdk_init(&eth->phy);
-	mdio_attach(&eth->mdio_bus, &eth->phy, 0x1);
+	mdio_attach(&eth->mdio_bus, &eth->phy, eth->phyaddr);
 
 	eth->ethregs = cpu_register_io_memory(0, eth_read, eth_write, eth);
 	cpu_register_physical_memory (base, 0x5c, eth->ethregs);

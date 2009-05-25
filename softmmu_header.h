@@ -70,10 +70,6 @@
 #define ADDR_READ addr_read
 #endif
 
-DATA_TYPE REGPARM glue(glue(__ld, SUFFIX), MMUSUFFIX)(target_ulong addr,
-                                                         int mmu_idx);
-void REGPARM glue(glue(__st, SUFFIX), MMUSUFFIX)(target_ulong addr, DATA_TYPE v, int mmu_idx);
-
 #if (DATA_SIZE <= 4) && (TARGET_LONG_BITS == 32) && defined(__i386__) && \
     (ACCESS_TYPE < NB_MMU_MODES) && defined(ASM_SOFTMMU)
 
@@ -231,8 +227,8 @@ static inline RES_TYPE glue(glue(ld, USUFFIX), MEMSUFFIX)(target_ulong ptr)
     addr = ptr;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
-    if (__builtin_expect(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
-                         (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))), 0)) {
+    if (unlikely(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
+                 (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))))) {
         res = glue(glue(__ld, SUFFIX), MMUSUFFIX)(addr, mmu_idx);
     } else {
         physaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
@@ -252,8 +248,8 @@ static inline int glue(glue(lds, SUFFIX), MEMSUFFIX)(target_ulong ptr)
     addr = ptr;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
-    if (__builtin_expect(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
-                         (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))), 0)) {
+    if (unlikely(env->tlb_table[mmu_idx][page_index].ADDR_READ !=
+                 (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))))) {
         res = (DATA_STYPE)glue(glue(__ld, SUFFIX), MMUSUFFIX)(addr, mmu_idx);
     } else {
         physaddr = addr + env->tlb_table[mmu_idx][page_index].addend;
@@ -277,8 +273,8 @@ static inline void glue(glue(st, SUFFIX), MEMSUFFIX)(target_ulong ptr, RES_TYPE 
     addr = ptr;
     page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
     mmu_idx = CPU_MMU_INDEX;
-    if (__builtin_expect(env->tlb_table[mmu_idx][page_index].addr_write !=
-                         (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))), 0)) {
+    if (unlikely(env->tlb_table[mmu_idx][page_index].addr_write !=
+                 (addr & (TARGET_PAGE_MASK | (DATA_SIZE - 1))))) {
         glue(glue(__st, SUFFIX), MMUSUFFIX)(addr, v, mmu_idx);
     } else {
         physaddr = addr + env->tlb_table[mmu_idx][page_index].addend;

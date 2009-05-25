@@ -31,6 +31,7 @@
 #include "pci.h"
 #include "ppc.h"
 #include "boards.h"
+#include "qemu-log.h"
 
 //#define HARD_DEBUG_PPC_IO
 //#define DEBUG_PPC_IO
@@ -43,9 +44,6 @@
 #define BIOS_FILENAME "ppc_rom.bin"
 #define KERNEL_LOAD_ADDR 0x01000000
 #define INITRD_LOAD_ADDR 0x01800000
-
-extern int loglevel;
-extern FILE *logfile;
 
 #if defined (HARD_DEBUG_PPC_IO) && !defined (DEBUG_PPC_IO)
 #define DEBUG_PPC_IO
@@ -86,9 +84,11 @@ static int ne2000_irq[NE2000_NB_MAX] = { 9, 10, 11, 3, 4, 5 };
 /* ISA IO ports bridge */
 #define PPC_IO_BASE 0x80000000
 
+#if 0
 /* Speaker port 0x61 */
-int speaker_data_on;
-int dummy_refresh_clock;
+static int speaker_data_on;
+static int dummy_refresh_clock;
+#endif
 
 static void speaker_ioport_write (void *opaque, uint32_t addr, uint32_t val)
 {
@@ -520,13 +520,13 @@ static uint32_t PPC_prep_io_readl (void *opaque, target_phys_addr_t addr)
     return ret;
 }
 
-CPUWriteMemoryFunc *PPC_prep_io_write[] = {
+static CPUWriteMemoryFunc *PPC_prep_io_write[] = {
     &PPC_prep_io_writeb,
     &PPC_prep_io_writew,
     &PPC_prep_io_writel,
 };
 
-CPUReadMemoryFunc *PPC_prep_io_read[] = {
+static CPUReadMemoryFunc *PPC_prep_io_read[] = {
     &PPC_prep_io_readb,
     &PPC_prep_io_readw,
     &PPC_prep_io_readl,
@@ -760,8 +760,9 @@ static void ppc_prep_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine prep_machine = {
-    "prep",
-    "PowerPC PREP platform",
-    ppc_prep_init,
-    BIOS_SIZE + VGA_RAM_SIZE,
+    .name = "prep",
+    .desc = "PowerPC PREP platform",
+    .init = ppc_prep_init,
+    .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
+    .max_cpus = MAX_CPUS,
 };

@@ -37,12 +37,6 @@ these four paragraphs for those parts of this code that are retained.
 #endif
 
 /*----------------------------------------------------------------------------
-| Underflow tininess-detection mode, statically initialized to default value.
-| (The declaration in `softfloat.h' must match the `int8' type here.)
-*----------------------------------------------------------------------------*/
-int8 float_detect_tininess = float_tininess_after_rounding;
-
-/*----------------------------------------------------------------------------
 | Raises the exceptions specified by `flags'.  Floating-point traps can be
 | defined here if desired.  It is currently not possible for such a trap
 | to substitute a result value.  If traps are not implemented, this routine
@@ -67,7 +61,7 @@ typedef struct {
 *----------------------------------------------------------------------------*/
 #if defined(TARGET_SPARC)
 #define float32_default_nan make_float32(0x7FFFFFFF)
-#elif defined(TARGET_POWERPC)
+#elif defined(TARGET_POWERPC) || defined(TARGET_ARM)
 #define float32_default_nan make_float32(0x7FC00000)
 #elif defined(TARGET_HPPA)
 #define float32_default_nan make_float32(0x7FA00000)
@@ -192,7 +186,7 @@ static float32 propagateFloat32NaN( float32 a, float32 b STATUS_PARAM)
 *----------------------------------------------------------------------------*/
 #if defined(TARGET_SPARC)
 #define float64_default_nan make_float64(LIT64( 0x7FFFFFFFFFFFFFFF ))
-#elif defined(TARGET_POWERPC)
+#elif defined(TARGET_POWERPC) || defined(TARGET_ARM)
 #define float64_default_nan make_float64(LIT64( 0x7FF8000000000000 ))
 #elif defined(TARGET_HPPA)
 #define float64_default_nan make_float64(LIT64( 0x7FF4000000000000 ))

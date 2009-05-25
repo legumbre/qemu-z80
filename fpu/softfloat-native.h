@@ -8,6 +8,11 @@
 #include <fenv.h>
 #endif
 
+#ifdef __OpenBSD__
+/* Get OpenBSD version number */
+#include <sys/param.h>
+#endif
+
 /*
  * Define some C99-7.12.3 classification macros and
  *        some C99-.12.4 for Solaris systems OS less than 10,
@@ -15,7 +20,9 @@
  *   Solaris 10 with GCC4 does not need these macros as they
  *   are defined in <iso/math_c99.h> with a compiler directive
  */
-#if defined(HOST_SOLARIS) && (( HOST_SOLARIS <= 9 ) || ((HOST_SOLARIS >= 10) && (__GNUC__ <= 4)))
+#if defined(HOST_SOLARIS) && (( HOST_SOLARIS <= 9 ) || ((HOST_SOLARIS >= 10) \
+                                                        && (__GNUC__ <= 4))) \
+    || (defined(__OpenBSD__) && (OpenBSD < 200811))
 /*
  * C99 7.12.3 classification macros
  * and
@@ -24,6 +31,9 @@
  * ... do not work on Solaris 10 using GNU CC 3.4.x.
  * Try to workaround the missing / broken C99 math macros.
  */
+#if defined(__OpenBSD__)
+#define unordered(x, y) (isnan(x) || isnan(y))
+#endif
 
 #define isnormal(x)             (fpclass(x) >= FP_NZERO)
 #define isgreater(x, y)         ((!unordered(x, y)) && ((x) > (y)))
@@ -84,6 +94,11 @@ typedef union {
 | Software IEC/IEEE floating-point rounding mode.
 *----------------------------------------------------------------------------*/
 #if (defined(_BSD) && !defined(__APPLE__)) || defined(HOST_SOLARIS)
+#if defined(__OpenBSD__)
+#define FE_RM FP_RM
+#define FE_RP FP_RP
+#define FE_RZ FP_RZ
+#endif
 enum {
     float_round_nearest_even = FP_RN,
     float_round_down         = FP_RM,

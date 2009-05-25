@@ -22,6 +22,7 @@
 
 #include "host-utils.h"
 
+#include "helper.h"
 /*****************************************************************************/
 /* Exceptions processing helpers */
 
@@ -87,24 +88,24 @@ target_ulong do_dclz (target_ulong t0)
 #endif /* TARGET_MIPS64 */
 
 /* 64 bits arithmetic for 32 bits hosts */
-static always_inline uint64_t get_HILO (void)
+static inline uint64_t get_HILO (void)
 {
     return ((uint64_t)(env->active_tc.HI[0]) << 32) | (uint32_t)env->active_tc.LO[0];
 }
 
-static always_inline void set_HILO (uint64_t HILO)
+static inline void set_HILO (uint64_t HILO)
 {
     env->active_tc.LO[0] = (int32_t)HILO;
     env->active_tc.HI[0] = (int32_t)(HILO >> 32);
 }
 
-static always_inline void set_HIT0_LO (target_ulong t0, uint64_t HILO)
+static inline void set_HIT0_LO (target_ulong t0, uint64_t HILO)
 {
     env->active_tc.LO[0] = (int32_t)(HILO & 0xFFFFFFFF);
     t0 = env->active_tc.HI[0] = (int32_t)(HILO >> 32);
 }
 
-static always_inline void set_HI_LOT0 (target_ulong t0, uint64_t HILO)
+static inline void set_HI_LOT0 (target_ulong t0, uint64_t HILO)
 {
     t0 = env->active_tc.LO[0] = (int32_t)(HILO & 0xFFFFFFFF);
     env->active_tc.HI[0] = (int32_t)(HILO >> 32);
@@ -596,59 +597,7 @@ void do_sdr(target_ulong t0, target_ulong t1, int mem_idx)
 }
 #endif /* TARGET_MIPS64 */
 
-#ifdef CONFIG_USER_ONLY
-void do_mfc0_random (void)
-{
-    cpu_abort(env, "mfc0 random\n");
-}
-
-void do_mfc0_count (void)
-{
-    cpu_abort(env, "mfc0 count\n");
-}
-
-void cpu_mips_store_count(CPUState *env, uint32_t value)
-{
-    cpu_abort(env, "mtc0 count\n");
-}
-
-void cpu_mips_store_compare(CPUState *env, uint32_t value)
-{
-    cpu_abort(env, "mtc0 compare\n");
-}
-
-void cpu_mips_start_count(CPUState *env)
-{
-    cpu_abort(env, "start count\n");
-}
-
-void cpu_mips_stop_count(CPUState *env)
-{
-    cpu_abort(env, "stop count\n");
-}
-
-void cpu_mips_update_irq(CPUState *env)
-{
-    cpu_abort(env, "mtc0 status / mtc0 cause\n");
-}
-
-void do_mtc0_status_debug(uint32_t old, uint32_t val)
-{
-    cpu_abort(env, "mtc0 status debug\n");
-}
-
-void do_mtc0_status_irqraise_debug (void)
-{
-    cpu_abort(env, "mtc0 status irqraise debug\n");
-}
-
-void cpu_mips_tlb_flush (CPUState *env, int flush_global)
-{
-    cpu_abort(env, "mips_tlb_flush\n");
-}
-
-#else
-
+#ifndef CONFIG_USER_ONLY
 /* CP0 helpers */
 target_ulong do_mfc0_mvpcontrol (void)
 {
@@ -1410,7 +1359,7 @@ void do_mtc0_status_irqraise_debug(void)
 #endif /* !CONFIG_USER_ONLY */
 
 /* MIPS MT functions */
-target_ulong do_mftgpr(target_ulong t0, uint32_t sel)
+target_ulong do_mftgpr(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1420,7 +1369,7 @@ target_ulong do_mftgpr(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].gpr[sel];
 }
 
-target_ulong do_mftlo(target_ulong t0, uint32_t sel)
+target_ulong do_mftlo(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1430,7 +1379,7 @@ target_ulong do_mftlo(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].LO[sel];
 }
 
-target_ulong do_mfthi(target_ulong t0, uint32_t sel)
+target_ulong do_mfthi(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1440,7 +1389,7 @@ target_ulong do_mfthi(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].HI[sel];
 }
 
-target_ulong do_mftacx(target_ulong t0, uint32_t sel)
+target_ulong do_mftacx(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1450,7 +1399,7 @@ target_ulong do_mftacx(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].ACX[sel];
 }
 
-target_ulong do_mftdsp(target_ulong t0)
+target_ulong do_mftdsp(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1582,44 +1531,6 @@ target_ulong do_yield(target_ulong t0)
     return env->CP0_YQMask;
 }
 
-/* CP1 functions */
-void fpu_handle_exception(void)
-{
-#ifdef CONFIG_SOFTFLOAT
-    int flags = get_float_exception_flags(&env->fpu->fp_status);
-    unsigned int cpuflags = 0, enable, cause = 0;
-
-    enable = GET_FP_ENABLE(env->fpu->fcr31);
-
-    /* determine current flags */
-    if (flags & float_flag_invalid) {
-        cpuflags |= FP_INVALID;
-        cause |= FP_INVALID & enable;
-    }
-    if (flags & float_flag_divbyzero) {
-        cpuflags |= FP_DIV0;
-        cause |= FP_DIV0 & enable;
-    }
-    if (flags & float_flag_overflow) {
-        cpuflags |= FP_OVERFLOW;
-        cause |= FP_OVERFLOW & enable;
-    }
-    if (flags & float_flag_underflow) {
-        cpuflags |= FP_UNDERFLOW;
-        cause |= FP_UNDERFLOW & enable;
-    }
-    if (flags & float_flag_inexact) {
-        cpuflags |= FP_INEXACT;
-        cause |= FP_INEXACT & enable;
-    }
-    SET_FP_FLAGS(env->fpu->fcr31, cpuflags);
-    SET_FP_CAUSE(env->fpu->fcr31, cause);
-#else
-    SET_FP_FLAGS(env->fpu->fcr31, 0);
-    SET_FP_CAUSE(env->fpu->fcr31, 0);
-#endif
-}
-
 #ifndef CONFIG_USER_ONLY
 /* TLB management */
 void cpu_mips_tlb_flush (CPUState *env, int flush_global)
@@ -1662,13 +1573,17 @@ static void r4k_fill_tlb (int idx)
 
 void r4k_do_tlbwi (void)
 {
+    int idx;
+
+    idx = (env->CP0_Index & ~0x80000000) % env->tlb->nb_tlb;
+
     /* Discard cached TLB entries.  We could avoid doing this if the
        tlbwi is just upgrading access permissions on the current entry;
        that might be a further win.  */
     r4k_mips_tlb_flush_extra (env, env->tlb->nb_tlb);
 
-    r4k_invalidate_tlb(env, env->CP0_Index % env->tlb->nb_tlb, 0);
-    r4k_fill_tlb(env->CP0_Index % env->tlb->nb_tlb);
+    r4k_invalidate_tlb(env, idx, 0);
+    r4k_fill_tlb(idx);
 }
 
 void r4k_do_tlbwr (void)
@@ -1725,9 +1640,11 @@ void r4k_do_tlbr (void)
 {
     r4k_tlb_t *tlb;
     uint8_t ASID;
+    int idx;
 
     ASID = env->CP0_EntryHi & 0xFF;
-    tlb = &env->tlb->mmu.r4k.tlb[env->CP0_Index % env->tlb->nb_tlb];
+    idx = (env->CP0_Index & ~0x80000000) % env->tlb->nb_tlb;
+    tlb = &env->tlb->mmu.r4k.tlb[idx];
 
     /* If this will change the current ASID, flush qemu's TLB.  */
     if (ASID != tlb->ASID)
@@ -1743,7 +1660,25 @@ void r4k_do_tlbr (void)
                         (tlb->C1 << 3) | (tlb->PFN[1] >> 6);
 }
 
-#endif /* !CONFIG_USER_ONLY */
+void do_tlbwi(void)
+{
+    env->tlb->do_tlbwi();
+}
+
+void do_tlbwr(void)
+{
+    env->tlb->do_tlbwr();
+}
+
+void do_tlbp(void)
+{
+    env->tlb->do_tlbp();
+}
+
+void do_tlbr(void)
+{
+    env->tlb->do_tlbr();
+}
 
 /* Specials */
 target_ulong do_di (void)
@@ -1821,6 +1756,7 @@ void do_deret (void)
         debug_post_eret();
     env->CP0_LLAddr = 1;
 }
+#endif /* !CONFIG_USER_ONLY */
 
 target_ulong do_rdhwr_cpunum(void)
 {
@@ -1865,49 +1801,6 @@ target_ulong do_rdhwr_ccres(void)
 
     return 0;
 }
-
-/* Bitfield operations. */
-target_ulong do_ext(target_ulong t1, uint32_t pos, uint32_t size)
-{
-    return (int32_t)((t1 >> pos) & ((size < 32) ? ((1 << size) - 1) : ~0));
-}
-
-target_ulong do_ins(target_ulong t0, target_ulong t1, uint32_t pos, uint32_t size)
-{
-    target_ulong mask = ((size < 32) ? ((1 << size) - 1) : ~0) << pos;
-
-    return (int32_t)((t0 & ~mask) | ((t1 << pos) & mask));
-}
-
-target_ulong do_wsbh(target_ulong t1)
-{
-    return (int32_t)(((t1 << 8) & ~0x00FF00FF) | ((t1 >> 8) & 0x00FF00FF));
-}
-
-#if defined(TARGET_MIPS64)
-target_ulong do_dext(target_ulong t1, uint32_t pos, uint32_t size)
-{
-    return (t1 >> pos) & ((size < 64) ? ((1ULL << size) - 1) : ~0ULL);
-}
-
-target_ulong do_dins(target_ulong t0, target_ulong t1, uint32_t pos, uint32_t size)
-{
-    target_ulong mask = ((size < 64) ? ((1ULL << size) - 1) : ~0ULL) << pos;
-
-    return (t0 & ~mask) | ((t1 << pos) & mask);
-}
-
-target_ulong do_dsbh(target_ulong t1)
-{
-    return ((t1 << 8) & ~0x00FF00FF00FF00FFULL) | ((t1 >> 8) & 0x00FF00FF00FF00FFULL);
-}
-
-target_ulong do_dshd(target_ulong t1)
-{
-    t1 = ((t1 << 16) & ~0x0000FFFF0000FFFFULL) | ((t1 >> 16) & 0x0000FFFF0000FFFFULL);
-    return (t1 << 32) | (t1 >> 32);
-}
-#endif
 
 void do_pmon (int function)
 {
@@ -1996,7 +1889,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
 }
 
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int unused)
+                          int unused, int size)
 {
     if (is_exec)
         do_raise_exception(EXCP_IBE);
@@ -2025,7 +1918,7 @@ unsigned int ieee_rm[] = {
 };
 
 #define RESTORE_ROUNDING_MODE \
-    set_float_rounding_mode(ieee_rm[env->fpu->fcr31 & 3], &env->fpu->fp_status)
+    set_float_rounding_mode(ieee_rm[env->active_fpu.fcr31 & 3], &env->active_fpu.fp_status)
 
 target_ulong do_cfc1 (uint32_t reg)
 {
@@ -2033,19 +1926,19 @@ target_ulong do_cfc1 (uint32_t reg)
 
     switch (reg) {
     case 0:
-        t0 = (int32_t)env->fpu->fcr0;
+        t0 = (int32_t)env->active_fpu.fcr0;
         break;
     case 25:
-        t0 = ((env->fpu->fcr31 >> 24) & 0xfe) | ((env->fpu->fcr31 >> 23) & 0x1);
+        t0 = ((env->active_fpu.fcr31 >> 24) & 0xfe) | ((env->active_fpu.fcr31 >> 23) & 0x1);
         break;
     case 26:
-        t0 = env->fpu->fcr31 & 0x0003f07c;
+        t0 = env->active_fpu.fcr31 & 0x0003f07c;
         break;
     case 28:
-        t0 = (env->fpu->fcr31 & 0x00000f83) | ((env->fpu->fcr31 >> 22) & 0x4);
+        t0 = (env->active_fpu.fcr31 & 0x00000f83) | ((env->active_fpu.fcr31 >> 22) & 0x4);
         break;
     default:
-        t0 = (int32_t)env->fpu->fcr31;
+        t0 = (int32_t)env->active_fpu.fcr31;
         break;
     }
 
@@ -2058,36 +1951,36 @@ void do_ctc1 (target_ulong t0, uint32_t reg)
     case 25:
         if (t0 & 0xffffff00)
             return;
-        env->fpu->fcr31 = (env->fpu->fcr31 & 0x017fffff) | ((t0 & 0xfe) << 24) |
+        env->active_fpu.fcr31 = (env->active_fpu.fcr31 & 0x017fffff) | ((t0 & 0xfe) << 24) |
                      ((t0 & 0x1) << 23);
         break;
     case 26:
         if (t0 & 0x007c0000)
             return;
-        env->fpu->fcr31 = (env->fpu->fcr31 & 0xfffc0f83) | (t0 & 0x0003f07c);
+        env->active_fpu.fcr31 = (env->active_fpu.fcr31 & 0xfffc0f83) | (t0 & 0x0003f07c);
         break;
     case 28:
         if (t0 & 0x007c0000)
             return;
-        env->fpu->fcr31 = (env->fpu->fcr31 & 0xfefff07c) | (t0 & 0x00000f83) |
+        env->active_fpu.fcr31 = (env->active_fpu.fcr31 & 0xfefff07c) | (t0 & 0x00000f83) |
                      ((t0 & 0x4) << 22);
         break;
     case 31:
         if (t0 & 0x007c0000)
             return;
-        env->fpu->fcr31 = t0;
+        env->active_fpu.fcr31 = t0;
         break;
     default:
         return;
     }
     /* set rounding mode */
     RESTORE_ROUNDING_MODE;
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    if ((GET_FP_ENABLE(env->fpu->fcr31) | 0x20) & GET_FP_CAUSE(env->fpu->fcr31))
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    if ((GET_FP_ENABLE(env->active_fpu.fcr31) | 0x20) & GET_FP_CAUSE(env->active_fpu.fcr31))
         do_raise_exception(EXCP_FPE);
 }
 
-static always_inline char ieee_ex_to_mips(char xcpt)
+static inline char ieee_ex_to_mips(char xcpt)
 {
     return (xcpt & float_flag_inexact) >> 5 |
            (xcpt & float_flag_underflow) >> 3 |
@@ -2096,7 +1989,7 @@ static always_inline char ieee_ex_to_mips(char xcpt)
            (xcpt & float_flag_invalid) << 4;
 }
 
-static always_inline char mips_ex_to_ieee(char xcpt)
+static inline char mips_ex_to_ieee(char xcpt)
 {
     return (xcpt & FP_INEXACT) << 5 |
            (xcpt & FP_UNDERFLOW) << 3 |
@@ -2105,15 +1998,15 @@ static always_inline char mips_ex_to_ieee(char xcpt)
            (xcpt & FP_INVALID) >> 4;
 }
 
-static always_inline void update_fcr31(void)
+static inline void update_fcr31(void)
 {
-    int tmp = ieee_ex_to_mips(get_float_exception_flags(&env->fpu->fp_status));
+    int tmp = ieee_ex_to_mips(get_float_exception_flags(&env->active_fpu.fp_status));
 
-    SET_FP_CAUSE(env->fpu->fcr31, tmp);
-    if (GET_FP_ENABLE(env->fpu->fcr31) & tmp)
+    SET_FP_CAUSE(env->active_fpu.fcr31, tmp);
+    if (GET_FP_ENABLE(env->active_fpu.fcr31) & tmp)
         do_raise_exception(EXCP_FPE);
     else
-        UPDATE_FP_FLAGS(env->fpu->fcr31, tmp);
+        UPDATE_FP_FLAGS(env->active_fpu.fcr31, tmp);
 }
 
 /* Float support.
@@ -2121,380 +2014,555 @@ static always_inline void update_fcr31(void)
    "d" suffix, 32bit integer "w", 64bit integer "l", paired single "ps",
    paired single lower "pl", paired single upper "pu".  */
 
-#define FLOAT_OP(name, p) void do_float_##name##_##p(void)
-
 /* unary operations, modifying fp status  */
-#define FLOAT_UNOP(name)  \
-FLOAT_OP(name, d)         \
-{                         \
-    FDT2 = float64_ ## name(FDT0, &env->fpu->fp_status); \
-}                         \
-FLOAT_OP(name, s)         \
-{                         \
-    FST2 = float32_ ## name(FST0, &env->fpu->fp_status); \
-}
-FLOAT_UNOP(sqrt)
-#undef FLOAT_UNOP
-
-FLOAT_OP(cvtd, s)
+uint64_t do_float_sqrt_d(uint64_t fdt0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float32_to_float64(FST0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvtd, w)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = int32_to_float64(WT0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvtd, l)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = int64_to_float64(DT0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvtl, d)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    DT2 = float64_to_int64(FDT0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(cvtl, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    DT2 = float32_to_int64(FST0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
+    return float64_sqrt(fdt0, &env->active_fpu.fp_status);
 }
 
-FLOAT_OP(cvtps, pw)
+uint32_t do_float_sqrt_s(uint32_t fst0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = int32_to_float32(WT0, &env->fpu->fp_status);
-    FSTH2 = int32_to_float32(WTH0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvtpw, ps)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    WT2 = float32_to_int32(FST0, &env->fpu->fp_status);
-    WTH2 = float32_to_int32(FSTH0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
-}
-FLOAT_OP(cvts, d)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float64_to_float32(FDT0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvts, w)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = int32_to_float32(WT0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvts, l)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = int64_to_float32(DT0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(cvts, pl)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    WT2 = WT0;
-    update_fcr31();
-}
-FLOAT_OP(cvts, pu)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    WT2 = WTH0;
-    update_fcr31();
-}
-FLOAT_OP(cvtw, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    WT2 = float32_to_int32(FST0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
-}
-FLOAT_OP(cvtw, d)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    WT2 = float64_to_int32(FDT0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    return float32_sqrt(fst0, &env->active_fpu.fp_status);
 }
 
-FLOAT_OP(roundl, d)
+uint64_t do_float_cvtd_s(uint32_t fst0)
 {
-    set_float_rounding_mode(float_round_nearest_even, &env->fpu->fp_status);
-    DT2 = float64_to_int64(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float32_to_float64(fst0, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(roundl, s)
-{
-    set_float_rounding_mode(float_round_nearest_even, &env->fpu->fp_status);
-    DT2 = float32_to_int64(FST0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(roundw, d)
-{
-    set_float_rounding_mode(float_round_nearest_even, &env->fpu->fp_status);
-    WT2 = float64_to_int32(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
-}
-FLOAT_OP(roundw, s)
-{
-    set_float_rounding_mode(float_round_nearest_even, &env->fpu->fp_status);
-    WT2 = float32_to_int32(FST0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    return fdt2;
 }
 
-FLOAT_OP(truncl, d)
+uint64_t do_float_cvtd_w(uint32_t wt0)
 {
-    DT2 = float64_to_int64_round_to_zero(FDT0, &env->fpu->fp_status);
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = int32_to_float64(wt0, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(truncl, s)
-{
-    DT2 = float32_to_int64_round_to_zero(FST0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(truncw, d)
-{
-    WT2 = float64_to_int32_round_to_zero(FDT0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
-}
-FLOAT_OP(truncw, s)
-{
-    WT2 = float32_to_int32_round_to_zero(FST0, &env->fpu->fp_status);
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    return fdt2;
 }
 
-FLOAT_OP(ceill, d)
+uint64_t do_float_cvtd_l(uint64_t dt0)
 {
-    set_float_rounding_mode(float_round_up, &env->fpu->fp_status);
-    DT2 = float64_to_int64(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = int64_to_float64(dt0, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(ceill, s)
-{
-    set_float_rounding_mode(float_round_up, &env->fpu->fp_status);
-    DT2 = float32_to_int64(FST0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
-}
-FLOAT_OP(ceilw, d)
-{
-    set_float_rounding_mode(float_round_up, &env->fpu->fp_status);
-    WT2 = float64_to_int32(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
-}
-FLOAT_OP(ceilw, s)
-{
-    set_float_rounding_mode(float_round_up, &env->fpu->fp_status);
-    WT2 = float32_to_int32(FST0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
-    update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    return fdt2;
 }
 
-FLOAT_OP(floorl, d)
+uint64_t do_float_cvtl_d(uint64_t fdt0)
 {
-    set_float_rounding_mode(float_round_down, &env->fpu->fp_status);
-    DT2 = float64_to_int64(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
+    uint64_t dt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    dt2 = float64_to_int64(fdt0, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
 }
-FLOAT_OP(floorl, s)
+
+uint64_t do_float_cvtl_s(uint32_t fst0)
 {
-    set_float_rounding_mode(float_round_down, &env->fpu->fp_status);
-    DT2 = float32_to_int64(FST0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
+    uint64_t dt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    dt2 = float32_to_int64(fst0, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        DT2 = FLOAT_SNAN64;
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
 }
-FLOAT_OP(floorw, d)
+
+uint64_t do_float_cvtps_pw(uint64_t dt0)
 {
-    set_float_rounding_mode(float_round_down, &env->fpu->fp_status);
-    WT2 = float64_to_int32(FDT0, &env->fpu->fp_status);
-    RESTORE_ROUNDING_MODE;
+    uint32_t fst2;
+    uint32_t fsth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = int32_to_float32(dt0 & 0XFFFFFFFF, &env->active_fpu.fp_status);
+    fsth2 = int32_to_float32(dt0 >> 32, &env->active_fpu.fp_status);
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    return ((uint64_t)fsth2 << 32) | fst2;
 }
-FLOAT_OP(floorw, s)
+
+uint64_t do_float_cvtpw_ps(uint64_t fdt0)
 {
-    set_float_rounding_mode(float_round_down, &env->fpu->fp_status);
-    WT2 = float32_to_int32(FST0, &env->fpu->fp_status);
+    uint32_t wt2;
+    uint32_t wth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    wt2 = float32_to_int32(fdt0 & 0XFFFFFFFF, &env->active_fpu.fp_status);
+    wth2 = float32_to_int32(fdt0 >> 32, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID)) {
+        wt2 = FLOAT_SNAN32;
+        wth2 = FLOAT_SNAN32;
+    }
+    return ((uint64_t)wth2 << 32) | wt2;
+}
+
+uint32_t do_float_cvts_d(uint64_t fdt0)
+{
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float64_to_float32(fdt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    return fst2;
+}
+
+uint32_t do_float_cvts_w(uint32_t wt0)
+{
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = int32_to_float32(wt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    return fst2;
+}
+
+uint32_t do_float_cvts_l(uint64_t dt0)
+{
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = int64_to_float32(dt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    return fst2;
+}
+
+uint32_t do_float_cvts_pl(uint32_t wt0)
+{
+    uint32_t wt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    wt2 = wt0;
+    update_fcr31();
+    return wt2;
+}
+
+uint32_t do_float_cvts_pu(uint32_t wth0)
+{
+    uint32_t wt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    wt2 = wth0;
+    update_fcr31();
+    return wt2;
+}
+
+uint32_t do_float_cvtw_s(uint32_t fst0)
+{
+    uint32_t wt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    wt2 = float32_to_int32(fst0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint32_t do_float_cvtw_d(uint64_t fdt0)
+{
+    uint32_t wt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    wt2 = float64_to_int32(fdt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint64_t do_float_roundl_d(uint64_t fdt0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_nearest_even, &env->active_fpu.fp_status);
+    dt2 = float64_to_int64(fdt0, &env->active_fpu.fp_status);
     RESTORE_ROUNDING_MODE;
     update_fcr31();
-    if (GET_FP_CAUSE(env->fpu->fcr31) & (FP_OVERFLOW | FP_INVALID))
-        WT2 = FLOAT_SNAN32;
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint64_t do_float_roundl_s(uint32_t fst0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_nearest_even, &env->active_fpu.fp_status);
+    dt2 = float32_to_int64(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint32_t do_float_roundw_d(uint64_t fdt0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_nearest_even, &env->active_fpu.fp_status);
+    wt2 = float64_to_int32(fdt0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint32_t do_float_roundw_s(uint32_t fst0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_nearest_even, &env->active_fpu.fp_status);
+    wt2 = float32_to_int32(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint64_t do_float_truncl_d(uint64_t fdt0)
+{
+    uint64_t dt2;
+
+    dt2 = float64_to_int64_round_to_zero(fdt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint64_t do_float_truncl_s(uint32_t fst0)
+{
+    uint64_t dt2;
+
+    dt2 = float32_to_int64_round_to_zero(fst0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint32_t do_float_truncw_d(uint64_t fdt0)
+{
+    uint32_t wt2;
+
+    wt2 = float64_to_int32_round_to_zero(fdt0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint32_t do_float_truncw_s(uint32_t fst0)
+{
+    uint32_t wt2;
+
+    wt2 = float32_to_int32_round_to_zero(fst0, &env->active_fpu.fp_status);
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint64_t do_float_ceill_d(uint64_t fdt0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_up, &env->active_fpu.fp_status);
+    dt2 = float64_to_int64(fdt0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint64_t do_float_ceill_s(uint32_t fst0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_up, &env->active_fpu.fp_status);
+    dt2 = float32_to_int64(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint32_t do_float_ceilw_d(uint64_t fdt0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_up, &env->active_fpu.fp_status);
+    wt2 = float64_to_int32(fdt0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint32_t do_float_ceilw_s(uint32_t fst0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_up, &env->active_fpu.fp_status);
+    wt2 = float32_to_int32(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint64_t do_float_floorl_d(uint64_t fdt0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_down, &env->active_fpu.fp_status);
+    dt2 = float64_to_int64(fdt0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint64_t do_float_floorl_s(uint32_t fst0)
+{
+    uint64_t dt2;
+
+    set_float_rounding_mode(float_round_down, &env->active_fpu.fp_status);
+    dt2 = float32_to_int64(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        dt2 = FLOAT_SNAN64;
+    return dt2;
+}
+
+uint32_t do_float_floorw_d(uint64_t fdt0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_down, &env->active_fpu.fp_status);
+    wt2 = float64_to_int32(fdt0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
+}
+
+uint32_t do_float_floorw_s(uint32_t fst0)
+{
+    uint32_t wt2;
+
+    set_float_rounding_mode(float_round_down, &env->active_fpu.fp_status);
+    wt2 = float32_to_int32(fst0, &env->active_fpu.fp_status);
+    RESTORE_ROUNDING_MODE;
+    update_fcr31();
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & (FP_OVERFLOW | FP_INVALID))
+        wt2 = FLOAT_SNAN32;
+    return wt2;
 }
 
 /* unary operations, not modifying fp status  */
-#define FLOAT_UNOP(name)  \
-FLOAT_OP(name, d)         \
-{                         \
-    FDT2 = float64_ ## name(FDT0);   \
-}                         \
-FLOAT_OP(name, s)         \
-{                         \
-    FST2 = float32_ ## name(FST0);   \
-}                         \
-FLOAT_OP(name, ps)        \
-{                         \
-    FST2 = float32_ ## name(FST0);   \
-    FSTH2 = float32_ ## name(FSTH0); \
+#define FLOAT_UNOP(name)                                       \
+uint64_t do_float_ ## name ## _d(uint64_t fdt0)                \
+{                                                              \
+    return float64_ ## name(fdt0);                             \
+}                                                              \
+uint32_t do_float_ ## name ## _s(uint32_t fst0)                \
+{                                                              \
+    return float32_ ## name(fst0);                             \
+}                                                              \
+uint64_t do_float_ ## name ## _ps(uint64_t fdt0)               \
+{                                                              \
+    uint32_t wt0;                                              \
+    uint32_t wth0;                                             \
+                                                               \
+    wt0 = float32_ ## name(fdt0 & 0XFFFFFFFF);                 \
+    wth0 = float32_ ## name(fdt0 >> 32);                       \
+    return ((uint64_t)wth0 << 32) | wt0;                       \
 }
 FLOAT_UNOP(abs)
 FLOAT_UNOP(chs)
 #undef FLOAT_UNOP
 
 /* MIPS specific unary operations */
-FLOAT_OP(recip, d)
+uint64_t do_float_recip_d(uint64_t fdt0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_div(FLOAT_ONE64, FDT0, &env->fpu->fp_status);
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_div(FLOAT_ONE64, fdt0, &env->active_fpu.fp_status);
     update_fcr31();
-}
-FLOAT_OP(recip, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST0, &env->fpu->fp_status);
-    update_fcr31();
+    return fdt2;
 }
 
-FLOAT_OP(rsqrt, d)
+uint32_t do_float_recip_s(uint32_t fst0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_sqrt(FDT0, &env->fpu->fp_status);
-    FDT2 = float64_div(FLOAT_ONE64, FDT2, &env->fpu->fp_status);
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fst0, &env->active_fpu.fp_status);
     update_fcr31();
-}
-FLOAT_OP(rsqrt, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_sqrt(FST0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST2, &env->fpu->fp_status);
-    update_fcr31();
+    return fst2;
 }
 
-FLOAT_OP(recip1, d)
+uint64_t do_float_rsqrt_d(uint64_t fdt0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_div(FLOAT_ONE64, FDT0, &env->fpu->fp_status);
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_sqrt(fdt0, &env->active_fpu.fp_status);
+    fdt2 = float64_div(FLOAT_ONE64, fdt2, &env->active_fpu.fp_status);
     update_fcr31();
-}
-FLOAT_OP(recip1, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST0, &env->fpu->fp_status);
-    update_fcr31();
-}
-FLOAT_OP(recip1, ps)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST0, &env->fpu->fp_status);
-    FSTH2 = float32_div(FLOAT_ONE32, FSTH0, &env->fpu->fp_status);
-    update_fcr31();
+    return fdt2;
 }
 
-FLOAT_OP(rsqrt1, d)
+uint32_t do_float_rsqrt_s(uint32_t fst0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_sqrt(FDT0, &env->fpu->fp_status);
-    FDT2 = float64_div(FLOAT_ONE64, FDT2, &env->fpu->fp_status);
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_sqrt(fst0, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fst2, &env->active_fpu.fp_status);
     update_fcr31();
+    return fst2;
 }
-FLOAT_OP(rsqrt1, s)
+
+uint64_t do_float_recip1_d(uint64_t fdt0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_sqrt(FST0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST2, &env->fpu->fp_status);
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_div(FLOAT_ONE64, fdt0, &env->active_fpu.fp_status);
     update_fcr31();
+    return fdt2;
 }
-FLOAT_OP(rsqrt1, ps)
+
+uint32_t do_float_recip1_s(uint32_t fst0)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_sqrt(FST0, &env->fpu->fp_status);
-    FSTH2 = float32_sqrt(FSTH0, &env->fpu->fp_status);
-    FST2 = float32_div(FLOAT_ONE32, FST2, &env->fpu->fp_status);
-    FSTH2 = float32_div(FLOAT_ONE32, FSTH2, &env->fpu->fp_status);
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fst0, &env->active_fpu.fp_status);
     update_fcr31();
+    return fst2;
 }
+
+uint64_t do_float_recip1_ps(uint64_t fdt0)
+{
+    uint32_t fst2;
+    uint32_t fsth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fdt0 & 0XFFFFFFFF, &env->active_fpu.fp_status);
+    fsth2 = float32_div(FLOAT_ONE32, fdt0 >> 32, &env->active_fpu.fp_status);
+    update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
+}
+
+uint64_t do_float_rsqrt1_d(uint64_t fdt0)
+{
+    uint64_t fdt2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_sqrt(fdt0, &env->active_fpu.fp_status);
+    fdt2 = float64_div(FLOAT_ONE64, fdt2, &env->active_fpu.fp_status);
+    update_fcr31();
+    return fdt2;
+}
+
+uint32_t do_float_rsqrt1_s(uint32_t fst0)
+{
+    uint32_t fst2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_sqrt(fst0, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fst2, &env->active_fpu.fp_status);
+    update_fcr31();
+    return fst2;
+}
+
+uint64_t do_float_rsqrt1_ps(uint64_t fdt0)
+{
+    uint32_t fst2;
+    uint32_t fsth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_sqrt(fdt0 & 0XFFFFFFFF, &env->active_fpu.fp_status);
+    fsth2 = float32_sqrt(fdt0 >> 32, &env->active_fpu.fp_status);
+    fst2 = float32_div(FLOAT_ONE32, fst2, &env->active_fpu.fp_status);
+    fsth2 = float32_div(FLOAT_ONE32, fsth2, &env->active_fpu.fp_status);
+    update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
+}
+
+#define FLOAT_OP(name, p) void do_float_##name##_##p(void)
 
 /* binary operations */
-#define FLOAT_BINOP(name) \
-FLOAT_OP(name, d)         \
-{                         \
-    set_float_exception_flags(0, &env->fpu->fp_status);            \
-    FDT2 = float64_ ## name (FDT0, FDT1, &env->fpu->fp_status);    \
+#define FLOAT_BINOP(name)                                          \
+uint64_t do_float_ ## name ## _d(uint64_t fdt0, uint64_t fdt1)     \
+{                                                                  \
+    uint64_t dt2;                                                  \
+                                                                   \
+    set_float_exception_flags(0, &env->active_fpu.fp_status);            \
+    dt2 = float64_ ## name (fdt0, fdt1, &env->active_fpu.fp_status);     \
     update_fcr31();                                                \
-    if (GET_FP_CAUSE(env->fpu->fcr31) & FP_INVALID)                \
-        DT2 = FLOAT_QNAN64;                                        \
-}                         \
-FLOAT_OP(name, s)         \
-{                         \
-    set_float_exception_flags(0, &env->fpu->fp_status);            \
-    FST2 = float32_ ## name (FST0, FST1, &env->fpu->fp_status);    \
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & FP_INVALID)                \
+        dt2 = FLOAT_QNAN64;                                        \
+    return dt2;                                                    \
+}                                                                  \
+                                                                   \
+uint32_t do_float_ ## name ## _s(uint32_t fst0, uint32_t fst1)     \
+{                                                                  \
+    uint32_t wt2;                                                  \
+                                                                   \
+    set_float_exception_flags(0, &env->active_fpu.fp_status);            \
+    wt2 = float32_ ## name (fst0, fst1, &env->active_fpu.fp_status);     \
     update_fcr31();                                                \
-    if (GET_FP_CAUSE(env->fpu->fcr31) & FP_INVALID)                \
-        WT2 = FLOAT_QNAN32;                                        \
-}                         \
-FLOAT_OP(name, ps)        \
-{                         \
-    set_float_exception_flags(0, &env->fpu->fp_status);            \
-    FST2 = float32_ ## name (FST0, FST1, &env->fpu->fp_status);    \
-    FSTH2 = float32_ ## name (FSTH0, FSTH1, &env->fpu->fp_status); \
-    update_fcr31();       \
-    if (GET_FP_CAUSE(env->fpu->fcr31) & FP_INVALID) {              \
-        WT2 = FLOAT_QNAN32;                                        \
-        WTH2 = FLOAT_QNAN32;                                       \
-    }                     \
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & FP_INVALID)                \
+        wt2 = FLOAT_QNAN32;                                        \
+    return wt2;                                                    \
+}                                                                  \
+                                                                   \
+uint64_t do_float_ ## name ## _ps(uint64_t fdt0, uint64_t fdt1)    \
+{                                                                  \
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;                             \
+    uint32_t fsth0 = fdt0 >> 32;                                   \
+    uint32_t fst1 = fdt1 & 0XFFFFFFFF;                             \
+    uint32_t fsth1 = fdt1 >> 32;                                   \
+    uint32_t wt2;                                                  \
+    uint32_t wth2;                                                 \
+                                                                   \
+    set_float_exception_flags(0, &env->active_fpu.fp_status);            \
+    wt2 = float32_ ## name (fst0, fst1, &env->active_fpu.fp_status);     \
+    wth2 = float32_ ## name (fsth0, fsth1, &env->active_fpu.fp_status);  \
+    update_fcr31();                                                \
+    if (GET_FP_CAUSE(env->active_fpu.fcr31) & FP_INVALID) {              \
+        wt2 = FLOAT_QNAN32;                                        \
+        wth2 = FLOAT_QNAN32;                                       \
+    }                                                              \
+    return ((uint64_t)wth2 << 32) | wt2;                           \
 }
+
 FLOAT_BINOP(add)
 FLOAT_BINOP(sub)
 FLOAT_BINOP(mul)
@@ -2502,146 +2570,210 @@ FLOAT_BINOP(div)
 #undef FLOAT_BINOP
 
 /* ternary operations */
-#define FLOAT_TERNOP(name1, name2) \
-FLOAT_OP(name1 ## name2, d)        \
-{                                  \
-    FDT0 = float64_ ## name1 (FDT0, FDT1, &env->fpu->fp_status);    \
-    FDT2 = float64_ ## name2 (FDT0, FDT2, &env->fpu->fp_status);    \
-}                                  \
-FLOAT_OP(name1 ## name2, s)        \
-{                                  \
-    FST0 = float32_ ## name1 (FST0, FST1, &env->fpu->fp_status);    \
-    FST2 = float32_ ## name2 (FST0, FST2, &env->fpu->fp_status);    \
-}                                  \
-FLOAT_OP(name1 ## name2, ps)       \
-{                                  \
-    FST0 = float32_ ## name1 (FST0, FST1, &env->fpu->fp_status);    \
-    FSTH0 = float32_ ## name1 (FSTH0, FSTH1, &env->fpu->fp_status); \
-    FST2 = float32_ ## name2 (FST0, FST2, &env->fpu->fp_status);    \
-    FSTH2 = float32_ ## name2 (FSTH0, FSTH2, &env->fpu->fp_status); \
+#define FLOAT_TERNOP(name1, name2)                                        \
+uint64_t do_float_ ## name1 ## name2 ## _d(uint64_t fdt0, uint64_t fdt1,  \
+                                           uint64_t fdt2)                 \
+{                                                                         \
+    fdt0 = float64_ ## name1 (fdt0, fdt1, &env->active_fpu.fp_status);          \
+    return float64_ ## name2 (fdt0, fdt2, &env->active_fpu.fp_status);          \
+}                                                                         \
+                                                                          \
+uint32_t do_float_ ## name1 ## name2 ## _s(uint32_t fst0, uint32_t fst1,  \
+                                           uint32_t fst2)                 \
+{                                                                         \
+    fst0 = float32_ ## name1 (fst0, fst1, &env->active_fpu.fp_status);          \
+    return float32_ ## name2 (fst0, fst2, &env->active_fpu.fp_status);          \
+}                                                                         \
+                                                                          \
+uint64_t do_float_ ## name1 ## name2 ## _ps(uint64_t fdt0, uint64_t fdt1, \
+                                            uint64_t fdt2)                \
+{                                                                         \
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;                                    \
+    uint32_t fsth0 = fdt0 >> 32;                                          \
+    uint32_t fst1 = fdt1 & 0XFFFFFFFF;                                    \
+    uint32_t fsth1 = fdt1 >> 32;                                          \
+    uint32_t fst2 = fdt2 & 0XFFFFFFFF;                                    \
+    uint32_t fsth2 = fdt2 >> 32;                                          \
+                                                                          \
+    fst0 = float32_ ## name1 (fst0, fst1, &env->active_fpu.fp_status);          \
+    fsth0 = float32_ ## name1 (fsth0, fsth1, &env->active_fpu.fp_status);       \
+    fst2 = float32_ ## name2 (fst0, fst2, &env->active_fpu.fp_status);          \
+    fsth2 = float32_ ## name2 (fsth0, fsth2, &env->active_fpu.fp_status);       \
+    return ((uint64_t)fsth2 << 32) | fst2;                                \
 }
+
 FLOAT_TERNOP(mul, add)
 FLOAT_TERNOP(mul, sub)
 #undef FLOAT_TERNOP
 
 /* negated ternary operations */
-#define FLOAT_NTERNOP(name1, name2) \
-FLOAT_OP(n ## name1 ## name2, d)    \
-{                                   \
-    FDT0 = float64_ ## name1 (FDT0, FDT1, &env->fpu->fp_status);    \
-    FDT2 = float64_ ## name2 (FDT0, FDT2, &env->fpu->fp_status);    \
-    FDT2 = float64_chs(FDT2);       \
-}                                   \
-FLOAT_OP(n ## name1 ## name2, s)    \
-{                                   \
-    FST0 = float32_ ## name1 (FST0, FST1, &env->fpu->fp_status);    \
-    FST2 = float32_ ## name2 (FST0, FST2, &env->fpu->fp_status);    \
-    FST2 = float32_chs(FST2);       \
-}                                   \
-FLOAT_OP(n ## name1 ## name2, ps)   \
-{                                   \
-    FST0 = float32_ ## name1 (FST0, FST1, &env->fpu->fp_status);    \
-    FSTH0 = float32_ ## name1 (FSTH0, FSTH1, &env->fpu->fp_status); \
-    FST2 = float32_ ## name2 (FST0, FST2, &env->fpu->fp_status);    \
-    FSTH2 = float32_ ## name2 (FSTH0, FSTH2, &env->fpu->fp_status); \
-    FST2 = float32_chs(FST2);       \
-    FSTH2 = float32_chs(FSTH2);     \
+#define FLOAT_NTERNOP(name1, name2)                                       \
+uint64_t do_float_n ## name1 ## name2 ## _d(uint64_t fdt0, uint64_t fdt1, \
+                                           uint64_t fdt2)                 \
+{                                                                         \
+    fdt0 = float64_ ## name1 (fdt0, fdt1, &env->active_fpu.fp_status);          \
+    fdt2 = float64_ ## name2 (fdt0, fdt2, &env->active_fpu.fp_status);          \
+    return float64_chs(fdt2);                                             \
+}                                                                         \
+                                                                          \
+uint32_t do_float_n ## name1 ## name2 ## _s(uint32_t fst0, uint32_t fst1, \
+                                           uint32_t fst2)                 \
+{                                                                         \
+    fst0 = float32_ ## name1 (fst0, fst1, &env->active_fpu.fp_status);          \
+    fst2 = float32_ ## name2 (fst0, fst2, &env->active_fpu.fp_status);          \
+    return float32_chs(fst2);                                             \
+}                                                                         \
+                                                                          \
+uint64_t do_float_n ## name1 ## name2 ## _ps(uint64_t fdt0, uint64_t fdt1,\
+                                           uint64_t fdt2)                 \
+{                                                                         \
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;                                    \
+    uint32_t fsth0 = fdt0 >> 32;                                          \
+    uint32_t fst1 = fdt1 & 0XFFFFFFFF;                                    \
+    uint32_t fsth1 = fdt1 >> 32;                                          \
+    uint32_t fst2 = fdt2 & 0XFFFFFFFF;                                    \
+    uint32_t fsth2 = fdt2 >> 32;                                          \
+                                                                          \
+    fst0 = float32_ ## name1 (fst0, fst1, &env->active_fpu.fp_status);          \
+    fsth0 = float32_ ## name1 (fsth0, fsth1, &env->active_fpu.fp_status);       \
+    fst2 = float32_ ## name2 (fst0, fst2, &env->active_fpu.fp_status);          \
+    fsth2 = float32_ ## name2 (fsth0, fsth2, &env->active_fpu.fp_status);       \
+    fst2 = float32_chs(fst2);                                             \
+    fsth2 = float32_chs(fsth2);                                           \
+    return ((uint64_t)fsth2 << 32) | fst2;                                \
 }
+
 FLOAT_NTERNOP(mul, add)
 FLOAT_NTERNOP(mul, sub)
 #undef FLOAT_NTERNOP
 
 /* MIPS specific binary operations */
-FLOAT_OP(recip2, d)
+uint64_t do_float_recip2_d(uint64_t fdt0, uint64_t fdt2)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_mul(FDT0, FDT2, &env->fpu->fp_status);
-    FDT2 = float64_chs(float64_sub(FDT2, FLOAT_ONE64, &env->fpu->fp_status));
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_mul(fdt0, fdt2, &env->active_fpu.fp_status);
+    fdt2 = float64_chs(float64_sub(fdt2, FLOAT_ONE64, &env->active_fpu.fp_status));
     update_fcr31();
-}
-FLOAT_OP(recip2, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_mul(FST0, FST2, &env->fpu->fp_status);
-    FST2 = float32_chs(float32_sub(FST2, FLOAT_ONE32, &env->fpu->fp_status));
-    update_fcr31();
-}
-FLOAT_OP(recip2, ps)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_mul(FST0, FST2, &env->fpu->fp_status);
-    FSTH2 = float32_mul(FSTH0, FSTH2, &env->fpu->fp_status);
-    FST2 = float32_chs(float32_sub(FST2, FLOAT_ONE32, &env->fpu->fp_status));
-    FSTH2 = float32_chs(float32_sub(FSTH2, FLOAT_ONE32, &env->fpu->fp_status));
-    update_fcr31();
+    return fdt2;
 }
 
-FLOAT_OP(rsqrt2, d)
+uint32_t do_float_recip2_s(uint32_t fst0, uint32_t fst2)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FDT2 = float64_mul(FDT0, FDT2, &env->fpu->fp_status);
-    FDT2 = float64_sub(FDT2, FLOAT_ONE64, &env->fpu->fp_status);
-    FDT2 = float64_chs(float64_div(FDT2, FLOAT_TWO64, &env->fpu->fp_status));
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_mul(fst0, fst2, &env->active_fpu.fp_status);
+    fst2 = float32_chs(float32_sub(fst2, FLOAT_ONE32, &env->active_fpu.fp_status));
     update_fcr31();
-}
-FLOAT_OP(rsqrt2, s)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_mul(FST0, FST2, &env->fpu->fp_status);
-    FST2 = float32_sub(FST2, FLOAT_ONE32, &env->fpu->fp_status);
-    FST2 = float32_chs(float32_div(FST2, FLOAT_TWO32, &env->fpu->fp_status));
-    update_fcr31();
-}
-FLOAT_OP(rsqrt2, ps)
-{
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_mul(FST0, FST2, &env->fpu->fp_status);
-    FSTH2 = float32_mul(FSTH0, FSTH2, &env->fpu->fp_status);
-    FST2 = float32_sub(FST2, FLOAT_ONE32, &env->fpu->fp_status);
-    FSTH2 = float32_sub(FSTH2, FLOAT_ONE32, &env->fpu->fp_status);
-    FST2 = float32_chs(float32_div(FST2, FLOAT_TWO32, &env->fpu->fp_status));
-    FSTH2 = float32_chs(float32_div(FSTH2, FLOAT_TWO32, &env->fpu->fp_status));
-    update_fcr31();
+    return fst2;
 }
 
-FLOAT_OP(addr, ps)
+uint64_t do_float_recip2_ps(uint64_t fdt0, uint64_t fdt2)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_add (FST0, FSTH0, &env->fpu->fp_status);
-    FSTH2 = float32_add (FST1, FSTH1, &env->fpu->fp_status);
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;
+    uint32_t fsth0 = fdt0 >> 32;
+    uint32_t fst2 = fdt2 & 0XFFFFFFFF;
+    uint32_t fsth2 = fdt2 >> 32;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_mul(fst0, fst2, &env->active_fpu.fp_status);
+    fsth2 = float32_mul(fsth0, fsth2, &env->active_fpu.fp_status);
+    fst2 = float32_chs(float32_sub(fst2, FLOAT_ONE32, &env->active_fpu.fp_status));
+    fsth2 = float32_chs(float32_sub(fsth2, FLOAT_ONE32, &env->active_fpu.fp_status));
     update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
 }
 
-FLOAT_OP(mulr, ps)
+uint64_t do_float_rsqrt2_d(uint64_t fdt0, uint64_t fdt2)
 {
-    set_float_exception_flags(0, &env->fpu->fp_status);
-    FST2 = float32_mul (FST0, FSTH0, &env->fpu->fp_status);
-    FSTH2 = float32_mul (FST1, FSTH1, &env->fpu->fp_status);
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fdt2 = float64_mul(fdt0, fdt2, &env->active_fpu.fp_status);
+    fdt2 = float64_sub(fdt2, FLOAT_ONE64, &env->active_fpu.fp_status);
+    fdt2 = float64_chs(float64_div(fdt2, FLOAT_TWO64, &env->active_fpu.fp_status));
     update_fcr31();
+    return fdt2;
+}
+
+uint32_t do_float_rsqrt2_s(uint32_t fst0, uint32_t fst2)
+{
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_mul(fst0, fst2, &env->active_fpu.fp_status);
+    fst2 = float32_sub(fst2, FLOAT_ONE32, &env->active_fpu.fp_status);
+    fst2 = float32_chs(float32_div(fst2, FLOAT_TWO32, &env->active_fpu.fp_status));
+    update_fcr31();
+    return fst2;
+}
+
+uint64_t do_float_rsqrt2_ps(uint64_t fdt0, uint64_t fdt2)
+{
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;
+    uint32_t fsth0 = fdt0 >> 32;
+    uint32_t fst2 = fdt2 & 0XFFFFFFFF;
+    uint32_t fsth2 = fdt2 >> 32;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_mul(fst0, fst2, &env->active_fpu.fp_status);
+    fsth2 = float32_mul(fsth0, fsth2, &env->active_fpu.fp_status);
+    fst2 = float32_sub(fst2, FLOAT_ONE32, &env->active_fpu.fp_status);
+    fsth2 = float32_sub(fsth2, FLOAT_ONE32, &env->active_fpu.fp_status);
+    fst2 = float32_chs(float32_div(fst2, FLOAT_TWO32, &env->active_fpu.fp_status));
+    fsth2 = float32_chs(float32_div(fsth2, FLOAT_TWO32, &env->active_fpu.fp_status));
+    update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
+}
+
+uint64_t do_float_addr_ps(uint64_t fdt0, uint64_t fdt1)
+{
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;
+    uint32_t fsth0 = fdt0 >> 32;
+    uint32_t fst1 = fdt1 & 0XFFFFFFFF;
+    uint32_t fsth1 = fdt1 >> 32;
+    uint32_t fst2;
+    uint32_t fsth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_add (fst0, fsth0, &env->active_fpu.fp_status);
+    fsth2 = float32_add (fst1, fsth1, &env->active_fpu.fp_status);
+    update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
+}
+
+uint64_t do_float_mulr_ps(uint64_t fdt0, uint64_t fdt1)
+{
+    uint32_t fst0 = fdt0 & 0XFFFFFFFF;
+    uint32_t fsth0 = fdt0 >> 32;
+    uint32_t fst1 = fdt1 & 0XFFFFFFFF;
+    uint32_t fsth1 = fdt1 >> 32;
+    uint32_t fst2;
+    uint32_t fsth2;
+
+    set_float_exception_flags(0, &env->active_fpu.fp_status);
+    fst2 = float32_mul (fst0, fsth0, &env->active_fpu.fp_status);
+    fsth2 = float32_mul (fst1, fsth1, &env->active_fpu.fp_status);
+    update_fcr31();
+    return ((uint64_t)fsth2 << 32) | fst2;
 }
 
 /* compare operations */
-#define FOP_COND_D(op, cond)                   \
-void do_cmp_d_ ## op (long cc)                 \
-{                                              \
-    int c = cond;                              \
-    update_fcr31();                            \
-    if (c)                                     \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
-}                                              \
-void do_cmpabs_d_ ## op (long cc)              \
-{                                              \
-    int c;                                     \
-    FDT0 = float64_abs(FDT0);                  \
-    FDT1 = float64_abs(FDT1);                  \
-    c = cond;                                  \
-    update_fcr31();                            \
-    if (c)                                     \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
+#define FOP_COND_D(op, cond)                                   \
+void do_cmp_d_ ## op (uint64_t fdt0, uint64_t fdt1, int cc)    \
+{                                                              \
+    int c = cond;                                              \
+    update_fcr31();                                            \
+    if (c)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                      \
+    else                                                       \
+        CLEAR_FP_COND(cc, env->active_fpu);                    \
+}                                                              \
+void do_cmpabs_d_ ## op (uint64_t fdt0, uint64_t fdt1, int cc) \
+{                                                              \
+    int c;                                                     \
+    fdt0 = float64_abs(fdt0);                                  \
+    fdt1 = float64_abs(fdt1);                                  \
+    c = cond;                                                  \
+    update_fcr31();                                            \
+    if (c)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                      \
+    else                                                       \
+        CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
 int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
@@ -2660,46 +2792,46 @@ int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
 
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_D(f,   (float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status), 0))
-FOP_COND_D(un,  float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status))
-FOP_COND_D(eq,  !float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status) && float64_eq(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ueq, float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status)  || float64_eq(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(olt, !float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status) && float64_lt(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ult, float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status)  || float64_lt(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ole, !float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status) && float64_le(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ule, float64_is_unordered(0, FDT1, FDT0, &env->fpu->fp_status)  || float64_le(FDT0, FDT1, &env->fpu->fp_status))
+FOP_COND_D(f,   (float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status), 0))
+FOP_COND_D(un,  float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status))
+FOP_COND_D(eq,  !float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status) && float64_eq(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ueq, float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_eq(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(olt, !float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status) && float64_lt(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ult, float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_lt(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ole, !float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status) && float64_le(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ule, float64_is_unordered(0, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_le(fdt0, fdt1, &env->active_fpu.fp_status))
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_D(sf,  (float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status), 0))
-FOP_COND_D(ngle,float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status))
-FOP_COND_D(seq, !float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status) && float64_eq(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ngl, float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status)  || float64_eq(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(lt,  !float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status) && float64_lt(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(nge, float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status)  || float64_lt(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(le,  !float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status) && float64_le(FDT0, FDT1, &env->fpu->fp_status))
-FOP_COND_D(ngt, float64_is_unordered(1, FDT1, FDT0, &env->fpu->fp_status)  || float64_le(FDT0, FDT1, &env->fpu->fp_status))
+FOP_COND_D(sf,  (float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status), 0))
+FOP_COND_D(ngle,float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status))
+FOP_COND_D(seq, !float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status) && float64_eq(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ngl, float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_eq(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(lt,  !float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status) && float64_lt(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(nge, float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_lt(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(le,  !float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status) && float64_le(fdt0, fdt1, &env->active_fpu.fp_status))
+FOP_COND_D(ngt, float64_is_unordered(1, fdt1, fdt0, &env->active_fpu.fp_status)  || float64_le(fdt0, fdt1, &env->active_fpu.fp_status))
 
-#define FOP_COND_S(op, cond)                   \
-void do_cmp_s_ ## op (long cc)                 \
-{                                              \
-    int c = cond;                              \
-    update_fcr31();                            \
-    if (c)                                     \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
-}                                              \
-void do_cmpabs_s_ ## op (long cc)              \
-{                                              \
-    int c;                                     \
-    FST0 = float32_abs(FST0);                  \
-    FST1 = float32_abs(FST1);                  \
-    c = cond;                                  \
-    update_fcr31();                            \
-    if (c)                                     \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
+#define FOP_COND_S(op, cond)                                   \
+void do_cmp_s_ ## op (uint32_t fst0, uint32_t fst1, int cc)    \
+{                                                              \
+    int c = cond;                                              \
+    update_fcr31();                                            \
+    if (c)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                      \
+    else                                                       \
+        CLEAR_FP_COND(cc, env->active_fpu);                    \
+}                                                              \
+void do_cmpabs_s_ ## op (uint32_t fst0, uint32_t fst1, int cc) \
+{                                                              \
+    int c;                                                     \
+    fst0 = float32_abs(fst0);                                  \
+    fst1 = float32_abs(fst1);                                  \
+    c = cond;                                                  \
+    update_fcr31();                                            \
+    if (c)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                      \
+    else                                                       \
+        CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
 flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
@@ -2718,93 +2850,98 @@ flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
 
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_S(f,   (float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status), 0))
-FOP_COND_S(un,  float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status))
-FOP_COND_S(eq,  !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status) && float32_eq(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ueq, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)  || float32_eq(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(olt, !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status) && float32_lt(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ult, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)  || float32_lt(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ole, !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status) && float32_le(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ule, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)  || float32_le(FST0, FST1, &env->fpu->fp_status))
+FOP_COND_S(f,   (float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status), 0))
+FOP_COND_S(un,  float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status))
+FOP_COND_S(eq,  !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status) && float32_eq(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ueq, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)  || float32_eq(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(olt, !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status) && float32_lt(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ult, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)  || float32_lt(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ole, !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status) && float32_le(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ule, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)  || float32_le(fst0, fst1, &env->active_fpu.fp_status))
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_S(sf,  (float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status), 0))
-FOP_COND_S(ngle,float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status))
-FOP_COND_S(seq, !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status) && float32_eq(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ngl, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)  || float32_eq(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(lt,  !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status) && float32_lt(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(nge, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)  || float32_lt(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(le,  !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status) && float32_le(FST0, FST1, &env->fpu->fp_status))
-FOP_COND_S(ngt, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)  || float32_le(FST0, FST1, &env->fpu->fp_status))
+FOP_COND_S(sf,  (float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status), 0))
+FOP_COND_S(ngle,float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status))
+FOP_COND_S(seq, !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status) && float32_eq(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ngl, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)  || float32_eq(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(lt,  !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status) && float32_lt(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(nge, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)  || float32_lt(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(le,  !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status) && float32_le(fst0, fst1, &env->active_fpu.fp_status))
+FOP_COND_S(ngt, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)  || float32_le(fst0, fst1, &env->active_fpu.fp_status))
 
-#define FOP_COND_PS(op, condl, condh)          \
-void do_cmp_ps_ ## op (long cc)                \
-{                                              \
-    int cl = condl;                            \
-    int ch = condh;                            \
-    update_fcr31();                            \
-    if (cl)                                    \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
-    if (ch)                                    \
-        SET_FP_COND(cc + 1, env->fpu);         \
-    else                                       \
-        CLEAR_FP_COND(cc + 1, env->fpu);       \
-}                                              \
-void do_cmpabs_ps_ ## op (long cc)             \
-{                                              \
-    int cl, ch;                                \
-    FST0 = float32_abs(FST0);                  \
-    FSTH0 = float32_abs(FSTH0);                \
-    FST1 = float32_abs(FST1);                  \
-    FSTH1 = float32_abs(FSTH1);                \
-    cl = condl;                                \
-    ch = condh;                                \
-    update_fcr31();                            \
-    if (cl)                                    \
-        SET_FP_COND(cc, env->fpu);             \
-    else                                       \
-        CLEAR_FP_COND(cc, env->fpu);           \
-    if (ch)                                    \
-        SET_FP_COND(cc + 1, env->fpu);         \
-    else                                       \
-        CLEAR_FP_COND(cc + 1, env->fpu);       \
+#define FOP_COND_PS(op, condl, condh)                           \
+void do_cmp_ps_ ## op (uint64_t fdt0, uint64_t fdt1, int cc)    \
+{                                                               \
+    uint32_t fst0 = float32_abs(fdt0 & 0XFFFFFFFF);             \
+    uint32_t fsth0 = float32_abs(fdt0 >> 32);                   \
+    uint32_t fst1 = float32_abs(fdt1 & 0XFFFFFFFF);             \
+    uint32_t fsth1 = float32_abs(fdt1 >> 32);                   \
+    int cl = condl;                                             \
+    int ch = condh;                                             \
+                                                                \
+    update_fcr31();                                             \
+    if (cl)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                       \
+    else                                                        \
+        CLEAR_FP_COND(cc, env->active_fpu);                     \
+    if (ch)                                                     \
+        SET_FP_COND(cc + 1, env->active_fpu);                   \
+    else                                                        \
+        CLEAR_FP_COND(cc + 1, env->active_fpu);                 \
+}                                                               \
+void do_cmpabs_ps_ ## op (uint64_t fdt0, uint64_t fdt1, int cc) \
+{                                                               \
+    uint32_t fst0 = float32_abs(fdt0 & 0XFFFFFFFF);             \
+    uint32_t fsth0 = float32_abs(fdt0 >> 32);                   \
+    uint32_t fst1 = float32_abs(fdt1 & 0XFFFFFFFF);             \
+    uint32_t fsth1 = float32_abs(fdt1 >> 32);                   \
+    int cl = condl;                                             \
+    int ch = condh;                                             \
+                                                                \
+    update_fcr31();                                             \
+    if (cl)                                                     \
+        SET_FP_COND(cc, env->active_fpu);                       \
+    else                                                        \
+        CLEAR_FP_COND(cc, env->active_fpu);                     \
+    if (ch)                                                     \
+        SET_FP_COND(cc + 1, env->active_fpu);                   \
+    else                                                        \
+        CLEAR_FP_COND(cc + 1, env->active_fpu);                 \
 }
 
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_PS(f,   (float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status), 0),
-                 (float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status), 0))
-FOP_COND_PS(un,  float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status),
-                 float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status))
-FOP_COND_PS(eq,  !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)   && float32_eq(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status) && float32_eq(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ueq, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)    || float32_eq(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_eq(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(olt, !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)   && float32_lt(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status) && float32_lt(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ult, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)    || float32_lt(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_lt(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ole, !float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)   && float32_le(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status) && float32_le(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ule, float32_is_unordered(0, FST1, FST0, &env->fpu->fp_status)    || float32_le(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(0, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_le(FSTH0, FSTH1, &env->fpu->fp_status))
+FOP_COND_PS(f,   (float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status), 0),
+                 (float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status), 0))
+FOP_COND_PS(un,  float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status),
+                 float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status))
+FOP_COND_PS(eq,  !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)   && float32_eq(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status) && float32_eq(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ueq, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)    || float32_eq(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_eq(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(olt, !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)   && float32_lt(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status) && float32_lt(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ult, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)    || float32_lt(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_lt(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ole, !float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)   && float32_le(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status) && float32_le(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ule, float32_is_unordered(0, fst1, fst0, &env->active_fpu.fp_status)    || float32_le(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(0, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_le(fsth0, fsth1, &env->active_fpu.fp_status))
 /* NOTE: the comma operator will make "cond" to eval to false,
  * but float*_is_unordered() is still called. */
-FOP_COND_PS(sf,  (float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status), 0),
-                 (float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status), 0))
-FOP_COND_PS(ngle,float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status),
-                 float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status))
-FOP_COND_PS(seq, !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)   && float32_eq(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status) && float32_eq(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ngl, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)    || float32_eq(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_eq(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(lt,  !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)   && float32_lt(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status) && float32_lt(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(nge, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)    || float32_lt(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_lt(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(le,  !float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)   && float32_le(FST0, FST1, &env->fpu->fp_status),
-                 !float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status) && float32_le(FSTH0, FSTH1, &env->fpu->fp_status))
-FOP_COND_PS(ngt, float32_is_unordered(1, FST1, FST0, &env->fpu->fp_status)    || float32_le(FST0, FST1, &env->fpu->fp_status),
-                 float32_is_unordered(1, FSTH1, FSTH0, &env->fpu->fp_status)  || float32_le(FSTH0, FSTH1, &env->fpu->fp_status))
+FOP_COND_PS(sf,  (float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status), 0),
+                 (float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status), 0))
+FOP_COND_PS(ngle,float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status),
+                 float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status))
+FOP_COND_PS(seq, !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)   && float32_eq(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status) && float32_eq(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ngl, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)    || float32_eq(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_eq(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(lt,  !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)   && float32_lt(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status) && float32_lt(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(nge, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)    || float32_lt(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_lt(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(le,  !float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)   && float32_le(fst0, fst1, &env->active_fpu.fp_status),
+                 !float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status) && float32_le(fsth0, fsth1, &env->active_fpu.fp_status))
+FOP_COND_PS(ngt, float32_is_unordered(1, fst1, fst0, &env->active_fpu.fp_status)    || float32_le(fst0, fst1, &env->active_fpu.fp_status),
+                 float32_is_unordered(1, fsth1, fsth0, &env->active_fpu.fp_status)  || float32_le(fsth0, fsth1, &env->active_fpu.fp_status))

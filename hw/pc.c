@@ -32,6 +32,7 @@
 #include "smbus.h"
 #include "boards.h"
 #include "console.h"
+#include "fw_cfg.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -44,6 +45,7 @@
 
 /* Leave a chunk of memory at the top of RAM for the BIOS ACPI tables.  */
 #define ACPI_DATA_SIZE       0x10000
+#define BIOS_CFG_IOPORT 0x510
 
 #define MAX_IDE_BUS 2
 
@@ -76,7 +78,7 @@ uint64_t cpu_get_tsc(CPUX86State *env)
     /* Note: when using kqemu, it is more logical to return the host TSC
        because kqemu does not trap the RDTSC instruction for
        performance reasons */
-#if USE_KQEMU
+#ifdef USE_KQEMU
     if (env->kqemu_enabled) {
         return cpu_get_real_ticks();
     } else
@@ -118,13 +120,17 @@ static void pic_irq_request(void *opaque, int irq, int level)
 {
     CPUState *env = first_cpu;
 
-    if (!level)
-        return;
-
-    while (env) {
-        if (apic_accept_pic_intr(env))
-            apic_local_deliver(env, APIC_LINT0);
-        env = env->next_cpu;
+    if (env->apic_state) {
+        while (env) {
+            if (apic_accept_pic_intr(env))
+                apic_deliver_pic_intr(env, level);
+            env = env->next_cpu;
+        }
+    } else {
+        if (level)
+            cpu_interrupt(env, CPU_INTERRUPT_HARD);
+        else
+            cpu_reset_interrupt(env, CPU_INTERRUPT_HARD);
     }
 }
 
@@ -412,6 +418,8 @@ static void bochs_bios_write(void *opaque, uint32_t addr, uint32_t val)
 
 static void bochs_bios_init(void)
 {
+    void *fw_cfg;
+
     register_ioport_write(0x400, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x401, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x402, 1, 1, bochs_bios_write, NULL);
@@ -422,34 +430,53 @@ static void bochs_bios_init(void)
     register_ioport_write(0x502, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x500, 1, 1, bochs_bios_write, NULL);
     register_ioport_write(0x503, 1, 1, bochs_bios_write, NULL);
+
+    fw_cfg = fw_cfg_init(BIOS_CFG_IOPORT, BIOS_CFG_IOPORT + 1, 0, 0);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);
+    fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
 }
 
 /* Generate an initial boot sector which sets state and jump to
    a specified vector */
-static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
+static void generate_bootsect(uint8_t *option_rom,
+                              uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
 {
-    uint8_t bootsect[512], *p;
+    uint8_t rom[512], *p, *reloc;
+    uint8_t sum;
     int i;
-    int hda;
 
-    hda = drive_get_index(IF_IDE, 0, 0);
-    if (hda == -1) {
-	fprintf(stderr, "A disk image must be given for 'hda' when booting "
-		"a Linux kernel\n");
-	exit(1);
-    }
+    memset(rom, 0, sizeof(rom));
 
-    memset(bootsect, 0, sizeof(bootsect));
+    p = rom;
+    /* Make sure we have an option rom signature */
+    *p++ = 0x55;
+    *p++ = 0xaa;
 
-    /* Copy the MSDOS partition table if possible */
-    bdrv_read(drives_table[hda].bdrv, 0, bootsect, 1);
+    /* ROM size in sectors*/
+    *p++ = 1;
 
-    /* Make sure we have a partition signature */
-    bootsect[510] = 0x55;
-    bootsect[511] = 0xaa;
+    /* Hook int19 */
 
+    *p++ = 0x50;		/* push ax */
+    *p++ = 0x1e;		/* push ds */
+    *p++ = 0x31; *p++ = 0xc0;	/* xor ax, ax */
+    *p++ = 0x8e; *p++ = 0xd8;	/* mov ax, ds */
+
+    *p++ = 0xc7; *p++ = 0x06;   /* movvw _start,0x64 */
+    *p++ = 0x64; *p++ = 0x00;
+    reloc = p;
+    *p++ = 0x00; *p++ = 0x00;
+
+    *p++ = 0x8c; *p++ = 0x0e;   /* mov cs,0x66 */
+    *p++ = 0x66; *p++ = 0x00;
+
+    *p++ = 0x1f;		/* pop ds */
+    *p++ = 0x58;		/* pop ax */
+    *p++ = 0xcb;		/* lret */
+    
     /* Actual code */
-    p = bootsect;
+    *reloc = (p - rom);
+
     *p++ = 0xfa;		/* CLI */
     *p++ = 0xfc;		/* CLD */
 
@@ -479,7 +506,13 @@ static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
     *p++ = segs[1];		/* CS */
     *p++ = segs[1] >> 8;
 
-    bdrv_set_boot_sector(drives_table[hda].bdrv, bootsect, sizeof(bootsect));
+    /* sign rom */
+    sum = 0;
+    for (i = 0; i < (sizeof(rom) - 1); i++)
+        sum += rom[i];
+    rom[sizeof(rom) - 1] = -sum;
+
+    memcpy(option_rom, rom, sizeof(rom));
 }
 
 static long get_file_size(FILE *f)
@@ -496,7 +529,8 @@ static long get_file_size(FILE *f)
     return size;
 }
 
-static void load_linux(const char *kernel_filename,
+static void load_linux(uint8_t *option_rom,
+                       const char *kernel_filename,
 		       const char *initrd_filename,
 		       const char *kernel_cmdline)
 {
@@ -550,9 +584,9 @@ static void load_linux(const char *kernel_filename,
 
 #if 0
     fprintf(stderr,
-	    "qemu: real_addr     = %#zx\n"
-	    "qemu: cmdline_addr  = %#zx\n"
-	    "qemu: prot_addr     = %#zx\n",
+	    "qemu: real_addr     = 0x" TARGET_FMT_plx "\n"
+	    "qemu: cmdline_addr  = 0x" TARGET_FMT_plx "\n"
+	    "qemu: prot_addr     = 0x" TARGET_FMT_plx "\n",
 	    real_addr,
 	    cmdline_addr,
 	    prot_addr);
@@ -607,8 +641,8 @@ static void load_linux(const char *kernel_filename,
 	initrd_size = get_file_size(fi);
 	initrd_addr = (initrd_max-initrd_size) & ~4095;
 
-	fprintf(stderr, "qemu: loading initrd (%#x bytes) at %#zx\n",
-		initrd_size, initrd_addr);
+        fprintf(stderr, "qemu: loading initrd (%#x bytes) at 0x" TARGET_FMT_plx
+                "\n", initrd_size, initrd_addr);
 
 	if (!fread_targphys_ok(initrd_addr, initrd_size, fi)) {
 	    fprintf(stderr, "qemu: read error on initial ram disk '%s'\n",
@@ -646,7 +680,7 @@ static void load_linux(const char *kernel_filename,
     memset(gpr, 0, sizeof gpr);
     gpr[4] = cmdline_addr-real_addr-16;	/* SP (-16 is paranoia) */
 
-    generate_bootsect(gpr, seg, 0);
+    generate_bootsect(option_rom, gpr, seg, 0);
 }
 
 static void main_cpu_reset(void *opaque)
@@ -773,14 +807,27 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     vmport_init();
 
     /* allocate RAM */
-    ram_addr = qemu_ram_alloc(ram_size);
-    cpu_register_physical_memory(0, below_4g_mem_size, ram_addr);
+    ram_addr = qemu_ram_alloc(0xa0000);
+    cpu_register_physical_memory(0, 0xa0000, ram_addr);
+
+    /* Allocate, even though we won't register, so we don't break the
+     * phys_ram_base + PA assumption. This range includes vga (0xa0000 - 0xc0000),
+     * and some bios areas, which will be registered later
+     */
+    ram_addr = qemu_ram_alloc(0x100000 - 0xa0000);
+    ram_addr = qemu_ram_alloc(below_4g_mem_size - 0x100000);
+    cpu_register_physical_memory(0x100000,
+                 below_4g_mem_size - 0x100000,
+                 ram_addr);
 
     /* above 4giga memory allocation */
     if (above_4g_mem_size > 0) {
-        cpu_register_physical_memory(0x100000000ULL, above_4g_mem_size,
-                                     ram_addr + below_4g_mem_size);
+        ram_addr = qemu_ram_alloc(above_4g_mem_size);
+        cpu_register_physical_memory(0x100000000ULL,
+                                     above_4g_mem_size,
+                                     ram_addr);
     }
+
 
     /* allocate VGA RAM */
     vga_ram_addr = qemu_ram_alloc(vga_ram_size);
@@ -828,8 +875,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     isa_bios_size = bios_size;
     if (isa_bios_size > (128 * 1024))
         isa_bios_size = 128 * 1024;
-    cpu_register_physical_memory(0xd0000, (192 * 1024) - isa_bios_size,
-                                 IO_MEM_UNASSIGNED);
     cpu_register_physical_memory(0x100000 - isa_bios_size,
                                  isa_bios_size,
                                  (bios_offset + bios_size - isa_bios_size) | IO_MEM_ROM);
@@ -839,6 +884,15 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         int size, offset;
 
         offset = 0;
+        if (linux_boot) {
+            option_rom_offset = qemu_ram_alloc(TARGET_PAGE_SIZE);
+            load_linux(phys_ram_base + option_rom_offset,
+                       kernel_filename, initrd_filename, kernel_cmdline);
+            cpu_register_physical_memory(0xd0000, TARGET_PAGE_SIZE,
+                                         option_rom_offset | IO_MEM_ROM);
+            offset = TARGET_PAGE_SIZE;
+        }
+
         for (i = 0; i < nb_option_roms; i++) {
             size = get_image_size(option_rom[i]);
             if (size < 0) {
@@ -867,9 +921,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                                  bios_size, bios_offset | IO_MEM_ROM);
 
     bochs_bios_init();
-
-    if (linux_boot)
-	load_linux(kernel_filename, initrd_filename, kernel_cmdline);
 
     cpu_irq = qemu_allocate_irqs(pic_irq_request, NULL, 1);
     i8259 = i8259_init(cpu_irq[0]);
@@ -1068,15 +1119,17 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine pc_machine = {
-    "pc",
-    "Standard PC",
-    pc_init_pci,
-    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .name = "pc",
+    .desc = "Standard PC",
+    .init = pc_init_pci,
+    .ram_require = VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .max_cpus = 255,
 };
 
 QEMUMachine isapc_machine = {
-    "isapc",
-    "ISA-only PC",
-    pc_init_isa,
-    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .name = "isapc",
+    .desc = "ISA-only PC",
+    .init = pc_init_isa,
+    .ram_require = VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .max_cpus = 1,
 };

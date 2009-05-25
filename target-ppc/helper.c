@@ -29,6 +29,7 @@
 #include "exec-all.h"
 #include "helper_regs.h"
 #include "qemu-common.h"
+#include "helper.h"
 
 //#define DEBUG_MMU
 //#define DEBUG_BATS
@@ -2124,16 +2125,6 @@ void do_store_sr (CPUPPCState *env, int srnum, target_ulong value)
 }
 #endif /* !defined (CONFIG_USER_ONLY) */
 
-target_ulong ppc_load_xer (CPUPPCState *env)
-{
-    return hreg_load_xer(env);
-}
-
-void ppc_store_xer (CPUPPCState *env, target_ulong value)
-{
-    hreg_store_xer(env, value);
-}
-
 /* GDBstub can read and write MSR... */
 void ppc_store_msr (CPUPPCState *env, target_ulong value)
 {
@@ -2898,19 +2889,6 @@ void ppc_hw_interrupt (CPUPPCState *env)
     }
 }
 #endif /* !CONFIG_USER_ONLY */
-
-void cpu_dump_EA (target_ulong EA)
-{
-    FILE *f;
-
-    if (logfile) {
-        f = logfile;
-    } else {
-        f = stdout;
-        return;
-    }
-    fprintf(f, "Memory access at address " ADDRX "\n", EA);
-}
 
 void cpu_dump_rfi (target_ulong RA, target_ulong msr)
 {

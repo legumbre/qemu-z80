@@ -103,7 +103,7 @@ typedef unsigned char u_int8_t;
 # include <sys/time.h>
 # include <time.h>
 #else
-# if HAVE_SYS_TIME_H
+# ifdef HAVE_SYS_TIME_H
 #  include <sys/time.h>
 # else
 #  include <time.h>
@@ -270,8 +270,8 @@ void lprint _P((const char *, ...));
 # define insque_32 insque
 # define remque_32 remque
 #else
- inline void insque_32 _P((void *, void *));
- inline void remque_32 _P((void *));
+ void insque_32 _P((void *, void *));
+ void remque_32 _P((void *));
 #endif
 
 #ifndef _WIN32

@@ -15,6 +15,7 @@
 #include "sysemu.h"
 #include "boards.h"
 #include "flash.h"
+#include "qemu-log.h"
 
 #ifdef TARGET_WORDS_BIGENDIAN
 #define BIOS_FILENAME "mips_bios.bin"
@@ -34,8 +35,6 @@ static const int ide_irq[2] = { 14, 15 };
 
 static int serial_io[MAX_SERIAL_PORTS] = { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 static int serial_irq[MAX_SERIAL_PORTS] = { 4, 3, 4, 3 };
-
-extern FILE *logfile;
 
 static PITState *pit; /* PIT i8254 */
 
@@ -83,7 +82,8 @@ static void load_kernel (CPUState *env)
     ram_addr_t initrd_offset;
 
     kernel_size = load_elf(loaderparams.kernel_filename, VIRT_TO_PHYS_ADDEND,
-                           &entry, &kernel_low, &kernel_high);
+                           (uint64_t *)&entry, (uint64_t *)&kernel_low,
+                           (uint64_t *)&kernel_high);
     if (kernel_size >= 0) {
         if ((entry & ~0x7fffffffULL) == 0x80000000)
             entry = (int32_t)entry;
@@ -120,15 +120,15 @@ static void load_kernel (CPUState *env)
     /* Store command line.  */
     if (initrd_size > 0) {
         int ret;
-        ret = sprintf(phys_ram_base + (16 << 20) - 256,
+        ret = sprintf((char *)(phys_ram_base + (16 << 20) - 256),
                       "rd_start=0x" TARGET_FMT_lx " rd_size=%li ",
                       PHYS_TO_VIRT((uint32_t)initrd_offset),
                       initrd_size);
-        strcpy (phys_ram_base + (16 << 20) - 256 + ret,
+        strcpy ((char *)(phys_ram_base + (16 << 20) - 256 + ret),
                 loaderparams.kernel_cmdline);
     }
     else {
-        strcpy (phys_ram_base + (16 << 20) - 256,
+        strcpy ((char *)(phys_ram_base + (16 << 20) - 256),
                 loaderparams.kernel_cmdline);
     }
 
@@ -225,7 +225,6 @@ void mips_r4k_init (ram_addr_t ram_size, int vga_ram_size,
     /* Init CPU internal devices */
     cpu_mips_irq_init_cpu(env);
     cpu_mips_clock_init(env);
-    cpu_mips_irqctrl_init();
 
     /* The PIC is attached to the MIPS CPU INT0 pin */
     i8259 = i8259_init(env->irq[2]);
@@ -283,8 +282,9 @@ void mips_r4k_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine mips_machine = {
-    "mips",
-    "mips r4k platform",
-    mips_r4k_init,
-    VGA_RAM_SIZE + BIOS_SIZE,
+    .name = "mips",
+    .desc = "mips r4k platform",
+    .init = mips_r4k_init,
+    .ram_require = VGA_RAM_SIZE + BIOS_SIZE,
+    .nodisk_ok = 1,
 };

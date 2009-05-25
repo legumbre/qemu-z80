@@ -1255,7 +1255,7 @@ static void rtl8139_reset(RTL8139State *s)
     RTL8139TallyCounters_clear(&s->tally_counters);
 }
 
-void RTL8139TallyCounters_clear(RTL8139TallyCounters* counters)
+static void RTL8139TallyCounters_clear(RTL8139TallyCounters* counters)
 {
     counters->TxOk = 0;
     counters->RxOk = 0;
@@ -2001,7 +2001,7 @@ static int rtl8139_cplus_transmit_one(RTL8139State *s)
     while (s->cplus_txbuffer && s->cplus_txbuffer_offset + txsize >= s->cplus_txbuffer_len)
     {
         s->cplus_txbuffer_len += CP_TX_BUFFER_SIZE;
-        s->cplus_txbuffer = realloc(s->cplus_txbuffer, s->cplus_txbuffer_len);
+        s->cplus_txbuffer = qemu_realloc(s->cplus_txbuffer, s->cplus_txbuffer_len);
 
         DEBUG_PRINT(("RTL8139: +++ C+ mode transmission buffer space changed to %d\n", s->cplus_txbuffer_len));
     }
@@ -3356,7 +3356,7 @@ static inline int64_t rtl8139_get_next_tctr_time(RTL8139State *s, int64_t curren
     return next_time;
 }
 
-#if RTL8139_ONBOARD_TIMER
+#ifdef RTL8139_ONBOARD_TIMER
 static void rtl8139_timer(void *opaque)
 {
     RTL8139State *s = opaque;
@@ -3454,10 +3454,9 @@ void pci_rtl8139_init(PCIBus *bus, NICInfo *nd, int devfn)
     s->cplus_txbuffer_len = 0;
     s->cplus_txbuffer_offset = 0;
 
-    /* XXX: instance number ? */
-    register_savevm("rtl8139", 0, 3, rtl8139_save, rtl8139_load, s);
+    register_savevm("rtl8139", -1, 3, rtl8139_save, rtl8139_load, s);
 
-#if RTL8139_ONBOARD_TIMER
+#ifdef RTL8139_ONBOARD_TIMER
     s->timer = qemu_new_timer(vm_clock, rtl8139_timer, s);
 
     qemu_mod_timer(s->timer,

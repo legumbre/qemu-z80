@@ -45,6 +45,8 @@
 #include <malloc.h>
 #endif
 
+#include "qemu_socket.h"
+
 #if defined(_WIN32)
 void *qemu_memalign(size_t alignment, size_t size)
 {
@@ -68,7 +70,14 @@ void qemu_vfree(void *ptr)
 
 #if defined(USE_KQEMU)
 
+#ifdef __OpenBSD__
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/mount.h>
+#else
 #include <sys/vfs.h>
+#endif
+
 #include <sys/mman.h>
 #include <fcntl.h>
 
@@ -76,9 +85,14 @@ static void *kqemu_vmalloc(size_t size)
 {
     static int phys_ram_fd = -1;
     static int phys_ram_size = 0;
+    void *ptr;
+
+#ifdef __OpenBSD__ /* no need (?) for a dummy file on OpenBSD */
+    int map_anon = MAP_ANON;
+#else
+    int map_anon = 0;
     const char *tmpdir;
     char phys_ram_file[1024];
-    void *ptr;
 #ifdef HOST_SOLARIS
     struct statvfs stfs;
 #else
@@ -140,9 +154,10 @@ static void *kqemu_vmalloc(size_t size)
     }
     size = (size + 4095) & ~4095;
     ftruncate(phys_ram_fd, phys_ram_size + size);
+#endif /* !__OpenBSD__ */
     ptr = mmap(NULL,
                size,
-               PROT_WRITE | PROT_READ, MAP_SHARED,
+               PROT_WRITE | PROT_READ, map_anon | MAP_SHARED,
                phys_ram_fd, phys_ram_size);
     if (ptr == MAP_FAILED) {
         fprintf(stderr, "Could not map physical memory\n");
@@ -185,7 +200,7 @@ void *qemu_vmalloc(size_t size)
 #ifdef _BSD
     return valloc(size);
 #else
-    return memalign(4096, size);
+    return memalign(getpagesize(), size);
 #endif
 }
 
@@ -270,3 +285,28 @@ int qemu_gettimeofday(qemu_timeval *tp)
   return 0;
 }
 #endif /* _WIN32 */
+
+
+#ifdef _WIN32
+void socket_set_nonblock(int fd)
+{
+    unsigned long opt = 1;
+    ioctlsocket(fd, FIONBIO, &opt);
+}
+
+int inet_aton(const char *cp, struct in_addr *ia)
+{
+    uint32_t addr = inet_addr(cp);
+    if (addr == 0xffffffff)
+	return 0;
+    ia->s_addr = addr;
+    return 1;
+}
+#else
+void socket_set_nonblock(int fd)
+{
+    int f;
+    f = fcntl(fd, F_GETFL);
+    fcntl(fd, F_SETFL, f | O_NONBLOCK);
+}
+#endif

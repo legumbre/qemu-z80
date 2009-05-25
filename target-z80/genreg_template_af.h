@@ -22,7 +22,7 @@
 
 static inline void glue(gen_movw_v_,REGPAIR)(TCGv v)
 {
-    TCGv tmp1 = tcg_temp_new(TCG_TYPE_TL);
+    TCGv tmp1 = tcg_temp_new();
 
     tcg_gen_ld8u_tl(tmp1, cpu_env,
                     offsetof(CPUState, regs[glue(R_,REGHIGH)]) +
@@ -54,7 +54,7 @@ static inline void glue(gen_movb_v_,REGLOW)(TCGv v)
 
 static inline void glue(glue(gen_movw_,REGPAIR),_v)(TCGv v)
 {
-    TCGv tmp1 = tcg_temp_new(TCG_TYPE_TL);
+    TCGv tmp1 = tcg_temp_new();
 
     tcg_gen_shri_tl(tmp1, v, 8);
     tcg_gen_st8_tl(tmp1, cpu_env,

@@ -61,7 +61,8 @@ static void load_kernel (CPUState *env)
     ram_addr_t initrd_offset;
 
     kernel_size = load_elf(loaderparams.kernel_filename, VIRT_TO_PHYS_ADDEND,
-                           &entry, &kernel_low, &kernel_high);
+                           (uint64_t *)&entry, (uint64_t *)&kernel_low,
+                           (uint64_t *)&kernel_high);
     if (kernel_size >= 0) {
         if ((entry & ~0x7fffffffULL) == 0x80000000)
             entry = (int32_t)entry;
@@ -165,7 +166,6 @@ mips_mipssim_init (ram_addr_t ram_size, int vga_ram_size,
     /* Init CPU internal devices. */
     cpu_mips_irq_init_cpu(env);
     cpu_mips_clock_init(env);
-    cpu_mips_irqctrl_init();
 
     /* Register 64 KB of ISA IO space at 0x1fd00000. */
     isa_mmio_init(0x1fd00000, 0x00010000);
@@ -191,8 +191,9 @@ mips_mipssim_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine mips_mipssim_machine = {
-    "mipssim",
-    "MIPS MIPSsim platform",
-    mips_mipssim_init,
-    BIOS_SIZE + VGA_RAM_SIZE /* unused */,
+    .name = "mipssim",
+    .desc = "MIPS MIPSsim platform",
+    .init = mips_mipssim_init,
+    .ram_require = BIOS_SIZE + VGA_RAM_SIZE /* unused */,
+    .nodisk_ok = 1,
 };

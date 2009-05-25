@@ -159,9 +159,11 @@
 #define HF_MP_MASK           (1 << HF_MP_SHIFT)
 #define HF_EM_MASK           (1 << HF_EM_SHIFT)
 #define HF_TS_MASK           (1 << HF_TS_SHIFT)
+#define HF_IOPL_MASK         (3 << HF_IOPL_SHIFT)
 #define HF_LMA_MASK          (1 << HF_LMA_SHIFT)
 #define HF_CS64_MASK         (1 << HF_CS64_SHIFT)
 #define HF_OSFXSR_MASK       (1 << HF_OSFXSR_SHIFT)
+#define HF_VM_MASK           (1 << HF_VM_SHIFT)
 #define HF_SMM_MASK          (1 << HF_SMM_SHIFT)
 #define HF_SVME_MASK         (1 << HF_SVME_SHIFT)
 #define HF_SVMI_MASK         (1 << HF_SVMI_SHIFT)
@@ -177,6 +179,9 @@
 #define HF2_HIF_MASK          (1 << HF2_HIF_SHIFT) 
 #define HF2_NMI_MASK          (1 << HF2_NMI_SHIFT)
 #define HF2_VINTR_MASK        (1 << HF2_VINTR_SHIFT)
+
+#define CR0_PE_SHIFT 0
+#define CR0_MP_SHIFT 1
 
 #define CR0_PE_MASK  (1 << 0)
 #define CR0_MP_MASK  (1 << 1)
@@ -196,7 +201,8 @@
 #define CR4_PAE_MASK  (1 << 5)
 #define CR4_PGE_MASK  (1 << 7)
 #define CR4_PCE_MASK  (1 << 8)
-#define CR4_OSFXSR_MASK (1 << 9)
+#define CR4_OSFXSR_SHIFT 9
+#define CR4_OSFXSR_MASK (1 << CR4_OSFXSR_SHIFT)
 #define CR4_OSXMMEXCPT_MASK  (1 << 10)
 
 #define PG_PRESENT_BIT	0
@@ -229,6 +235,7 @@
 #define PG_ERROR_RSVD_MASK 0x08
 #define PG_ERROR_I_D_MASK  0x10
 
+#define MSR_IA32_TSC                    0x10
 #define MSR_IA32_APICBASE               0x1b
 #define MSR_IA32_APICBASE_BSP           (1<<8)
 #define MSR_IA32_APICBASE_ENABLE        (1<<11)
@@ -241,6 +248,8 @@
 #define MSR_MCG_CAP                     0x179
 #define MSR_MCG_STATUS                  0x17a
 #define MSR_MCG_CTL                     0x17b
+
+#define MSR_IA32_PERF_STATUS            0x198
 
 #define MSR_PAT                         0x277
 
@@ -296,6 +305,7 @@
 #define CPUID_PBE (1 << 31)
 
 #define CPUID_EXT_SSE3     (1 << 0)
+#define CPUID_EXT_DTES64   (1 << 2)
 #define CPUID_EXT_MONITOR  (1 << 3)
 #define CPUID_EXT_DSCPL    (1 << 4)
 #define CPUID_EXT_VMX      (1 << 5)
@@ -306,8 +316,15 @@
 #define CPUID_EXT_CID      (1 << 10)
 #define CPUID_EXT_CX16     (1 << 13)
 #define CPUID_EXT_XTPR     (1 << 14)
-#define CPUID_EXT_DCA      (1 << 17)
-#define CPUID_EXT_POPCNT   (1 << 22)
+#define CPUID_EXT_PDCM     (1 << 15)
+#define CPUID_EXT_DCA      (1 << 18)
+#define CPUID_EXT_SSE41    (1 << 19)
+#define CPUID_EXT_SSE42    (1 << 20)
+#define CPUID_EXT_X2APIC   (1 << 21)
+#define CPUID_EXT_MOVBE    (1 << 22)
+#define CPUID_EXT_POPCNT   (1 << 23)
+#define CPUID_EXT_XSAVE    (1 << 26)
+#define CPUID_EXT_OSXSAVE  (1 << 27)
 
 #define CPUID_EXT2_SYSCALL (1 << 11)
 #define CPUID_EXT2_MP      (1 << 19)
@@ -332,6 +349,17 @@
 #define CPUID_EXT3_OSVW    (1 << 9)
 #define CPUID_EXT3_IBS     (1 << 10)
 #define CPUID_EXT3_SKINIT  (1 << 12)
+
+#define CPUID_VENDOR_INTEL_1 0x756e6547 /* "Genu" */
+#define CPUID_VENDOR_INTEL_2 0x49656e69 /* "ineI" */
+#define CPUID_VENDOR_INTEL_3 0x6c65746e /* "ntel" */
+
+#define CPUID_VENDOR_AMD_1   0x68747541 /* "Auth" */
+#define CPUID_VENDOR_AMD_2   0x69746e65 /* "enti" */ 
+#define CPUID_VENDOR_AMD_3   0x444d4163 /* "cAMD" */
+
+#define CPUID_MWAIT_IBE     (1 << 1) /* Interrupts can exit capability */
+#define CPUID_MWAIT_EMX     (1 << 0) /* enumeration supported */
 
 #define EXCP00_DIVZ	0
 #define EXCP01_SSTP	1
@@ -536,8 +564,8 @@ typedef struct CPUX86State {
 
     /* sysenter registers */
     uint32_t sysenter_cs;
-    uint32_t sysenter_esp;
-    uint32_t sysenter_eip;
+    target_ulong sysenter_esp;
+    target_ulong sysenter_eip;
     uint64_t efer;
     uint64_t star;
 
@@ -558,6 +586,8 @@ typedef struct CPUX86State {
     target_ulong fmask;
     target_ulong kernelgsbase;
 #endif
+
+    uint64_t tsc;
 
     uint64_t pat;
 
@@ -589,6 +619,10 @@ typedef struct CPUX86State {
     int kqemu_enabled;
     int last_io_time;
 #endif
+
+    /* For KVM */
+    uint64_t interrupt_bitmap[256 / 64];
+
     /* in order to simplify APIC support, we leave this pointer to the
        user */
     struct APICState *apic_state;
@@ -702,6 +736,10 @@ void cpu_smm_update(CPUX86State *env);
 /* will be suppressed */
 void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
 
+void cpu_x86_cpuid(CPUX86State *env, uint32_t index,
+                   uint32_t *eax, uint32_t *ebx,
+                   uint32_t *ecx, uint32_t *edx);
+
 /* used to debug */
 #define X86_DUMP_FPU  0x0001 /* dump FPU state too */
 #define X86_DUMP_CCOP 0x0002 /* dump qemu flag cache */
@@ -724,7 +762,7 @@ static inline int cpu_get_time_fast(void)
 #define cpu_signal_handler cpu_x86_signal_handler
 #define cpu_list x86_cpu_list
 
-#define CPU_SAVE_VERSION 6
+#define CPU_SAVE_VERSION 7
 
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _kernel
@@ -741,8 +779,6 @@ typedef struct CCTable {
     int (*compute_all)(void); /* return all the flags */
     int (*compute_c)(void);  /* return the C flag */
 } CCTable;
-
-extern CCTable cc_table[];
 
 #if defined(CONFIG_USER_ONLY)
 static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)

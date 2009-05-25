@@ -27,23 +27,11 @@
 
 #if defined (TARGET_PPC64)
 /* PowerPC 64 definitions */
-typedef uint64_t ppc_gpr_t;
 #define TARGET_LONG_BITS 64
 #define TARGET_PAGE_BITS 12
 
 #else /* defined (TARGET_PPC64) */
 /* PowerPC 32 definitions */
-#if (HOST_LONG_BITS >= 64)
-/* When using 64 bits temporary registers,
- * we can use 64 bits GPR with no extra cost
- * It's even an optimization as this will prevent
- * the compiler to do unuseful masking in the micro-ops.
- */
-typedef uint64_t ppc_gpr_t;
-#else /* (HOST_LONG_BITS >= 64) */
-typedef uint32_t ppc_gpr_t;
-#endif /* (HOST_LONG_BITS >= 64) */
-
 #define TARGET_LONG_BITS 32
 
 #if defined(TARGET_PPCEMB)
@@ -315,7 +303,7 @@ struct ppc_spr_t {
     void (*hea_read)(void *opaque, int spr_num);
     void (*hea_write)(void *opaque, int spr_num);
 #endif
-    const unsigned char *name;
+    const char *name;
 };
 
 /* Altivec registers (128 bits) */
@@ -541,29 +529,35 @@ struct CPUPPCState {
     /* First are the most commonly used resources
      * during translated code execution
      */
-#if (HOST_LONG_BITS == 32)
+#if TARGET_LONG_BITS > HOST_LONG_BITS
+    target_ulong t0, t1;
+#endif
+     /* XXX: this is a temporary workaround for i386. cf translate.c comment */
+#if (TARGET_LONG_BITS > HOST_LONG_BITS) || defined(HOST_I386)
+    target_ulong t2;
+#endif
+#if !defined(TARGET_PPC64)
     /* temporary fixed-point registers
-     * used to emulate 64 bits registers on 32 bits hosts
+     * used to emulate 64 bits registers on 32 bits targets
      */
-    uint64_t t0, t1, t2;
+    uint64_t t0_64, t1_64, t2_64;
 #endif
     ppc_avr_t avr0, avr1, avr2;
 
     /* general purpose registers */
-    ppc_gpr_t gpr[32];
+    target_ulong gpr[32];
 #if !defined(TARGET_PPC64)
     /* Storage for GPR MSB, used by the SPE extension */
-    ppc_gpr_t gprh[32];
+    target_ulong gprh[32];
 #endif
     /* LR */
     target_ulong lr;
     /* CTR */
     target_ulong ctr;
     /* condition register */
-    uint8_t crf[8];
+    uint32_t crf[8];
     /* XER */
-    /* XXX: We use only 5 fields, but we want to keep the structure aligned */
-    uint8_t xer[8];
+    target_ulong xer;
     /* Reservation address */
     target_ulong reserve;
 
@@ -571,7 +565,7 @@ struct CPUPPCState {
     /* machine state register */
     target_ulong msr;
     /* temporary general purpose registers */
-    ppc_gpr_t tgpr[4]; /* Used to speed-up TLB assist handlers */
+    target_ulong tgpr[4]; /* Used to speed-up TLB assist handlers */
 
     /* Floating point execution context */
     /* temporary float registers */
@@ -624,7 +618,7 @@ struct CPUPPCState {
     ppc_avr_t avr[32];
     uint32_t vscr;
     /* SPE registers */
-    ppc_gpr_t spe_acc;
+    target_ulong spe_acc;
     float_status spe_status;
     uint32_t spe_fscr;
 
@@ -734,15 +728,13 @@ target_ulong do_load_sr (CPUPPCState *env, int srnum);
 #endif
 void do_store_sr (CPUPPCState *env, int srnum, target_ulong value);
 #endif /* !defined(CONFIG_USER_ONLY) */
-target_ulong ppc_load_xer (CPUPPCState *env);
-void ppc_store_xer (CPUPPCState *env, target_ulong value);
 void ppc_store_msr (CPUPPCState *env, target_ulong value);
 
 void cpu_ppc_reset (void *opaque);
 
 void ppc_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
 
-const ppc_def_t *cpu_ppc_find_by_name (const unsigned char *name);
+const ppc_def_t *cpu_ppc_find_by_name (const char *name);
 int cpu_ppc_register_internal (CPUPPCState *env, const ppc_def_t *def);
 
 /* Time-base and decrementer management */
@@ -839,17 +831,27 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 #include "cpu-all.h"
 
 /*****************************************************************************/
-/* Registers definitions */
-#define XER_SO 31
-#define XER_OV 30
-#define XER_CA 29
-#define XER_CMP 8
-#define XER_BC  0
-#define xer_so  env->xer[4]
-#define xer_ov  env->xer[6]
-#define xer_ca  env->xer[2]
-#define xer_cmp env->xer[1]
-#define xer_bc  env->xer[0]
+/* CRF definitions */
+#define CRF_LT        3
+#define CRF_GT        2
+#define CRF_EQ        1
+#define CRF_SO        0
+#define CRF_CH        (1 << 4)
+#define CRF_CL        (1 << 3)
+#define CRF_CH_OR_CL  (1 << 2)
+#define CRF_CH_AND_CL (1 << 1)
+
+/* XER definitions */
+#define XER_SO  31
+#define XER_OV  30
+#define XER_CA  29
+#define XER_CMP  8
+#define XER_BC   0
+#define xer_so  ((env->xer >> XER_SO)  &    1)
+#define xer_ov  ((env->xer >> XER_OV)  &    1)
+#define xer_ca  ((env->xer >> XER_CA)  &    1)
+#define xer_cmp ((env->xer >> XER_CMP) & 0xFF)
+#define xer_bc  ((env->xer >> XER_BC)  & 0x7F)
 
 /* SPR definitions */
 #define SPR_MQ                (0x000)
