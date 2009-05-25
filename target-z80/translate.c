@@ -50,6 +50,8 @@
 static TCGv cpu_env, cpu_T[3];
 #define cpu_A0 cpu_T[2]
 
+#include "gen-icount.h"
+
 #define MEM_INDEX 0
 
 typedef struct DisasContext {
@@ -1176,14 +1178,28 @@ next_byte:
                     n = ldub_code(s->pc);
                     s->pc++;
                     gen_movb_v_A(cpu_T[0]);
+                    if (use_icount) {
+                        gen_io_start();
+                    }
                     gen_helper_out_T0_im(tcg_const_tl(n));
+                    if (use_icount) {
+                        gen_io_end();
+                        gen_jmp_im(s->pc);
+                    }
                     zprintf("out ($%02x),a\n", n);
                     break;
                 case 3:
                     n = ldub_code(s->pc);
                     s->pc++;
+                    if (use_icount) {
+                        gen_io_start();
+                    }
                     gen_helper_in_T0_im(tcg_const_tl(n));
                     gen_movb_A_v(cpu_T[0]);
+                    if (use_icount) {
+                        gen_io_end();
+                        gen_jmp_im(s->pc);
+                    }
                     zprintf("in a,($%02x)\n", n);
                     break;
                 case 4:
@@ -1407,6 +1423,9 @@ next_byte:
         case 1:
             switch (z) {
             case 0:
+                if (use_icount) {
+                    gen_io_start();
+                }
                 gen_helper_in_T0_bc_cc();
                 if (y != 6) {
                     r1 = regmap(reg[y], m);
@@ -1414,6 +1433,10 @@ next_byte:
                     zprintf("in %s,(c)\n", regnames[r1]);
                 } else {
                     zprintf("in (c)\n");
+                }
+                if (use_icount) {
+                    gen_io_end();
+                    gen_jmp_im(s->pc);
                 }
                 break;
             case 1:
@@ -1425,7 +1448,14 @@ next_byte:
                     tcg_gen_movi_tl(cpu_T[0], 0);
                     zprintf("out (c),0\n");
                 }
+                if (use_icount) {
+                    gen_io_start();
+                }
                 gen_helper_out_T0_bc();
+                if (use_icount) {
+                    gen_io_end();
+                    gen_jmp_im(s->pc);
+                }
                 break;
             case 2:
                 r1 = regpairmap(OR2_HL, m);
@@ -1561,7 +1591,13 @@ next_byte:
                     break;
 
                 case 2: /* ini/ind/inir/indr */
+                    if (use_icount) {
+                        gen_io_start();
+                    }
                     gen_helper_in_T0_bc_cc();
+                    if (use_icount) {
+                        gen_io_end();
+                    }
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1)) {
@@ -1573,13 +1609,21 @@ next_byte:
                         gen_helper_bli_io_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
+                    } else if (use_icount) {
+                        gen_jmp_im(s->pc);
                     }
                     break;
 
                 case 3: /* outi/outd/otir/otdr */
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_ld8u(cpu_T[0], cpu_A0, MEM_INDEX);
+                    if (use_icount) {
+                        gen_io_start();
+                    }
                     gen_helper_out_T0_bc();
+                    if (use_icount) {
+                        gen_io_end();
+                    }
                     if (!(y & 1)) {
                         gen_helper_bli_io_inc();
                     } else {
@@ -1589,6 +1633,8 @@ next_byte:
                         gen_helper_bli_io_rep(tcg_const_tl(s->pc));
                         gen_eob(s);
                         s->is_jmp = 3;
+                    } else if (use_icount) {
+                        gen_jmp_im(s->pc);
                     }
                     break;
                 }
@@ -1648,6 +1694,8 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     int flags, j, lj, cflags;
     target_ulong pc_start;
     target_ulong cs_base;
+    int num_insns;
+    int max_insns;
 
     /* generate intermediate code */
     pc_start = tb->pc;
@@ -1675,6 +1723,13 @@ static inline int gen_intermediate_code_internal(CPUState *env,
     lj = -1;
     dc->model = env->model;
 
+    num_insns = 0;
+    max_insns = tb->cflags & CF_COUNT_MASK;
+    if (max_insns == 0) {
+        max_insns = CF_COUNT_MASK;
+    }
+
+    gen_icount_start();
     for (;;) {
         if (env->nb_breakpoints > 0) {
             for (j = 0; j < env->nb_breakpoints; j++) {
@@ -1694,8 +1749,14 @@ static inline int gen_intermediate_code_internal(CPUState *env,
             }
             gen_opc_pc[lj] = pc_ptr;
             gen_opc_instr_start[lj] = 1;
+            gen_opc_icount[lj] = num_insns;
         }
+        if (num_insns + 1 == max_insns && (tb->cflags & CF_LAST_IO)) {
+            gen_io_start();
+        }
+
         pc_ptr = disas_insn(dc, pc_ptr);
+        num_insns++;
         /* stop translation if indicated */
         if (dc->is_jmp) {
             break;
@@ -1706,20 +1767,24 @@ static inline int gen_intermediate_code_internal(CPUState *env,
            the flag and abort the translation to give the irqs a
            change to be happen */
         if (dc->singlestep_enabled ||
-            (flags & HF_INHIBIT_IRQ_MASK) ||
-            (cflags & CF_SINGLE_INSN)) {
+            (flags & HF_INHIBIT_IRQ_MASK)) {
             gen_jmp_im(pc_ptr - dc->cs_base);
             gen_eob(dc);
             break;
         }
         /* if too long translation, stop generation too */
         if (gen_opc_ptr >= gen_opc_end ||
-            (pc_ptr - pc_start) >= (TARGET_PAGE_SIZE - 32)) {
+            (pc_ptr - pc_start) >= (TARGET_PAGE_SIZE - 32) ||
+            num_insns >= max_insns) {
             gen_jmp_im(pc_ptr - dc->cs_base);
             gen_eob(dc);
             break;
         }
     }
+    if (tb->cflags & CF_LAST_IO) {
+        gen_io_end();
+    }
+    gen_icount_end(tb, num_insns);
     *gen_opc_ptr = INDEX_op_end;
     /* we don't forget to fill the last values */
     if (search_pc) {
@@ -1750,6 +1815,7 @@ static inline int gen_intermediate_code_internal(CPUState *env,
 
     if (!search_pc) {
         tb->size = pc_ptr - pc_start;
+        tb->icount = num_insns;
     }
     return 0;
 }

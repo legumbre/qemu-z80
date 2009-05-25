@@ -44,7 +44,6 @@
 #endif
 
 int tb_invalidated_flag;
-static unsigned long next_tb;
 
 //#define DEBUG_EXEC
 //#define DEBUG_SIGNAL
@@ -83,17 +82,40 @@ void cpu_resume_from_signal(CPUState *env1, void *puc)
     longjmp(env->jmp_env, 1);
 }
 
+/* Execute the code without caching the generated code. An interpreter
+   could be used if available. */
+static void cpu_exec_nocache(int max_cycles, TranslationBlock *orig_tb)
+{
+    unsigned long next_tb;
+    TranslationBlock *tb;
+
+    /* Should never happen.
+       We only end up here when an existing TB is too long.  */
+    if (max_cycles > CF_COUNT_MASK)
+        max_cycles = CF_COUNT_MASK;
+
+    tb = tb_gen_code(env, orig_tb->pc, orig_tb->cs_base, orig_tb->flags,
+                     max_cycles);
+    env->current_tb = tb;
+    /* execute the generated code */
+    next_tb = tcg_qemu_tb_exec(tb->tc_ptr);
+
+    if ((next_tb & 3) == 2) {
+        /* Restore PC.  This may happen if async event occurs before
+           the TB starts executing.  */
+        CPU_PC_FROM_TB(env, tb);
+    }
+    tb_phys_invalidate(tb, -1);
+    tb_free(tb);
+}
+
 static TranslationBlock *tb_find_slow(target_ulong pc,
                                       target_ulong cs_base,
                                       uint64_t flags)
 {
     TranslationBlock *tb, **ptb1;
-    int code_gen_size;
     unsigned int h;
     target_ulong phys_pc, phys_page1, phys_page2, virt_page2;
-    uint8_t *tc_ptr;
-
-    spin_lock(&tb_lock);
 
     tb_invalidated_flag = 0;
 
@@ -127,35 +149,12 @@ static TranslationBlock *tb_find_slow(target_ulong pc,
         ptb1 = &tb->phys_hash_next;
     }
  not_found:
-    /* if no translated code available, then translate it now */
-    tb = tb_alloc(pc);
-    if (!tb) {
-        /* flush must be done */
-        tb_flush(env);
-        /* cannot fail at this point */
-        tb = tb_alloc(pc);
-        /* don't forget to invalidate previous TB info */
-        tb_invalidated_flag = 1;
-    }
-    tc_ptr = code_gen_ptr;
-    tb->tc_ptr = tc_ptr;
-    tb->cs_base = cs_base;
-    tb->flags = flags;
-    cpu_gen_code(env, tb, &code_gen_size);
-    code_gen_ptr = (void *)(((unsigned long)code_gen_ptr + code_gen_size + CODE_GEN_ALIGN - 1) & ~(CODE_GEN_ALIGN - 1));
-
-    /* check next page if needed */
-    virt_page2 = (pc + tb->size - 1) & TARGET_PAGE_MASK;
-    phys_page2 = -1;
-    if ((pc & TARGET_PAGE_MASK) != virt_page2) {
-        phys_page2 = get_phys_addr_code(env, virt_page2);
-    }
-    tb_link_phys(tb, phys_pc, phys_page2);
+   /* if no translated code available, then translate it now */
+    tb = tb_gen_code(env, pc, cs_base, flags, 0);
 
  found:
     /* we add the TB in the virtual pc hash table */
     env->tb_jmp_cache[tb_jmp_cache_hash_func(pc)] = tb;
-    spin_unlock(&tb_lock);
     return tb;
 }
 
@@ -201,7 +200,7 @@ static inline TranslationBlock *tb_find_fast(void)
 #elif defined(TARGET_MIPS)
     flags = env->hflags & (MIPS_HFLAG_TMASK | MIPS_HFLAG_BMASK);
     cs_base = 0;
-    pc = env->PC[env->current_tc];
+    pc = env->active_tc.PC;
 #elif defined(TARGET_M68K)
     flags = (env->fpcr & M68K_FPCR_PREC)  /* Bit  6 */
             | (env->sr & SR_S)            /* Bit  13 */
@@ -217,7 +216,7 @@ static inline TranslationBlock *tb_find_fast(void)
     cs_base = 0;
     pc = env->pc;
 #elif defined(TARGET_CRIS)
-    flags = env->pregs[PR_CCS] & (U_FLAG | X_FLAG);
+    flags = env->pregs[PR_CCS] & (P_FLAG | U_FLAG | X_FLAG);
     flags |= env->dslot;
     cs_base = 0;
     pc = env->pc;
@@ -232,14 +231,6 @@ static inline TranslationBlock *tb_find_fast(void)
     if (__builtin_expect(!tb || tb->pc != pc || tb->cs_base != cs_base ||
                          tb->flags != flags, 0)) {
         tb = tb_find_slow(pc, cs_base, flags);
-        /* Note: we do it here to avoid a gcc bug on Mac OS X when
-           doing it in tb_find_slow */
-        if (tb_invalidated_flag) {
-            /* as some TB could have been invalidated because
-               of memory exceptions while generating the code, we
-               must recompute the hash index here */
-            next_tb = 0;
-        }
     }
     return tb;
 }
@@ -253,6 +244,7 @@ int cpu_exec(CPUState *env1)
     int ret, interrupt_request;
     TranslationBlock *tb;
     uint8_t *tc_ptr;
+    unsigned long next_tb;
 
     if (cpu_halted(env1) == EXCP_HALTED)
         return EXCP_HALTED;
@@ -517,7 +509,15 @@ int cpu_exec(CPUState *env1)
                         next_tb = 0;
                     }
 #elif defined(TARGET_CRIS)
-                    if (interrupt_request & CPU_INTERRUPT_HARD) {
+                    if (interrupt_request & CPU_INTERRUPT_HARD
+                        && (env->pregs[PR_CCS] & I_FLAG)) {
+                        env->exception_index = EXCP_IRQ;
+                        do_interrupt(env);
+                        next_tb = 0;
+                    }
+                    if (interrupt_request & CPU_INTERRUPT_NMI
+                        && (env->pregs[PR_CCS] & M_FLAG)) {
+                        env->exception_index = EXCP_NMI;
                         do_interrupt(env);
                         next_tb = 0;
                     }
@@ -591,7 +591,17 @@ int cpu_exec(CPUState *env1)
 #endif
                 }
 #endif
+                spin_lock(&tb_lock);
                 tb = tb_find_fast();
+                /* Note: we do it here to avoid a gcc bug on Mac OS X when
+                   doing it in tb_find_slow */
+                if (tb_invalidated_flag) {
+                    /* as some TB could have been invalidated because
+                       of memory exceptions while generating the code, we
+                       must recompute the hash index here */
+                    next_tb = 0;
+                    tb_invalidated_flag = 0;
+                }
 #ifdef DEBUG_EXEC
                 if ((loglevel & CPU_LOG_EXEC)) {
                     fprintf(logfile, "Trace 0x%08lx [" TARGET_FMT_lx "] %s\n",
@@ -608,21 +618,49 @@ int cpu_exec(CPUState *env1)
                         (env->kqemu_enabled != 2) &&
 #endif
                         tb->page_addr[1] == -1) {
-                    spin_lock(&tb_lock);
                     tb_add_jump((TranslationBlock *)(next_tb & ~3), next_tb & 3, tb);
-                    spin_unlock(&tb_lock);
                 }
                 }
-                tc_ptr = tb->tc_ptr;
+                spin_unlock(&tb_lock);
                 env->current_tb = tb;
+                while (env->current_tb) {
+                    tc_ptr = tb->tc_ptr;
                 /* execute the generated code */
 #if defined(__sparc__) && !defined(HOST_SOLARIS)
 #undef env
-                env = cpu_single_env;
+                    env = cpu_single_env;
 #define env cpu_single_env
 #endif
-                next_tb = tcg_qemu_tb_exec(tc_ptr);
-                env->current_tb = NULL;
+                    next_tb = tcg_qemu_tb_exec(tc_ptr);
+                    env->current_tb = NULL;
+                    if ((next_tb & 3) == 2) {
+                        /* Instruction counter exired.  */
+                        int insns_left;
+                        tb = (TranslationBlock *)(long)(next_tb & ~3);
+                        /* Restore PC.  */
+                        CPU_PC_FROM_TB(env, tb);
+                        insns_left = env->icount_decr.u32;
+                        if (env->icount_extra && insns_left >= 0) {
+                            /* Refill decrementer and continue execution.  */
+                            env->icount_extra += insns_left;
+                            if (env->icount_extra > 0xffff) {
+                                insns_left = 0xffff;
+                            } else {
+                                insns_left = env->icount_extra;
+                            }
+                            env->icount_extra -= insns_left;
+                            env->icount_decr.u16.low = insns_left;
+                        } else {
+                            if (insns_left > 0) {
+                                /* Execute remaining instructions.  */
+                                cpu_exec_nocache(insns_left, tb);
+                            }
+                            env->exception_index = EXCP_INTERRUPT;
+                            next_tb = 0;
+                            cpu_loop_exit();
+                        }
+                    }
+                }
                 /* reset soft MMU for next block (it can currently
                    only be set by a memory fault) */
 #if defined(USE_KQEMU)
