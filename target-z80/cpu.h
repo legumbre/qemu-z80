@@ -242,8 +242,12 @@ static inline int cpu_mmu_index (CPUState *env)
     return 0;
 }
 
-#define CPU_PC_FROM_TB(env, tb) env->pc = tb->pc
-
 #include "cpu-all.h"
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
 
 #endif /* CPU_Z80_H */
