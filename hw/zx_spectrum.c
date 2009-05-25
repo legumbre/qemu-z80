@@ -413,7 +413,8 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine zxspec_machine = {
-    "zxspec",
-    "ZX Spectrum",
-    zx_spectrum_init,
+    .name = "zxspec",
+    .desc = "ZX Spectrum",
+    .init = zx_spectrum_init,
+    .ram_require = 0x10000,
 };
