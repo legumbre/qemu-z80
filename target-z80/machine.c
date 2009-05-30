@@ -14,5 +14,3 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
 {
     return 0;
 }
-
-
