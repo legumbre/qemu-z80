@@ -166,7 +166,7 @@ static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
 
 static inline int get_pixfmt_index(DisplayState *s)
 {
-    switch(s->depth) {
+    switch(ds_get_bits_per_pixel(s)) {
     default:
     case 8:
         return zx_pixfmt_8;
@@ -213,7 +213,7 @@ static void zx_draw_scanline(ZXVState *s1, uint8_t *d,
     zx_draw_line_func *zx_draw_line;
 
     zx_draw_line = zx_draw_line_table[get_pixfmt_index(s1->ds)];
-    x_incr = (s1->ds->depth + 7) >> 3;
+    x_incr = (ds_get_bits_per_pixel(s1->ds) + 7) >> 3;
 
     for (x = 0; x < 32; x++) {
         int attrib, fg, bg, bright, flash;
@@ -244,7 +244,7 @@ static void zx_border_row(ZXVState *s, uint8_t *d)
     zx_draw_line_func *zx_draw_line;
 
     zx_draw_line = zx_draw_line_table[get_pixfmt_index(s->ds)];
-    x_incr = (s->ds->depth + 7) >> 3;
+    x_incr = (ds_get_bits_per_pixel(s->ds) + 7) >> 3;
 
     for (x = 0; x < s->twidth / 8; x++) {
         zx_draw_line(d, 0xff, s->palette[s->border], 0);
@@ -258,7 +258,7 @@ static void zx_border_sides(ZXVState *s, uint8_t *d)
     zx_draw_line_func *zx_draw_line;
 
     zx_draw_line = zx_draw_line_table[get_pixfmt_index(s->ds)];
-    x_incr = (s->ds->depth + 7) >> 3;
+    x_incr = (ds_get_bits_per_pixel(s->ds) + 7) >> 3;
 
     for (x = 0; x < s->bwidth / 8; x++) {
         zx_draw_line(d, 0xff, s->palette[s->border], 0);
@@ -271,7 +271,8 @@ static void zx_border_sides(ZXVState *s, uint8_t *d)
     }
 }
 
-static void update_palette(ZXVState *s) {
+static void update_palette(ZXVState *s)
+{
     int i, r, g, b;
     for(i = 0; i < 16; i++) {
         r = (zx_cols[i] >> 16) & 0xff;
@@ -291,7 +292,7 @@ static void zx_update_display(void *opaque)
     int dirty = s->invalidate;
     static int inited = 0;
 
-    x_incr = (s->ds->depth + 7) >> 3;
+    x_incr = (ds_get_bits_per_pixel(s->ds) + 7) >> 3;
 
     if (unlikely(inited == 0)) {
         s->rgb_to_pixel = rgb_to_pixel_dup_table[get_pixfmt_index(s->ds)];
@@ -307,23 +308,23 @@ static void zx_update_display(void *opaque)
         }
     }
 
-    if (s->ds->width != s->twidth ||
-        s->ds->height != s->theight) {
+    if (ds_get_width(s->ds) != s->twidth ||
+        ds_get_height(s->ds) != s->theight) {
         qemu_console_resize(s->console, s->twidth, s->theight);
         s->invalidate = 1;
         s->prevborder = -1;
     }
 
     if (dirty) {
-        d = s->ds->data;
-        d += s->bheight * s->ds->linesize;
+        d = ds_get_data(s->ds);
+        d += s->bheight * ds_get_linesize(s->ds);
         d += s->bwidth * x_incr;
 
         for (y = 0; y < 192; y++) {
             addr = ((y & 0x07) << 8) | ((y & 0x38) << 2) | ((y & 0xc0) << 5);
             attrib = 0x1800 | ((y & 0xf8) << 2);
             zx_draw_scanline(s, d, s->vram_ptr + addr, s->vram_ptr + attrib);
-            d += s->ds->linesize;
+            d += ds_get_linesize(s->ds);
         }
 
         s->invalidate = 0;
@@ -331,15 +332,15 @@ static void zx_update_display(void *opaque)
     }
 
     if (s->border != s->prevborder) {
-        d = s->ds->data;
+        d = ds_get_data(s->ds);
         for (y = 0; y < s->bheight; y++) {
-            zx_border_row(s, d + y * s->ds->linesize);
+            zx_border_row(s, d + (y * ds_get_linesize(s->ds)));
         }
         for (y = s->bheight; y < s->theight - s->bheight; y++) {
-            zx_border_sides(s, d + y * s->ds->linesize);
+            zx_border_sides(s, d + (y * ds_get_linesize(s->ds)));
         }
         for (y = s->theight - s->bheight; y < s->theight; y++) {
-            zx_border_row(s, d + y * s->ds->linesize);
+            zx_border_row(s, d + (y * ds_get_linesize(s->ds)));
         }
         s->prevborder = s->border;
     }
