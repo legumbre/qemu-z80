@@ -94,16 +94,17 @@ static void zx_50hz_timer(void *opaque)
 
 static CPUState *zx_env;
 
-static void zx_timer_init(void) {
+static void zx_timer_init(void)
+{
     int64_t t = qemu_get_clock(vm_clock);
     zx_ula_timer = qemu_new_timer(vm_clock, zx_50hz_timer, zx_env);
     qemu_mod_timer(zx_ula_timer, t);
 }
 
-struct keypos {
+typedef struct {
     int row;
     int column;
-};
+} ZXKeypos;
 
 #define DEF_ZX_KEY(name, row, column) ZX_KEY_ ## name,
 enum zx_keys {
@@ -112,7 +113,7 @@ ZX_MAX_KEYS
 };
 
 #define DEF_ZX_KEY(name, row, column) [ZX_KEY_ ## name] = {row, column},
-static const struct keypos keypos[ZX_MAX_KEYS] = {
+static const ZXKeypos keypos[ZX_MAX_KEYS] = {
 #include "zx_key_template.h"
 };
 

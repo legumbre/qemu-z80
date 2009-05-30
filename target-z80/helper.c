@@ -56,12 +56,12 @@ CPUZ80State *cpu_z80_init(const char *model)
     return env;
 }
 
-struct z80_cpu_t {
+typedef struct {
     int id;
     const char *name;
-};
+} Z80CPUModel;
 
-static const struct z80_cpu_t z80_cpu_names[] = {
+static const Z80CPUModel z80_cpu_names[] = {
     { Z80_CPU_Z80,  "z80" },
     { Z80_CPU_R800, "r800" },
     { 0, NULL }
