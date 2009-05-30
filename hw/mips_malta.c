@@ -679,13 +679,13 @@ static void prom_set(int index, const char *string, ...)
     }
 
     table_addr = ENVP_ADDR + sizeof(int32_t) * ENVP_NB_ENTRIES
-                 + index * ENVP_ENTRY_SIZE + VIRT_TO_PHYS_ADDEND;
-    stl_raw(p, table_addr);
+                 + index * ENVP_ENTRY_SIZE;
+    stl_phys(p, table_addr);
 
     va_start(ap, string);
     vsnprintf(buf, ENVP_ENTRY_SIZE, string, ap);
     va_end(ap);
-    pstrcpy_targphys(table_addr, ENVP_ENTRY_SIZE, buf);
+    pstrcpy_targphys(table_addr + VIRT_TO_PHYS_ADDEND, ENVP_ENTRY_SIZE, buf);
 }
 
 /* Kernel */
@@ -958,5 +958,4 @@ QEMUMachine mips_malta_machine = {
     .name = "malta",
     .desc = "MIPS Malta Core LV",
     .init = mips_malta_init,
-    .ram_require = VGA_RAM_SIZE + BIOS_SIZE,
 };
