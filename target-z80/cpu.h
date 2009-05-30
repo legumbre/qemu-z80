@@ -210,13 +210,8 @@ int cpu_z80_signal_handler(int host_signum, struct siginfo *info,
 
 uint64_t cpu_get_tsc(CPUZ80State *env);
 
-void cpu_set_apic_base(CPUZ80State *env, uint64_t val);
-uint64_t cpu_get_apic_base(CPUZ80State *env);
-void cpu_set_apic_tpr(CPUZ80State *env, uint8_t val);
-#ifndef NO_CPU_IO_DEFS
-uint8_t cpu_get_apic_tpr(CPUZ80State *env);
-#endif
-void cpu_smm_update(CPUZ80State *env);
+int cpu_z80_handle_mmu_fault(CPUZ80State *env1, target_ulong address, int rw,
+                             int mmu_idx, int is_softmmu);
 
 void z80_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
 

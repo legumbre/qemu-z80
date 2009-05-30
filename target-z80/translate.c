@@ -1803,10 +1803,9 @@ static inline int gen_intermediate_code_internal(CPUState *env,
         cpu_dump_state(env, logfile, fprintf, 0);
     }
     if (loglevel & CPU_LOG_TB_IN_ASM) {
-        int disas_flags;
         fprintf(logfile, "----------------\n");
         fprintf(logfile, "IN: %s\n", lookup_symbol(pc_start));
-        target_disas(logfile, pc_start, pc_ptr - pc_start, disas_flags);
+        target_disas(logfile, pc_start, pc_ptr - pc_start, 0);
         fprintf(logfile, "\n");
         if (loglevel & CPU_LOG_TB_OP_OPT) {
             fprintf(logfile, "OP before opt:\n");

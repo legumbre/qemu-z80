@@ -46,9 +46,6 @@ register target_ulong T2 asm(AREG3);
 
 #define A0 T2
 
-extern FILE *logfile;
-extern int loglevel;
-
 #define A   (env->regs[R_A])
 #define F   (env->regs[R_F])
 #define BC  (env->regs[R_BC])
@@ -70,10 +67,6 @@ extern int loglevel;
 #include "cpu.h"
 #include "exec-all.h"
 
-int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
-                             int is_write, int is_user, int is_softmmu);
-void tlb_fill(target_ulong addr, int is_write, int is_user,
-              void *retaddr);
 void __hidden cpu_lock(void);
 void __hidden cpu_unlock(void);
 void do_interrupt(CPUZ80State *env);
@@ -81,7 +74,6 @@ void raise_interrupt(int intno, int is_int, int error_code,
                      int next_eip_addend);
 void raise_exception_err(int exception_index, int error_code);
 void raise_exception(int exception_index);
-void __hidden cpu_loop_exit(void);
 
 #if !defined(CONFIG_USER_ONLY)
 
