@@ -1034,7 +1034,17 @@ e1000_mmio_map(PCIDevice *pci_dev, int region_num,
                                      excluded_regs[i] - 4);
 }
 
-void
+static int
+pci_e1000_uninit(PCIDevice *dev)
+{
+    E1000State *d = (E1000State *) dev;
+
+    cpu_unregister_io_memory(d->mmio_index);
+
+    return 0;
+}
+
+PCIDevice *
 pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
 {
     E1000State *d;
@@ -1054,8 +1064,7 @@ pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
     *(uint16_t *)(pci_conf+0x04) = cpu_to_le16(0x0407);
     *(uint16_t *)(pci_conf+0x06) = cpu_to_le16(0x0010);
     pci_conf[0x08] = 0x03;
-    pci_conf[0x0a] = 0x00; // ethernet network controller
-    pci_conf[0x0b] = 0x02;
+    pci_config_set_class(pci_conf, PCI_CLASS_NETWORK_ETHERNET);
     pci_conf[0x0c] = 0x10;
 
     pci_conf[0x3d] = 1; // interrupt pin 0
@@ -1093,4 +1102,7 @@ pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
     qemu_format_nic_info_str(d->vc, d->nd->macaddr);
 
     register_savevm(info_str, -1, 2, nic_save, nic_load, d);
+    d->dev.unregister = pci_e1000_uninit;
+
+    return (PCIDevice *)d;
 }

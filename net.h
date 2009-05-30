@@ -42,6 +42,7 @@ VLANClientState *qemu_new_vlan_client(VLANState *vlan,
                                       IOCanRWHandler *fd_can_read,
                                       void *opaque);
 void qemu_del_vlan_client(VLANClientState *vc);
+VLANClientState *qemu_find_vlan_client(VLANState *vlan, void *opaque);
 int qemu_can_send_packet(VLANClientState *vc);
 ssize_t qemu_sendv_packet(VLANClientState *vc, const struct iovec *iov,
                           int iovcnt);
@@ -52,8 +53,8 @@ void qemu_check_nic_model_list(NICInfo *nd, const char * const *models,
                                const char *default_model);
 void qemu_handler_true(void *opaque);
 
-void do_info_network(void);
-int do_set_link(const char *name, const char *up_or_down);
+void do_info_network(Monitor *mon);
+int do_set_link(Monitor *mon, const char *name, const char *up_or_down);
 
 /* NIC info */
 
@@ -64,6 +65,8 @@ struct NICInfo {
     const char *model;
     const char *name;
     VLANState *vlan;
+    void *private;
+    int used;
 };
 
 extern int nb_nics;
@@ -92,12 +95,15 @@ void net_checksum_calculate(uint8_t *data, int length);
 
 /* from net.c */
 int net_client_init(const char *device, const char *p);
+void net_client_uninit(NICInfo *nd);
 int net_client_parse(const char *str);
 void net_slirp_smb(const char *exported_dir);
 void net_slirp_redir(const char *redir_str);
 void net_cleanup(void);
 int slirp_is_inited(void);
 void net_client_check(void);
+void net_host_device_add(Monitor *mon, const char *device, const char *opts);
+void net_host_device_remove(Monitor *mon, int vlan_id, const char *device);
 
 #define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
 #define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/qemu-ifdown"

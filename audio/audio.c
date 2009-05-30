@@ -23,7 +23,7 @@
  */
 #include "hw/hw.h"
 #include "audio.h"
-#include "console.h"
+#include "monitor.h"
 #include "qemu-timer.h"
 #include "sysemu.h"
 
@@ -197,8 +197,8 @@ void *audio_calloc (const char *funcname, int nmemb, size_t size)
 static char *audio_alloc_prefix (const char *s)
 {
     const char qemu_prefix[] = "QEMU_";
-    size_t len;
-    char *r;
+    size_t len, i;
+    char *r, *u;
 
     if (!s) {
         return NULL;
@@ -207,17 +207,15 @@ static char *audio_alloc_prefix (const char *s)
     len = strlen (s);
     r = qemu_malloc (len + sizeof (qemu_prefix));
 
-    if (r) {
-        size_t i;
-        char *u = r + sizeof (qemu_prefix) - 1;
+    u = r + sizeof (qemu_prefix) - 1;
 
-        pstrcpy (r, len + sizeof (qemu_prefix), qemu_prefix);
-        pstrcat (r, len + sizeof (qemu_prefix), s);
+    pstrcpy (r, len + sizeof (qemu_prefix), qemu_prefix);
+    pstrcat (r, len + sizeof (qemu_prefix), s);
 
-        for (i = 0; i < len; ++i) {
-            u[i] = qemu_toupper(u[i]);
-        }
+    for (i = 0; i < len; ++i) {
+        u[i] = qemu_toupper(u[i]);
     }
+
     return r;
 }
 
@@ -330,10 +328,10 @@ void AUD_vlog (const char *cap, const char *fmt, va_list ap)
 {
     if (conf.log_to_monitor) {
         if (cap) {
-            term_printf ("%s: ", cap);
+            monitor_printf(cur_mon, "%s: ", cap);
         }
 
-        term_vprintf (fmt, ap);
+        monitor_vprintf(cur_mon, fmt, ap);
     }
     else {
         if (cap) {
@@ -460,11 +458,6 @@ static void audio_process_options (const char *prefix,
          * sizeof) */
         optlen = len + preflen + sizeof (qemu_prefix) + 1;
         optname = qemu_malloc (optlen);
-        if (!optname) {
-            dolog ("Could not allocate memory for option name `%s'\n",
-                   opt->name);
-            continue;
-        }
 
         pstrcpy (optname, optlen, qemu_prefix);
 
@@ -1134,6 +1127,7 @@ void AUD_set_active_out (SWVoiceOut *sw, int on)
 
     hw = sw->hw;
     if (sw->active != on) {
+        AudioState *s = &glob_audio_state;
         SWVoiceOut *temp_sw;
         SWVoiceCap *sc;
 
@@ -1141,7 +1135,9 @@ void AUD_set_active_out (SWVoiceOut *sw, int on)
             hw->pending_disable = 0;
             if (!hw->enabled) {
                 hw->enabled = 1;
-                hw->pcm_ops->ctl_out (hw, VOICE_ENABLE);
+                if (s->vm_running) {
+                    hw->pcm_ops->ctl_out (hw, VOICE_ENABLE);
+                }
             }
         }
         else {
@@ -1177,12 +1173,15 @@ void AUD_set_active_in (SWVoiceIn *sw, int on)
 
     hw = sw->hw;
     if (sw->active != on) {
+        AudioState *s = &glob_audio_state;
         SWVoiceIn *temp_sw;
 
         if (on) {
             if (!hw->enabled) {
                 hw->enabled = 1;
-                hw->pcm_ops->ctl_in (hw, VOICE_ENABLE);
+                if (s->vm_running) {
+                    hw->pcm_ops->ctl_in (hw, VOICE_ENABLE);
+                }
             }
             sw->total_hw_samples_acquired = hw->total_samples_captured;
         }
@@ -1630,6 +1629,7 @@ static void audio_vm_change_state_handler (void *opaque, int running,
     HWVoiceIn *hwi = NULL;
     int op = running ? VOICE_ENABLE : VOICE_DISABLE;
 
+    s->vm_running = running;
     while ((hwo = audio_pcm_hw_find_any_enabled_out (s, hwo))) {
         hwo->pcm_ops->ctl_out (hwo, op);
     }

@@ -663,6 +663,7 @@ void cpu_reset(CPUSPARCState *env)
     env->pstate = PS_PRIV;
     env->hpstate = HS_PRIV;
     env->tsptr = &env->ts[env->tl & MAXTL_MASK];
+    env->lsu = 0;
 #else
     env->mmuregs[0] &= ~(MMU_E | MMU_NF);
     env->mmuregs[0] |= env->def->mmu_bm;
@@ -713,8 +714,6 @@ CPUSPARCState *cpu_sparc_init(const char *cpu_model)
     CPUSPARCState *env;
 
     env = qemu_mallocz(sizeof(CPUSPARCState));
-    if (!env)
-        return NULL;
     cpu_exec_init(env);
 
     gen_intermediate_code_init(env);

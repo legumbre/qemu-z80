@@ -100,6 +100,9 @@ typedef struct TaskState {
     uint32_t v86flags;
     uint32_t v86mask;
 #endif
+#ifdef USE_NPTL
+    abi_ulong child_tidptr;
+#endif
 #ifdef TARGET_M68K
     int sim_syscalls;
 #endif
@@ -120,6 +123,7 @@ typedef struct TaskState {
     uint8_t stack[0];
 } __attribute__((aligned(16))) TaskState;
 
+extern char *exec_path;
 void init_task_state(TaskState *ts);
 extern const char *qemu_uname_release;
 
@@ -224,6 +228,8 @@ int target_msync(abi_ulong start, abi_ulong len, int flags);
 extern unsigned long last_brk;
 void mmap_lock(void);
 void mmap_unlock(void);
+void cpu_list_lock(void);
+void cpu_list_unlock(void);
 #if defined(USE_NPTL)
 void mmap_fork_start(void);
 void mmap_fork_end(int child);

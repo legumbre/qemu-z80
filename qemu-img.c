@@ -27,14 +27,13 @@
 #include <assert.h>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
 /* Default to cache=writeback as data integrity is not important for qemu-tcg. */
 #define BRDV_O_FLAGS BDRV_O_CACHE_WB
 
-static void noreturn error(const char *fmt, ...)
+static void QEMU_NORETURN error(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -74,8 +73,8 @@ static void help(void)
            "    differ\n"
            "  'fmt' is the disk image format. It is guessed automatically in most cases\n"
            "  'size' is the disk image size in kilobytes. Optional suffixes\n"
-           "    'M' (megabyte, 1024 * 1024) and 'G' (gigabyte, 1024 * 1024 * 1024) are"
-           "    supported any @code{k} or @code{K} is ignored\n"
+           "    'M' (megabyte, 1024 * 1024) and 'G' (gigabyte, 1024 * 1024 * 1024) are\n"
+           "    supported any 'k' or 'K' is ignored\n"
            "  'output_filename' is the destination disk image filename\n"
            "  'output_fmt' is the destination format\n"
            "  '-c' indicates that target image must be compressed (qcow format only)\n"
@@ -221,6 +220,7 @@ static int img_create(int argc, char **argv)
     const char *filename;
     const char *base_filename = NULL;
     uint64_t size;
+    double sizef;
     const char *p;
     BlockDriver *drv;
 
@@ -261,13 +261,13 @@ static int img_create(int argc, char **argv)
         if (optind >= argc)
             help();
         p = argv[optind];
-        size = strtoul(p, (char **)&p, 0);
+        sizef = strtod(p, (char **)&p);
         if (*p == 'M') {
-            size *= 1024 * 1024;
+            size = (uint64_t)(sizef * 1024 * 1024);
         } else if (*p == 'G') {
-            size *= 1024 * 1024 * 1024;
+            size = (uint64_t)(sizef * 1024 * 1024 * 1024);
         } else if (*p == 'k' || *p == 'K' || *p == '\0') {
-            size *= 1024;
+            size = (uint64_t)(sizef * 1024);
         } else {
             help();
         }
@@ -730,10 +730,6 @@ static int img_info(int argc, char **argv)
     if (bdrv_get_info(bs, &bdi) >= 0) {
         if (bdi.cluster_size != 0)
             printf("cluster_size: %d\n", bdi.cluster_size);
-        if (bdi.highest_alloc)
-            printf("highest_alloc: %" PRId64 "\n", bdi.highest_alloc);
-        if (bdi.num_free_bytes)
-            printf("num_free_bytes: %" PRId64 "\n", bdi.num_free_bytes);
     }
     bdrv_get_backing_filename(bs, backing_filename, sizeof(backing_filename));
     if (backing_filename[0] != '\0') {
@@ -865,7 +861,7 @@ int main(int argc, char **argv)
     if (argc < 2)
         help();
     cmd = argv[1];
-    optind++;
+    argc--; argv++;
     if (!strcmp(cmd, "create")) {
         img_create(argc, argv);
     } else if (!strcmp(cmd, "commit")) {

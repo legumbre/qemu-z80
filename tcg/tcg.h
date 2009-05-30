@@ -153,12 +153,16 @@ typedef int TCGv_i64;
 #define MAKE_TCGV_I64(x) (x)
 #define GET_TCGV_I32(t) (t)
 #define GET_TCGV_I64(t) (t)
+
 #if TCG_TARGET_REG_BITS == 32
 #define TCGV_LOW(t) (t)
 #define TCGV_HIGH(t) ((t) + 1)
 #endif
 
 #endif /* DEBUG_TCGV */
+
+#define TCGV_EQUAL_I32(a, b) (GET_TCGV_I32(a) == GET_TCGV_I32(b))
+#define TCGV_EQUAL_I64(a, b) (GET_TCGV_I64(a) == GET_TCGV_I64(b))
 
 /* Dummy definition to avoid compiler warnings.  */
 #define TCGV_UNUSED_I32(x) x = MAKE_TCGV_I32(-1)
@@ -272,7 +276,6 @@ struct TCGContext {
     int op_count_max; /* max insn per TB */
     int64_t temp_count;
     int temp_count_max;
-    int64_t old_op_count;
     int64_t del_op_count;
     int64_t code_in_len;
     int64_t code_out_len;
@@ -389,8 +392,6 @@ typedef struct TCGTargetOpDef {
     int op;
     const char *args_ct_str[TCG_MAX_OP_ARGS];
 } TCGTargetOpDef;
-
-extern TCGOpDef tcg_op_defs[];
 
 void tcg_target_init(TCGContext *s);
 void tcg_target_qemu_prologue(TCGContext *s);

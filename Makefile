@@ -137,13 +137,20 @@ endif
 AUDIO_OBJS+= wavcapture.o
 OBJS+=$(addprefix audio/, $(AUDIO_OBJS))
 
+OBJS+=keymaps.o
 ifdef CONFIG_SDL
 OBJS+=sdl.o x_keymap.o
 endif
 ifdef CONFIG_CURSES
 OBJS+=curses.o
 endif
-OBJS+=vnc.o d3des.o
+OBJS+=vnc.o acl.o d3des.o
+ifdef CONFIG_VNC_TLS
+OBJS+=vnc-tls.o vnc-auth-vencrypt.o
+endif
+ifdef CONFIG_VNC_SASL
+OBJS+=vnc-auth-sasl.o
+endif
 
 ifdef CONFIG_COCOA
 OBJS+=cocoa.o
@@ -161,15 +168,27 @@ LIBS+=$(VDE_LIBS)
 
 cocoa.o: cocoa.m
 
-sdl.o: sdl.c keymaps.c sdl_keysym.h
+keymaps.o: keymaps.c keymaps.h
+
+sdl.o: sdl.c keymaps.h sdl_keysym.h
 
 sdl.o audio/sdlaudio.o: CFLAGS += $(SDL_CFLAGS)
 
-vnc.o: vnc.c keymaps.c sdl_keysym.h vnchextile.h d3des.c d3des.h
+acl.o: acl.h acl.c
+
+vnc.h: vnc-tls.h vnc-auth-vencrypt.h vnc-auth-sasl.h keymaps.h
+
+vnc.o: vnc.c vnc.h vnc_keysym.h vnchextile.h d3des.c d3des.h acl.h
 
 vnc.o: CFLAGS += $(CONFIG_VNC_TLS_CFLAGS)
 
-curses.o: curses.c keymaps.c curses_keys.h
+vnc-tls.o: vnc-tls.c vnc.h
+
+vnc-auth-vencrypt.o: vnc-auth-vencrypt.c vnc.h
+
+vnc-auth-sasl.o: vnc-auth-sasl.c vnc.h
+
+curses.o: curses.c keymaps.h curses_keys.h
 
 bt-host.o: CFLAGS += $(CONFIG_BLUEZ_CFLAGS)
 
@@ -273,15 +292,15 @@ cscope:
 	texi2dvi $<
 
 qemu.1: qemu-doc.texi
-	$(SRC_PATH)/texi2pod.pl $< qemu.pod
+	perl -Ww -- $(SRC_PATH)/texi2pod.pl $< qemu.pod
 	pod2man --section=1 --center=" " --release=" " qemu.pod > $@
 
 qemu-img.1: qemu-img.texi
-	$(SRC_PATH)/texi2pod.pl $< qemu-img.pod
+	perl -Ww -- $(SRC_PATH)/texi2pod.pl $< qemu-img.pod
 	pod2man --section=1 --center=" " --release=" " qemu-img.pod > $@
 
 qemu-nbd.8: qemu-nbd.texi
-	$(SRC_PATH)/texi2pod.pl $< qemu-nbd.pod
+	perl -Ww -- $(SRC_PATH)/texi2pod.pl $< qemu-nbd.pod
 	pod2man --section=8 --center=" " --release=" " qemu-nbd.pod > $@
 
 info: qemu-doc.info qemu-tech.info

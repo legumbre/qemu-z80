@@ -133,7 +133,7 @@ static inline void free_sigqueue(struct sigqueue *q)
 }
 
 /* abort execution with signal */
-void noreturn force_sig(int sig)
+void QEMU_NORETURN force_sig(int sig)
 {
     int host_sig;
     host_sig = target_to_host_signal(sig);
@@ -215,7 +215,7 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
 #endif
     if (queue_signal(sig, &tinfo) == 1) {
         /* interrupt the virtual CPU as soon as possible */
-        cpu_interrupt(global_env, CPU_INTERRUPT_EXIT);
+        cpu_exit(global_env);
     }
 }
 

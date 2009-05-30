@@ -42,6 +42,8 @@
 #define ELF_MACHINE	EM_386
 #endif
 
+#define CPUState struct CPUX86State
+
 #include "cpu-defs.h"
 
 #include "softfloat.h"
@@ -250,6 +252,11 @@
 #define MSR_IA32_APICBASE_BSP           (1<<8)
 #define MSR_IA32_APICBASE_ENABLE        (1<<11)
 #define MSR_IA32_APICBASE_BASE          (0xfffff<<12)
+
+#define MSR_MTRRcap			0xfe
+#define MSR_MTRRcap_VCNT		8
+#define MSR_MTRRcap_FIXRANGE_SUPPORT	(1 << 8)
+#define MSR_MTRRcap_WC_SUPPORTED	(1 << 10)
 
 #define MSR_IA32_SYSENTER_CS            0x174
 #define MSR_IA32_SYSENTER_ESP           0x175
@@ -767,7 +774,7 @@ int cpu_x86_signal_handler(int host_signum, void *pinfo,
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
                              int is_write, int mmu_idx, int is_softmmu);
 void cpu_x86_set_a20(CPUX86State *env, int a20_state);
-void cpu_x86_cpuid(CPUX86State *env, uint32_t index,
+void cpu_x86_cpuid(CPUX86State *env, uint32_t index, uint32_t count,
                    uint32_t *eax, uint32_t *ebx,
                    uint32_t *ecx, uint32_t *edx);
 
@@ -823,7 +830,6 @@ static inline int cpu_get_time_fast(void)
 
 #define TARGET_PAGE_BITS 12
 
-#define CPUState CPUX86State
 #define cpu_init cpu_x86_init
 #define cpu_exec cpu_x86_exec
 #define cpu_gen_code cpu_x86_gen_code

@@ -134,7 +134,7 @@ static uint32_t vmdk_read_cid(BlockDriverState *bs, int parent)
         cid_str_size = sizeof("CID");
     }
 
-    if ((p_name = strstr(desc,cid_str)) != 0) {
+    if ((p_name = strstr(desc,cid_str)) != NULL) {
         p_name += cid_str_size;
         sscanf(p_name,"%x",&cid);
     }
@@ -154,7 +154,7 @@ static int vmdk_write_cid(BlockDriverState *bs, uint32_t cid)
 
     tmp_str = strstr(desc,"parentCID");
     pstrcpy(tmp_desc, sizeof(tmp_desc), tmp_str);
-    if ((p_name = strstr(desc,"CID")) != 0) {
+    if ((p_name = strstr(desc,"CID")) != NULL) {
         p_name += sizeof("CID");
         snprintf(p_name, sizeof(desc) - (p_name - desc), "%x\n", cid);
         pstrcat(desc, sizeof(desc), tmp_desc);
@@ -239,7 +239,7 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
     if (read(p_fd, p_desc, DESC_SIZE) != DESC_SIZE)
         goto fail;
 
-    if ((p_name = strstr(p_desc,"CID")) != 0) {
+    if ((p_name = strstr(p_desc,"CID")) != NULL) {
         p_name += sizeof("CID");
         sscanf(p_name,"%x",&p_cid);
     }
@@ -276,8 +276,6 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
 
     /* write RGD */
     rgd_buf = qemu_malloc(gd_size);
-    if (!rgd_buf)
-        goto fail;
     if (lseek(p_fd, rgd_offset, SEEK_SET) == -1)
         goto fail_rgd;
     if (read(p_fd, rgd_buf, gd_size) != gd_size)
@@ -290,8 +288,6 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
 
     /* write GD */
     gd_buf = qemu_malloc(gd_size);
-    if (!gd_buf)
-        goto fail_rgd;
     if (lseek(p_fd, gd_offset, SEEK_SET) == -1)
         goto fail_gd;
     if (read(p_fd, gd_buf, gd_size) != gd_size)
@@ -334,12 +330,12 @@ static int vmdk_parent_open(BlockDriverState *bs, const char * filename)
     if (bdrv_pread(s->hd, 0x200, desc, DESC_SIZE) != DESC_SIZE)
         return -1;
 
-    if ((p_name = strstr(desc,"parentFileNameHint")) != 0) {
+    if ((p_name = strstr(desc,"parentFileNameHint")) != NULL) {
         char *end_name;
         struct stat file_buf;
 
         p_name += sizeof("parentFileNameHint") + 1;
-        if ((end_name = strchr(p_name,'\"')) == 0)
+        if ((end_name = strchr(p_name,'\"')) == NULL)
             return -1;
         if ((end_name - p_name) > sizeof (s->hd->backing_file) - 1)
             return -1;
@@ -430,8 +426,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
     /* read the L1 table */
     l1_size = s->l1_size * sizeof(uint32_t);
     s->l1_table = qemu_malloc(l1_size);
-    if (!s->l1_table)
-        goto fail;
     if (bdrv_pread(s->hd, s->l1_table_offset, s->l1_table, l1_size) != l1_size)
         goto fail;
     for(i = 0; i < s->l1_size; i++) {
@@ -440,8 +434,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
 
     if (s->l1_backup_table_offset) {
         s->l1_backup_table = qemu_malloc(l1_size);
-        if (!s->l1_backup_table)
-            goto fail;
         if (bdrv_pread(s->hd, s->l1_backup_table_offset, s->l1_backup_table, l1_size) != l1_size)
             goto fail;
         for(i = 0; i < s->l1_size; i++) {
@@ -450,8 +442,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
     }
 
     s->l2_cache = qemu_malloc(s->l2_size * L2_CACHE_SIZE * sizeof(uint32_t));
-    if (!s->l2_cache)
-        goto fail;
     return 0;
  fail:
     qemu_free(s->l1_backup_table);
@@ -822,14 +812,14 @@ static void vmdk_flush(BlockDriverState *bs)
 }
 
 BlockDriver bdrv_vmdk = {
-    "vmdk",
-    sizeof(BDRVVmdkState),
-    vmdk_probe,
-    vmdk_open,
-    vmdk_read,
-    vmdk_write,
-    vmdk_close,
-    vmdk_create,
-    vmdk_flush,
-    vmdk_is_allocated,
+    .format_name	= "vmdk",
+    .instance_size	= sizeof(BDRVVmdkState),
+    .bdrv_probe		= vmdk_probe,
+    .bdrv_open		= vmdk_open,
+    .bdrv_read		= vmdk_read,
+    .bdrv_write		= vmdk_write,
+    .bdrv_close		= vmdk_close,
+    .bdrv_create	= vmdk_create,
+    .bdrv_flush		= vmdk_flush,
+    .bdrv_is_allocated	= vmdk_is_allocated,
 };

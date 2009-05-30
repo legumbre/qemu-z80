@@ -612,9 +612,9 @@ static void usb_bt_handle_destroy(USBDevice *dev)
 {
     struct USBBtState *s = (struct USBBtState *) dev->opaque;
 
-    s->hci->opaque = 0;
-    s->hci->evt_recv = 0;
-    s->hci->acl_recv = 0;
+    s->hci->opaque = NULL;
+    s->hci->evt_recv = NULL;
+    s->hci->acl_recv = NULL;
     qemu_free(s);
 }
 
@@ -625,8 +625,6 @@ USBDevice *usb_bt_init(HCIInfo *hci)
     if (!hci)
         return NULL;
     s = qemu_mallocz(sizeof(struct USBBtState));
-    if (!s)
-        return NULL;
     s->dev.opaque = s;
     s->dev.speed = USB_SPEED_HIGH;
     s->dev.handle_packet = usb_generic_handle_packet;

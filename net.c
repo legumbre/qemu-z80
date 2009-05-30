@@ -21,14 +21,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "qemu-common.h"
-#include "net.h"
-#include "console.h"
-#include "sysemu.h"
-#include "qemu-timer.h"
-#include "qemu-char.h"
-#include "audio/audio.h"
-
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -36,6 +28,9 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <zlib.h>
+
+/* Needed early for HOST_BSD etc. */
+#include "config-host.h"
 
 #ifndef _WIN32
 #include <sys/times.h>
@@ -57,9 +52,9 @@
 #include <dirent.h>
 #include <netdb.h>
 #include <sys/select.h>
-#ifdef _BSD
+#ifdef HOST_BSD
 #include <sys/stat.h>
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__DragonFly__)
 #include <libutil.h>
 #else
 #include <util.h>
@@ -98,12 +93,6 @@
 #endif
 #endif
 
-#include "qemu_socket.h"
-
-#if defined(CONFIG_SLIRP)
-#include "libslirp.h"
-#endif
-
 #if defined(__OpenBSD__)
 #include <util.h>
 #endif
@@ -113,12 +102,27 @@
 #endif
 
 #ifdef _WIN32
+#include <windows.h>
 #include <malloc.h>
 #include <sys/timeb.h>
 #include <mmsystem.h>
 #define getopt_long_only getopt_long
 #define memalign(align, size) malloc(size)
 #endif
+
+#include "qemu-common.h"
+#include "net.h"
+#include "monitor.h"
+#include "sysemu.h"
+#include "qemu-timer.h"
+#include "qemu-char.h"
+#include "audio/audio.h"
+#include "qemu_socket.h"
+
+#if defined(CONFIG_SLIRP)
+#include "libslirp.h"
+#endif
+
 
 static VLANState *first_vlan;
 
@@ -333,8 +337,6 @@ VLANClientState *qemu_new_vlan_client(VLANState *vlan,
 {
     VLANClientState *vc, **pvc;
     vc = qemu_mallocz(sizeof(VLANClientState));
-    if (!vc)
-        return NULL;
     vc->model = strdup(model);
     if (name)
         vc->name = strdup(name);
@@ -366,6 +368,19 @@ void qemu_del_vlan_client(VLANClientState *vc)
             break;
         } else
             pvc = &(*pvc)->next;
+}
+
+VLANClientState *qemu_find_vlan_client(VLANState *vlan, void *opaque)
+{
+    VLANClientState **pvc = &vlan->first_client;
+
+    while (*pvc != NULL)
+        if ((*pvc)->opaque == opaque)
+            return *pvc;
+        else
+            pvc = &(*pvc)->next;
+
+    return NULL;
 }
 
 int qemu_can_send_packet(VLANClientState *vc1)
@@ -574,7 +589,7 @@ static void erase_dir(char *dir_name)
     char filename[1024];
 
     /* erase all the files in the directory */
-    if ((d = opendir(dir_name)) != 0) {
+    if ((d = opendir(dir_name)) != NULL) {
         for(;;) {
             de = readdir(d);
             if (!de)
@@ -654,9 +669,26 @@ void net_slirp_smb(const char *exported_dir)
 }
 
 #endif /* !defined(_WIN32) */
-void do_info_slirp(void)
+void do_info_slirp(Monitor *mon)
 {
     slirp_stats();
+}
+
+struct VMChannel {
+    CharDriverState *hd;
+    int port;
+};
+
+static int vmchannel_can_read(void *opaque)
+{
+    struct VMChannel *vmc = (struct VMChannel*)opaque;
+    return slirp_socket_can_recv(4, vmc->port);
+}
+
+static void vmchannel_read(void *opaque, const uint8_t *buf, int size)
+{
+    struct VMChannel *vmc = (struct VMChannel*)opaque;
+    slirp_socket_recv(4, vmc->port, buf, size);
 }
 
 #endif /* CONFIG_SLIRP */
@@ -728,8 +760,6 @@ static TAPState *net_tap_fd_init(VLANState *vlan,
     TAPState *s;
 
     s = qemu_mallocz(sizeof(TAPState));
-    if (!s)
-        return NULL;
     s->fd = fd;
     s->vc = qemu_new_vlan_client(vlan, model, name, tap_receive, NULL, s);
 #ifdef HAVE_IOVEC
@@ -740,7 +770,7 @@ static TAPState *net_tap_fd_init(VLANState *vlan,
     return s;
 }
 
-#if defined (_BSD) || defined (__FreeBSD_kernel__)
+#if defined (HOST_BSD) || defined (__FreeBSD_kernel__)
 static int tap_open(char *ifname, int ifname_size)
 {
     int fd;
@@ -1049,8 +1079,6 @@ static int net_vde_init(VLANState *vlan, const char *model,
     };
 
     s = qemu_mallocz(sizeof(VDEState));
-    if (!s)
-        return -1;
     s->vde = vde_open(init_sock, "QEMU", &args);
     if (!s->vde){
         free(s);
@@ -1069,8 +1097,8 @@ typedef struct NetSocketState {
     VLANClientState *vc;
     int fd;
     int state; /* 0 = getting length, 1 = getting data */
-    int index;
-    int packet_len;
+    unsigned int index;
+    unsigned int packet_len;
     uint8_t buf[4096];
     struct sockaddr_in dgram_dst; /* contains inet host and port destination iff connectionless (SOCK_DGRAM) */
 } NetSocketState;
@@ -1103,7 +1131,8 @@ static void net_socket_receive_dgram(void *opaque, const uint8_t *buf, int size)
 static void net_socket_send(void *opaque)
 {
     NetSocketState *s = opaque;
-    int l, size, err;
+    int size, err;
+    unsigned l;
     uint8_t buf1[4096];
     const uint8_t *buf;
 
@@ -1142,7 +1171,15 @@ static void net_socket_send(void *opaque)
             l = s->packet_len - s->index;
             if (l > size)
                 l = size;
-            memcpy(s->buf + s->index, buf, l);
+            if (s->index + l <= sizeof(s->buf)) {
+                memcpy(s->buf + s->index, buf, l);
+            } else {
+                fprintf(stderr, "serious error: oversized packet received,"
+                    "connection terminated.\n");
+                s->state = 0;
+                goto eoc;
+            }
+
             s->index += l;
             buf += l;
             size -= l;
@@ -1274,8 +1311,6 @@ static NetSocketState *net_socket_fd_init_dgram(VLANState *vlan,
     }
 
     s = qemu_mallocz(sizeof(NetSocketState));
-    if (!s)
-        return NULL;
     s->fd = fd;
 
     s->vc = qemu_new_vlan_client(vlan, model, name, net_socket_receive_dgram, NULL, s);
@@ -1304,8 +1339,6 @@ static NetSocketState *net_socket_fd_init_stream(VLANState *vlan,
 {
     NetSocketState *s;
     s = qemu_mallocz(sizeof(NetSocketState));
-    if (!s)
-        return NULL;
     s->fd = fd;
     s->vc = qemu_new_vlan_client(vlan, model, name,
                                  net_socket_receive, NULL, s);
@@ -1383,8 +1416,6 @@ static int net_socket_listen_init(VLANState *vlan,
         return -1;
 
     s = qemu_mallocz(sizeof(NetSocketListenState));
-    if (!s)
-        return -1;
 
     fd = socket(PF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -1504,8 +1535,6 @@ VLANState *qemu_find_vlan(int id)
             return vlan;
     }
     vlan = qemu_mallocz(sizeof(VLANState));
-    if (!vlan)
-        return NULL;
     vlan->id = id;
     vlan->next = NULL;
     pvlan = &first_vlan;
@@ -1513,6 +1542,16 @@ VLANState *qemu_find_vlan(int id)
         pvlan = &(*pvlan)->next;
     *pvlan = vlan;
     return vlan;
+}
+
+static int nic_get_free_idx(void)
+{
+    int index;
+
+    for (index = 0; index < MAX_NICS; index++)
+        if (!nd_table[index].used)
+            return index;
+    return -1;
 }
 
 void qemu_check_nic_model(NICInfo *nd, const char *model)
@@ -1571,19 +1610,20 @@ int net_client_init(const char *device, const char *p)
     if (!strcmp(device, "nic")) {
         NICInfo *nd;
         uint8_t *macaddr;
+        int idx = nic_get_free_idx();
 
-        if (nb_nics >= MAX_NICS) {
+        if (idx == -1 || nb_nics >= MAX_NICS) {
             fprintf(stderr, "Too Many NICs\n");
             return -1;
         }
-        nd = &nd_table[nb_nics];
+        nd = &nd_table[idx];
         macaddr = nd->macaddr;
         macaddr[0] = 0x52;
         macaddr[1] = 0x54;
         macaddr[2] = 0x00;
         macaddr[3] = 0x12;
         macaddr[4] = 0x34;
-        macaddr[5] = 0x56 + nb_nics;
+        macaddr[5] = 0x56 + idx;
 
         if (get_param_value(buf, sizeof(buf), "macaddr", p)) {
             if (parse_macaddr(macaddr, buf) < 0) {
@@ -1596,10 +1636,11 @@ int net_client_init(const char *device, const char *p)
         }
         nd->vlan = vlan;
         nd->name = name;
+        nd->used = 1;
         name = NULL;
         nb_nics++;
         vlan->nb_guest_devs++;
-        ret = 0;
+        ret = idx;
     } else
     if (!strcmp(device, "none")) {
         /* does nothing. It is needed to signal that no network cards
@@ -1619,6 +1660,30 @@ int net_client_init(const char *device, const char *p)
         }
         vlan->nb_host_devs++;
         ret = net_slirp_init(vlan, device, name);
+    } else if (!strcmp(device, "channel")) {
+        long port;
+        char name[20], *devname;
+        struct VMChannel *vmc;
+
+        port = strtol(p, &devname, 10);
+        devname++;
+        if (port < 1 || port > 65535) {
+            fprintf(stderr, "vmchannel wrong port number\n"); 
+            return -1;
+        }
+        vmc = malloc(sizeof(struct VMChannel));
+        snprintf(name, 20, "vmchannel%ld", port);
+        vmc->hd = qemu_chr_open(name, devname, NULL);
+        if (!vmc->hd) {
+            fprintf(stderr, "qemu: could not open vmchannel device"
+                    "'%s'\n", devname);
+            return -1;
+        }
+        vmc->port = port;
+        slirp_add_exec(3, vmc->hd, 4, port);
+        qemu_chr_add_handlers(vmc->hd, vmchannel_can_read, vmchannel_read,
+                NULL, vmc);
+        ret = 0;
     } else
 #endif
 #ifdef _WIN32
@@ -1715,6 +1780,70 @@ int net_client_init(const char *device, const char *p)
     return ret;
 }
 
+void net_client_uninit(NICInfo *nd)
+{
+    nd->vlan->nb_guest_devs--;
+    nb_nics--;
+    nd->used = 0;
+    free((void *)nd->model);
+}
+
+static int net_host_check_device(const char *device)
+{
+    int i;
+    const char *valid_param_list[] = { "tap", "socket"
+#ifdef CONFIG_SLIRP
+                                       ,"user"
+#endif
+#ifdef CONFIG_VDE
+                                       ,"vde"
+#endif
+    };
+    for (i = 0; i < sizeof(valid_param_list) / sizeof(char *); i++) {
+        if (!strncmp(valid_param_list[i], device,
+                     strlen(valid_param_list[i])))
+            return 1;
+    }
+
+    return 0;
+}
+
+void net_host_device_add(Monitor *mon, const char *device, const char *opts)
+{
+    if (!net_host_check_device(device)) {
+        monitor_printf(mon, "invalid host network device %s\n", device);
+        return;
+    }
+    net_client_init(device, opts);
+}
+
+void net_host_device_remove(Monitor *mon, int vlan_id, const char *device)
+{
+    VLANState *vlan;
+    VLANClientState *vc;
+
+    if (!net_host_check_device(device)) {
+        monitor_printf(mon, "invalid host network device %s\n", device);
+        return;
+    }
+
+    vlan = qemu_find_vlan(vlan_id);
+    if (!vlan) {
+        monitor_printf(mon, "can't find vlan %d\n", vlan_id);
+        return;
+    }
+
+   for(vc = vlan->first_client; vc != NULL; vc = vc->next)
+        if (!strcmp(vc->name, device))
+            break;
+
+    if (!vc) {
+        monitor_printf(mon, "can't find device %s\n", device);
+        return;
+    }
+    qemu_del_vlan_client(vc);
+}
+
 int net_client_parse(const char *str)
 {
     const char *p;
@@ -1735,19 +1864,19 @@ int net_client_parse(const char *str)
     return net_client_init(device, p);
 }
 
-void do_info_network(void)
+void do_info_network(Monitor *mon)
 {
     VLANState *vlan;
     VLANClientState *vc;
 
     for(vlan = first_vlan; vlan != NULL; vlan = vlan->next) {
-        term_printf("VLAN %d devices:\n", vlan->id);
+        monitor_printf(mon, "VLAN %d devices:\n", vlan->id);
         for(vc = vlan->first_client; vc != NULL; vc = vc->next)
-            term_printf("  %s: %s\n", vc->name, vc->info_str);
+            monitor_printf(mon, "  %s: %s\n", vc->name, vc->info_str);
     }
 }
 
-int do_set_link(const char *name, const char *up_or_down)
+int do_set_link(Monitor *mon, const char *name, const char *up_or_down)
 {
     VLANState *vlan;
     VLANClientState *vc = NULL;
@@ -1759,7 +1888,7 @@ int do_set_link(const char *name, const char *up_or_down)
 done:
 
     if (!vc) {
-        term_printf("could not find network device '%s'", name);
+        monitor_printf(mon, "could not find network device '%s'", name);
         return 0;
     }
 
@@ -1768,8 +1897,8 @@ done:
     else if (strcmp(up_or_down, "down") == 0)
         vc->link_down = 1;
     else
-        term_printf("invalid link status '%s'; only 'up' or 'down' valid\n",
-                    up_or_down);
+        monitor_printf(mon, "invalid link status '%s'; only 'up' or 'down' "
+                       "valid\n", up_or_down);
 
     if (vc->link_status_changed)
         vc->link_status_changed(vc);

@@ -38,33 +38,33 @@
 
 /* force some bits to zero */
 const uint8_t sr_mask[8] = {
-    (uint8_t)~0xfc,
-    (uint8_t)~0xc2,
-    (uint8_t)~0xf0,
-    (uint8_t)~0xc0,
-    (uint8_t)~0xf1,
-    (uint8_t)~0xff,
-    (uint8_t)~0xff,
-    (uint8_t)~0x00,
+    0x03,
+    0x3d,
+    0x0f,
+    0x3f,
+    0x0e,
+    0x00,
+    0x00,
+    0xff,
 };
 
 const uint8_t gr_mask[16] = {
-    (uint8_t)~0xf0, /* 0x00 */
-    (uint8_t)~0xf0, /* 0x01 */
-    (uint8_t)~0xf0, /* 0x02 */
-    (uint8_t)~0xe0, /* 0x03 */
-    (uint8_t)~0xfc, /* 0x04 */
-    (uint8_t)~0x84, /* 0x05 */
-    (uint8_t)~0xf0, /* 0x06 */
-    (uint8_t)~0xf0, /* 0x07 */
-    (uint8_t)~0x00, /* 0x08 */
-    (uint8_t)~0xff, /* 0x09 */
-    (uint8_t)~0xff, /* 0x0a */
-    (uint8_t)~0xff, /* 0x0b */
-    (uint8_t)~0xff, /* 0x0c */
-    (uint8_t)~0xff, /* 0x0d */
-    (uint8_t)~0xff, /* 0x0e */
-    (uint8_t)~0xff, /* 0x0f */
+    0x0f, /* 0x00 */
+    0x0f, /* 0x01 */
+    0x0f, /* 0x02 */
+    0x1f, /* 0x03 */
+    0x03, /* 0x04 */
+    0x7b, /* 0x05 */
+    0x0f, /* 0x06 */
+    0x0f, /* 0x07 */
+    0xff, /* 0x08 */
+    0x00, /* 0x09 */
+    0x00, /* 0x0a */
+    0x00, /* 0x0b */
+    0x00, /* 0x0c */
+    0x00, /* 0x0d */
+    0x00, /* 0x0e */
+    0x00, /* 0x0f */
 };
 
 #define cbswap_32(__x) \
@@ -1161,7 +1161,10 @@ static inline int get_depth_index(DisplayState *s)
     case 16:
         return 2;
     case 32:
-        return 3;
+        if (is_surface_bgr(s->surface))
+            return 4;
+        else
+            return 3;
     }
 }
 
@@ -1627,7 +1630,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
         if (depth == 32) {
 #endif
             if (is_graphic_console()) {
-                qemu_free_displaysurface(s->ds->surface);
+                qemu_free_displaysurface(s->ds);
                 s->ds->surface = qemu_create_displaysurface_from(disp_width, height, depth,
                                                                s->line_offset,
                                                                s->vram_ptr + (s->start_addr * 4));
@@ -2444,8 +2447,6 @@ int isa_vga_init(uint8_t *vga_ram_base,
     VGAState *s;
 
     s = qemu_mallocz(sizeof(VGAState));
-    if (!s)
-        return -1;
 
     vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
@@ -2469,8 +2470,6 @@ int isa_vga_mm_init(uint8_t *vga_ram_base,
     VGAState *s;
 
     s = qemu_mallocz(sizeof(VGAState));
-    if (!s)
-        return -1;
 
     vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_mm_init(s, vram_base, ctrl_base, it_shift);
@@ -2510,10 +2509,10 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
     s->pci_dev = &d->dev;
 
     pci_conf = d->dev.config;
-    pci_config_set_vendor_id(pci_conf, 0x1234); // dummy VGA (same as Bochs ID)
-    pci_config_set_device_id(pci_conf, 0x1111);
-    pci_conf[0x0a] = 0x00; // VGA controller
-    pci_conf[0x0b] = 0x03;
+    // dummy VGA (same as Bochs ID)
+    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_QEMU);
+    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_QEMU_VGA);
+    pci_config_set_class(pci_conf, PCI_CLASS_DISPLAY_VGA);
     pci_conf[0x0e] = 0x00; // header_type
 
     /* XXX: vga_ram_size must be a power of two */
@@ -2623,7 +2622,7 @@ static void vga_screen_dump_common(VGAState *s, const char *filename,
     dcl.dpy_resize = vga_save_dpy_resize;
     dcl.dpy_refresh = vga_save_dpy_refresh;
     register_displaychangelistener(ds, &dcl);
-    ds->surface = qemu_create_displaysurface(w, h, 32, 4 * w);
+    ds->surface = qemu_create_displaysurface(ds, w, h);
 
     s->ds = ds;
     s->graphic_mode = -1;
@@ -2631,7 +2630,7 @@ static void vga_screen_dump_common(VGAState *s, const char *filename,
 
     ppm_save(filename, ds->surface);
 
-    qemu_free_displaysurface(ds->surface);
+    qemu_free_displaysurface(ds);
     s->ds = saved_ds;
 }
 

@@ -22,6 +22,7 @@
 #include "sysemu.h"
 #include "kvm.h"
 #include "cpu.h"
+#include "gdbstub.h"
 
 //#define DEBUG_KVM
 
@@ -36,35 +37,87 @@
 int kvm_arch_init_vcpu(CPUState *env)
 {
     struct {
-        struct kvm_cpuid cpuid;
-        struct kvm_cpuid_entry entries[100];
+        struct kvm_cpuid2 cpuid;
+        struct kvm_cpuid_entry2 entries[100];
     } __attribute__((packed)) cpuid_data;
-    uint32_t limit, i, cpuid_i;
+    uint32_t limit, i, j, cpuid_i;
     uint32_t eax, ebx, ecx, edx;
 
     cpuid_i = 0;
 
-    cpu_x86_cpuid(env, 0, &eax, &ebx, &ecx, &edx);
+    cpu_x86_cpuid(env, 0, 0, &eax, &ebx, &ecx, &edx);
     limit = eax;
 
     for (i = 0; i <= limit; i++) {
-        struct kvm_cpuid_entry *c = &cpuid_data.entries[cpuid_i++];
+        struct kvm_cpuid_entry2 *c = &cpuid_data.entries[cpuid_i++];
 
-        cpu_x86_cpuid(env, i, &eax, &ebx, &ecx, &edx);
-        c->function = i;
-        c->eax = eax;
-        c->ebx = ebx;
-        c->ecx = ecx;
-        c->edx = edx;
+        switch (i) {
+        case 2: {
+            /* Keep reading function 2 till all the input is received */
+            int times;
+
+            cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
+            times = eax & 0xff;
+
+            c->function = i;
+            c->flags |= KVM_CPUID_FLAG_STATEFUL_FUNC;
+            c->flags |= KVM_CPUID_FLAG_STATE_READ_NEXT;
+            c->eax = eax;
+            c->ebx = ebx;
+            c->ecx = ecx;
+            c->edx = edx;
+
+            for (j = 1; j < times; ++j) {
+                cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
+                c->function = i;
+                c->flags |= KVM_CPUID_FLAG_STATEFUL_FUNC;
+                c->eax = eax;
+                c->ebx = ebx;
+                c->ecx = ecx;
+                c->edx = edx;
+                c = &cpuid_data.entries[++cpuid_i];
+            }
+            break;
+        }
+        case 4:
+        case 0xb:
+        case 0xd:
+            for (j = 0; ; j++) {
+                cpu_x86_cpuid(env, i, j, &eax, &ebx, &ecx, &edx);
+                c->function = i;
+                c->flags = KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+                c->index = j;
+                c->eax = eax;
+                c->ebx = ebx;
+                c->ecx = ecx;
+                c->edx = edx;
+                c = &cpuid_data.entries[++cpuid_i];
+
+                if (i == 4 && eax == 0)
+                    break;
+                if (i == 0xb && !(ecx & 0xff00))
+                    break;
+                if (i == 0xd && eax == 0)
+                    break;
+            }
+            break;
+        default:
+            cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
+            c->function = i;
+            c->eax = eax;
+            c->ebx = ebx;
+            c->ecx = ecx;
+            c->edx = edx;
+            break;
+        }
     }
-
-    cpu_x86_cpuid(env, 0x80000000, &eax, &ebx, &ecx, &edx);
+    cpu_x86_cpuid(env, 0x80000000, 0, &eax, &ebx, &ecx, &edx);
     limit = eax;
 
     for (i = 0x80000000; i <= limit; i++) {
-        struct kvm_cpuid_entry *c = &cpuid_data.entries[cpuid_i++];
+        struct kvm_cpuid_entry2 *c = &cpuid_data.entries[cpuid_i++];
 
-        cpu_x86_cpuid(env, i, &eax, &ebx, &ecx, &edx);
+        cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
         c->function = i;
         c->eax = eax;
         c->ebx = ebx;
@@ -74,7 +127,7 @@ int kvm_arch_init_vcpu(CPUState *env)
 
     cpuid_data.cpuid.nent = cpuid_i;
 
-    return kvm_vcpu_ioctl(env, KVM_SET_CPUID, &cpuid_data);
+    return kvm_vcpu_ioctl(env, KVM_SET_CPUID2, &cpuid_data);
 }
 
 static int kvm_has_msr_star(CPUState *env)
@@ -97,8 +150,6 @@ static int kvm_has_msr_star(CPUState *env)
 
         kvm_msr_list = qemu_mallocz(sizeof(msr_list) +
                                     msr_list.nmsrs * sizeof(msr_list.indices[0]));
-        if (kvm_msr_list == NULL)
-            return 0;
 
         kvm_msr_list->nmsrs = msr_list.nmsrs;
         ret = kvm_ioctl(env->kvm_state, KVM_GET_MSR_INDEX_LIST, kvm_msr_list);
@@ -445,10 +496,6 @@ static int kvm_get_sregs(CPUState *env)
             }
     }
     env->hflags = (env->hflags & HFLAG_COPY_MASK) | hflags;
-    env->cc_src = env->eflags & (CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
-    env->df = 1 - (2 * ((env->eflags >> 10) & 1));
-    env->cc_op = CC_OP_EFLAGS;
-    env->eflags &= ~(DF_MASK | CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
 
     return 0;
 }
@@ -637,3 +684,193 @@ int kvm_arch_handle_exit(CPUState *env, struct kvm_run *run)
 
     return ret;
 }
+
+#ifdef KVM_CAP_SET_GUEST_DEBUG
+static int kvm_patch_opcode_byte(CPUState *env, target_ulong addr, uint8_t val)
+{
+    target_phys_addr_t phys_page_addr;
+    unsigned long pd;
+    uint8_t *ptr;
+
+    phys_page_addr = cpu_get_phys_page_debug(env, addr & TARGET_PAGE_MASK);
+    if (phys_page_addr == -1)
+        return -EINVAL;
+
+    pd = cpu_get_physical_page_desc(phys_page_addr);
+    if ((pd & ~TARGET_PAGE_MASK) != IO_MEM_RAM &&
+        (pd & ~TARGET_PAGE_MASK) != IO_MEM_ROM && !(pd & IO_MEM_ROMD))
+        return -EINVAL;
+
+    ptr = phys_ram_base + (pd & TARGET_PAGE_MASK)
+                        + (addr & ~TARGET_PAGE_MASK);
+    *ptr = val;
+    return 0;
+}
+
+int kvm_arch_insert_sw_breakpoint(CPUState *env, struct kvm_sw_breakpoint *bp)
+{
+    if (cpu_memory_rw_debug(env, bp->pc, (uint8_t *)&bp->saved_insn, 1, 0) ||
+        kvm_patch_opcode_byte(env, bp->pc, 0xcc))
+        return -EINVAL;
+    return 0;
+}
+
+int kvm_arch_remove_sw_breakpoint(CPUState *env, struct kvm_sw_breakpoint *bp)
+{
+    uint8_t int3;
+
+    if (cpu_memory_rw_debug(env, bp->pc, &int3, 1, 0) || int3 != 0xcc ||
+        kvm_patch_opcode_byte(env, bp->pc, bp->saved_insn))
+        return -EINVAL;
+    return 0;
+}
+
+static struct {
+    target_ulong addr;
+    int len;
+    int type;
+} hw_breakpoint[4];
+
+static int nb_hw_breakpoint;
+
+static int find_hw_breakpoint(target_ulong addr, int len, int type)
+{
+    int n;
+
+    for (n = 0; n < nb_hw_breakpoint; n++)
+        if (hw_breakpoint[n].addr == addr && hw_breakpoint[n].type == type &&
+            (hw_breakpoint[n].len == len || len == -1))
+            return n;
+    return -1;
+}
+
+int kvm_arch_insert_hw_breakpoint(target_ulong addr,
+                                  target_ulong len, int type)
+{
+    switch (type) {
+    case GDB_BREAKPOINT_HW:
+        len = 1;
+        break;
+    case GDB_WATCHPOINT_WRITE:
+    case GDB_WATCHPOINT_ACCESS:
+        switch (len) {
+        case 1:
+            break;
+        case 2:
+        case 4:
+        case 8:
+            if (addr & (len - 1))
+                return -EINVAL;
+            break;
+        default:
+            return -EINVAL;
+        }
+        break;
+    default:
+        return -ENOSYS;
+    }
+
+    if (nb_hw_breakpoint == 4)
+        return -ENOBUFS;
+
+    if (find_hw_breakpoint(addr, len, type) >= 0)
+        return -EEXIST;
+
+    hw_breakpoint[nb_hw_breakpoint].addr = addr;
+    hw_breakpoint[nb_hw_breakpoint].len = len;
+    hw_breakpoint[nb_hw_breakpoint].type = type;
+    nb_hw_breakpoint++;
+
+    return 0;
+}
+
+int kvm_arch_remove_hw_breakpoint(target_ulong addr,
+                                  target_ulong len, int type)
+{
+    int n;
+
+    n = find_hw_breakpoint(addr, (type == GDB_BREAKPOINT_HW) ? 1 : len, type);
+    if (n < 0)
+        return -ENOENT;
+
+    nb_hw_breakpoint--;
+    hw_breakpoint[n] = hw_breakpoint[nb_hw_breakpoint];
+
+    return 0;
+}
+
+void kvm_arch_remove_all_hw_breakpoints(void)
+{
+    nb_hw_breakpoint = 0;
+}
+
+static CPUWatchpoint hw_watchpoint;
+
+int kvm_arch_debug(struct kvm_debug_exit_arch *arch_info)
+{
+    int handle = 0;
+    int n;
+
+    if (arch_info->exception == 1) {
+        if (arch_info->dr6 & (1 << 14)) {
+            if (cpu_single_env->singlestep_enabled)
+                handle = 1;
+        } else {
+            for (n = 0; n < 4; n++)
+                if (arch_info->dr6 & (1 << n))
+                    switch ((arch_info->dr7 >> (16 + n*4)) & 0x3) {
+                    case 0x0:
+                        handle = 1;
+                        break;
+                    case 0x1:
+                        handle = 1;
+                        cpu_single_env->watchpoint_hit = &hw_watchpoint;
+                        hw_watchpoint.vaddr = hw_breakpoint[n].addr;
+                        hw_watchpoint.flags = BP_MEM_WRITE;
+                        break;
+                    case 0x3:
+                        handle = 1;
+                        cpu_single_env->watchpoint_hit = &hw_watchpoint;
+                        hw_watchpoint.vaddr = hw_breakpoint[n].addr;
+                        hw_watchpoint.flags = BP_MEM_ACCESS;
+                        break;
+                    }
+        }
+    } else if (kvm_find_sw_breakpoint(cpu_single_env, arch_info->pc))
+        handle = 1;
+
+    if (!handle)
+        kvm_update_guest_debug(cpu_single_env,
+                        (arch_info->exception == 1) ?
+                        KVM_GUESTDBG_INJECT_DB : KVM_GUESTDBG_INJECT_BP);
+
+    return handle;
+}
+
+void kvm_arch_update_guest_debug(CPUState *env, struct kvm_guest_debug *dbg)
+{
+    const uint8_t type_code[] = {
+        [GDB_BREAKPOINT_HW] = 0x0,
+        [GDB_WATCHPOINT_WRITE] = 0x1,
+        [GDB_WATCHPOINT_ACCESS] = 0x3
+    };
+    const uint8_t len_code[] = {
+        [1] = 0x0, [2] = 0x1, [4] = 0x3, [8] = 0x2
+    };
+    int n;
+
+    if (kvm_sw_breakpoints_active(env))
+        dbg->control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP;
+
+    if (nb_hw_breakpoint > 0) {
+        dbg->control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP;
+        dbg->arch.debugreg[7] = 0x0600;
+        for (n = 0; n < nb_hw_breakpoint; n++) {
+            dbg->arch.debugreg[n] = hw_breakpoint[n].addr;
+            dbg->arch.debugreg[7] |= (2 << (n * 2)) |
+                (type_code[hw_breakpoint[n].type] << (16 + n*4)) |
+                (len_code[hw_breakpoint[n].len] << (18 + n*4));
+        }
+    }
+}
+#endif /* KVM_CAP_SET_GUEST_DEBUG */

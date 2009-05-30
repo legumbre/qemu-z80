@@ -28,10 +28,13 @@
 #include "scsi-disk.h"
 #include "pcmcia.h"
 #include "block.h"
+#include "block_int.h"
 #include "qemu-timer.h"
 #include "sysemu.h"
 #include "ppc_mac.h"
+#include "mac_dbdma.h"
 #include "sh.h"
+#include "dma.h"
 
 /* debug IDE devices */
 //#define DEBUG_IDE
@@ -422,7 +425,7 @@ typedef struct IDEState {
     int atapi_dma; /* true if dma is requested for the packet cmd */
     /* ATA DMA state */
     int io_buffer_size;
-    QEMUIOVector iovec;
+    QEMUSGList sg;
     /* PIO transfer handling */
     int req_nb_sectors; /* number of sectors per interrupt */
     EndTransferFunc *end_transfer_func;
@@ -437,6 +440,8 @@ typedef struct IDEState {
     uint32_t mdata_size;
     uint8_t *mdata_storage;
     int media_changed;
+    /* for pmac */
+    int is_read;
 } IDEState;
 
 /* XXX: DVDs that could fit on a CD will be reported as a CD */
@@ -873,10 +878,8 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
         uint32_t size;
     } prd;
     int l, len;
-    void *mem;
-    target_phys_addr_t l1;
 
-    qemu_iovec_init(&s->iovec, s->nsector / (TARGET_PAGE_SIZE/512) + 1);
+    qemu_sglist_init(&s->sg, s->nsector / (TARGET_PAGE_SIZE/512) + 1);
     s->io_buffer_size = 0;
     for(;;) {
         if (bm->cur_prd_len == 0) {
@@ -897,15 +900,10 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
         }
         l = bm->cur_prd_len;
         if (l > 0) {
-            l1 = l;
-            mem = cpu_physical_memory_map(bm->cur_prd_addr, &l1, is_write);
-            if (!mem) {
-                break;
-            }
-            qemu_iovec_add(&s->iovec, mem, l1);
-            bm->cur_prd_addr += l1;
-            bm->cur_prd_len -= l1;
-            s->io_buffer_size += l1;
+            qemu_sglist_add(&s->sg, bm->cur_prd_addr, l);
+            bm->cur_prd_addr += l;
+            bm->cur_prd_len -= l;
+            s->io_buffer_size += l;
         }
     }
     return 1;
@@ -913,14 +911,7 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
 
 static void dma_buf_commit(IDEState *s, int is_write)
 {
-    int i;
-
-    for (i = 0; i < s->iovec.niov; ++i) {
-        cpu_physical_memory_unmap(s->iovec.iov[i].iov_base,
-                                  s->iovec.iov[i].iov_len, is_write,
-                                  s->iovec.iov[i].iov_len);
-    }
-    qemu_iovec_destroy(&s->iovec);
+    qemu_sglist_destroy(&s->sg);
 }
 
 static void ide_dma_error(IDEState *s)
@@ -1003,39 +994,6 @@ static int dma_buf_rw(BMDMAState *bm, int is_write)
     return 1;
 }
 
-typedef struct {
-    BMDMAState *bm;
-    void (*cb)(void *opaque, int ret);
-    QEMUBH *bh;
-} MapFailureContinuation;
-
-static void reschedule_dma(void *opaque)
-{
-    MapFailureContinuation *cont = opaque;
-
-    cont->cb(cont->bm, 0);
-    qemu_bh_delete(cont->bh);
-    qemu_free(cont);
-}
-
-static void continue_after_map_failure(void *opaque)
-{
-    MapFailureContinuation *cont = opaque;
-
-    cont->bh = qemu_bh_new(reschedule_dma, opaque);
-    qemu_bh_schedule(cont->bh);
-}
-
-static void wait_for_bounce_buffer(BMDMAState *bmdma,
-                                   void (*cb)(void *opaque, int ret))
-{
-    MapFailureContinuation *cont = qemu_malloc(sizeof(*cont));
-
-    cont->bm = bmdma;
-    cont->cb = cb;
-    cpu_register_map_client(cont, continue_after_map_failure);
-}
-
 static void ide_read_dma_cb(void *opaque, int ret)
 {
     BMDMAState *bm = opaque;
@@ -1077,15 +1035,10 @@ static void ide_read_dma_cb(void *opaque, int ret)
     s->io_buffer_size = n * 512;
     if (dma_buf_prepare(bm, 1) == 0)
         goto eot;
-    if (!s->iovec.niov) {
-        wait_for_bounce_buffer(bm, ide_read_dma_cb);
-        return;
-    }
 #ifdef DEBUG_AIO
     printf("aio_read: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_readv(s->bs, sector_num, &s->iovec, n,
-                               ide_read_dma_cb, bm);
+    bm->aiocb = dma_bdrv_read(s->bs, &s->sg, sector_num, ide_read_dma_cb, bm);
     ide_dma_submit_check(s, ide_read_dma_cb, bm);
 }
 
@@ -1094,6 +1047,7 @@ static void ide_sector_read_dma(IDEState *s)
     s->status = READY_STAT | SEEK_STAT | DRQ_STAT | BUSY_STAT;
     s->io_buffer_index = 0;
     s->io_buffer_size = 0;
+    s->is_read = 1;
     ide_dma_start(s, ide_read_dma_cb);
 }
 
@@ -1205,15 +1159,10 @@ static void ide_write_dma_cb(void *opaque, int ret)
     /* launch next transfer */
     if (dma_buf_prepare(bm, 0) == 0)
         goto eot;
-    if (!s->iovec.niov) {
-        wait_for_bounce_buffer(bm, ide_write_dma_cb);
-        return;
-    }
 #ifdef DEBUG_AIO
     printf("aio_write: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_writev(s->bs, sector_num, &s->iovec, n,
-                                ide_write_dma_cb, bm);
+    bm->aiocb = dma_bdrv_write(s->bs, &s->sg, sector_num, ide_write_dma_cb, bm);
     ide_dma_submit_check(s, ide_write_dma_cb, bm);
 }
 
@@ -1222,6 +1171,7 @@ static void ide_sector_write_dma(IDEState *s)
     s->status = READY_STAT | SEEK_STAT | DRQ_STAT | BUSY_STAT;
     s->io_buffer_index = 0;
     s->io_buffer_size = 0;
+    s->is_read = 0;
     ide_dma_start(s, ide_write_dma_cb);
 }
 
@@ -1260,7 +1210,7 @@ static void ide_atapi_cmd_check_status(IDEState *s)
 static inline void cpu_to_ube16(uint8_t *buf, int val)
 {
     buf[0] = val >> 8;
-    buf[1] = val;
+    buf[1] = val & 0xff;
 }
 
 static inline void cpu_to_ube32(uint8_t *buf, unsigned int val)
@@ -1268,7 +1218,7 @@ static inline void cpu_to_ube32(uint8_t *buf, unsigned int val)
     buf[0] = val >> 24;
     buf[1] = val >> 16;
     buf[2] = val >> 8;
-    buf[3] = val;
+    buf[3] = val & 0xff;
 }
 
 static inline int ube16_to_cpu(const uint8_t *buf)
@@ -2946,8 +2896,6 @@ void isa_ide_init(int iobase, int iobase2, qemu_irq irq,
     IDEState *ide_state;
 
     ide_state = qemu_mallocz(sizeof(IDEState) * 2);
-    if (!ide_state)
-        return;
 
     ide_init2(ide_state, hd0, hd1, irq);
     ide_init_ioport(ide_state, iobase, iobase2);
@@ -3348,8 +3296,7 @@ void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
     pci_conf[0x08] = 0x07; // IDE controller revision
     pci_conf[0x09] = 0x8f;
 
-    pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
-    pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
+    pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_IDE);
     pci_conf[0x0e] = 0x00; // header_type
 
     pci_conf[0x51] = 0x04; // enable IDE0
@@ -3406,6 +3353,7 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
 {
     PCIIDEState *d;
     uint8_t *pci_conf;
+    int i;
 
     /* register a function 1 of PIIX3 */
     d = (PCIIDEState *)pci_register_device(bus, "PIIX3 IDE",
@@ -3418,8 +3366,7 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_INTEL);
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371SB_1);
     pci_conf[0x09] = 0x80; // legacy ATA mode
-    pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
-    pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
+    pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_IDE);
     pci_conf[0x0e] = 0x00; // header_type
 
     qemu_register_reset(piix3_reset, d);
@@ -3432,6 +3379,10 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init2(&d->ide_if[2], hd_table[2], hd_table[3], pic[15]);
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
+
+    for (i = 0; i < 4; i++)
+        if (hd_table[i])
+            hd_table[i]->private = &d->dev;
 
     register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
@@ -3455,8 +3406,7 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_INTEL);
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371AB);
     pci_conf[0x09] = 0x80; // legacy ATA mode
-    pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
-    pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
+    pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_IDE);
     pci_conf[0x0e] = 0x00; // header_type
 
     qemu_register_reset(piix3_reset, d);
@@ -3473,21 +3423,165 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
+#if defined(TARGET_PPC)
 /***********************************************************/
 /* MacIO based PowerPC IDE */
+
+typedef struct MACIOIDEState {
+    IDEState ide_if[2];
+    BlockDriverAIOCB *aiocb;
+} MACIOIDEState;
+
+static void pmac_ide_atapi_transfer_cb(void *opaque, int ret)
+{
+    DBDMA_io *io = opaque;
+    MACIOIDEState *m = io->opaque;
+    IDEState *s = m->ide_if->cur_drive;
+
+    if (ret < 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+        ide_atapi_io_error(s, ret);
+        io->dma_end(opaque);
+        return;
+    }
+
+    if (s->io_buffer_size > 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+
+        s->packet_transfer_size -= s->io_buffer_size;
+
+        s->io_buffer_index += s->io_buffer_size;
+	s->lba += s->io_buffer_index >> 11;
+        s->io_buffer_index &= 0x7ff;
+    }
+
+    if (s->packet_transfer_size <= 0)
+        ide_atapi_cmd_ok(s);
+
+    if (io->len == 0) {
+        io->dma_end(opaque);
+        return;
+    }
+
+    /* launch next transfer */
+
+    s->io_buffer_size = io->len;
+
+    qemu_sglist_init(&s->sg, io->len / TARGET_PAGE_SIZE + 1);
+    qemu_sglist_add(&s->sg, io->addr, io->len);
+    io->addr += io->len;
+    io->len = 0;
+
+    m->aiocb = dma_bdrv_read(s->bs, &s->sg,
+                             (int64_t)(s->lba << 2) + (s->io_buffer_index >> 9),
+                             pmac_ide_atapi_transfer_cb, io);
+    if (!m->aiocb) {
+        qemu_sglist_destroy(&s->sg);
+        /* Note: media not present is the most likely case */
+        ide_atapi_cmd_error(s, SENSE_NOT_READY,
+                            ASC_MEDIUM_NOT_PRESENT);
+        io->dma_end(opaque);
+        return;
+    }
+}
+
+static void pmac_ide_transfer_cb(void *opaque, int ret)
+{
+    DBDMA_io *io = opaque;
+    MACIOIDEState *m = io->opaque;
+    IDEState *s = m->ide_if->cur_drive;
+    int n;
+    int64_t sector_num;
+
+    if (ret < 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+	ide_dma_error(s);
+        io->dma_end(io);
+        return;
+    }
+
+    sector_num = ide_get_sector(s);
+    if (s->io_buffer_size > 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+        n = (s->io_buffer_size + 0x1ff) >> 9;
+        sector_num += n;
+        ide_set_sector(s, sector_num);
+        s->nsector -= n;
+    }
+
+    /* end of transfer ? */
+    if (s->nsector == 0) {
+        s->status = READY_STAT | SEEK_STAT;
+        ide_set_irq(s);
+    }
+
+    /* end of DMA ? */
+
+    if (io->len == 0) {
+        io->dma_end(io);
+	return;
+    }
+
+    /* launch next transfer */
+
+    s->io_buffer_index = 0;
+    s->io_buffer_size = io->len;
+
+    qemu_sglist_init(&s->sg, io->len / TARGET_PAGE_SIZE + 1);
+    qemu_sglist_add(&s->sg, io->addr, io->len);
+    io->addr += io->len;
+    io->len = 0;
+
+    if (s->is_read)
+        m->aiocb = dma_bdrv_read(s->bs, &s->sg, sector_num,
+		                 pmac_ide_transfer_cb, io);
+    else
+        m->aiocb = dma_bdrv_write(s->bs, &s->sg, sector_num,
+		                  pmac_ide_transfer_cb, io);
+    if (!m->aiocb)
+        pmac_ide_transfer_cb(io, -1);
+}
+
+static void pmac_ide_transfer(DBDMA_io *io)
+{
+    MACIOIDEState *m = io->opaque;
+    IDEState *s = m->ide_if->cur_drive;
+
+    s->io_buffer_size = 0;
+    if (s->is_cdrom) {
+        pmac_ide_atapi_transfer_cb(io, 0);
+        return;
+    }
+
+    pmac_ide_transfer_cb(io, 0);
+}
+
+static void pmac_ide_flush(DBDMA_io *io)
+{
+    MACIOIDEState *m = io->opaque;
+
+    if (m->aiocb)
+        qemu_aio_flush();
+}
 
 /* PowerMac IDE memory IO */
 static void pmac_ide_writeb (void *opaque,
                              target_phys_addr_t addr, uint32_t val)
 {
+    MACIOIDEState *d = opaque;
+
     addr = (addr & 0xFFF) >> 4;
     switch (addr) {
     case 1 ... 7:
-        ide_ioport_write(opaque, addr, val);
+        ide_ioport_write(d->ide_if, addr, val);
         break;
     case 8:
     case 22:
-        ide_cmd_write(opaque, 0, val);
+        ide_cmd_write(d->ide_if, 0, val);
         break;
     default:
         break;
@@ -3497,15 +3591,16 @@ static void pmac_ide_writeb (void *opaque,
 static uint32_t pmac_ide_readb (void *opaque,target_phys_addr_t addr)
 {
     uint8_t retval;
+    MACIOIDEState *d = opaque;
 
     addr = (addr & 0xFFF) >> 4;
     switch (addr) {
     case 1 ... 7:
-        retval = ide_ioport_read(opaque, addr);
+        retval = ide_ioport_read(d->ide_if, addr);
         break;
     case 8:
     case 22:
-        retval = ide_status_read(opaque, 0);
+        retval = ide_status_read(d->ide_if, 0);
         break;
     default:
         retval = 0xFF;
@@ -3517,22 +3612,25 @@ static uint32_t pmac_ide_readb (void *opaque,target_phys_addr_t addr)
 static void pmac_ide_writew (void *opaque,
                              target_phys_addr_t addr, uint32_t val)
 {
+    MACIOIDEState *d = opaque;
+
     addr = (addr & 0xFFF) >> 4;
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap16(val);
 #endif
     if (addr == 0) {
-        ide_data_writew(opaque, 0, val);
+        ide_data_writew(d->ide_if, 0, val);
     }
 }
 
 static uint32_t pmac_ide_readw (void *opaque,target_phys_addr_t addr)
 {
     uint16_t retval;
+    MACIOIDEState *d = opaque;
 
     addr = (addr & 0xFFF) >> 4;
     if (addr == 0) {
-        retval = ide_data_readw(opaque, 0);
+        retval = ide_data_readw(d->ide_if, 0);
     } else {
         retval = 0xFFFF;
     }
@@ -3545,22 +3643,25 @@ static uint32_t pmac_ide_readw (void *opaque,target_phys_addr_t addr)
 static void pmac_ide_writel (void *opaque,
                              target_phys_addr_t addr, uint32_t val)
 {
+    MACIOIDEState *d = opaque;
+
     addr = (addr & 0xFFF) >> 4;
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap32(val);
 #endif
     if (addr == 0) {
-        ide_data_writel(opaque, 0, val);
+        ide_data_writel(d->ide_if, 0, val);
     }
 }
 
 static uint32_t pmac_ide_readl (void *opaque,target_phys_addr_t addr)
 {
     uint32_t retval;
+    MACIOIDEState *d = opaque;
 
     addr = (addr & 0xFFF) >> 4;
     if (addr == 0) {
-        retval = ide_data_readl(opaque, 0);
+        retval = ide_data_readl(d->ide_if, 0);
     } else {
         retval = 0xFFFFFFFF;
     }
@@ -3584,7 +3685,8 @@ static CPUReadMemoryFunc *pmac_ide_read[] = {
 
 static void pmac_ide_save(QEMUFile *f, void *opaque)
 {
-    IDEState *s = (IDEState *)opaque;
+    MACIOIDEState *d = opaque;
+    IDEState *s = d->ide_if;
     uint8_t drive1_selected;
     unsigned int i;
 
@@ -3601,7 +3703,8 @@ static void pmac_ide_save(QEMUFile *f, void *opaque)
 
 static int pmac_ide_load(QEMUFile *f, void *opaque, int version_id)
 {
-    IDEState *s = (IDEState *)opaque;
+    MACIOIDEState *d = opaque;
+    IDEState *s = d->ide_if;
     uint8_t drive1_selected;
     unsigned int i;
 
@@ -3622,7 +3725,8 @@ static int pmac_ide_load(QEMUFile *f, void *opaque, int version_id)
 
 static void pmac_ide_reset(void *opaque)
 {
-    IDEState *s = (IDEState *)opaque;
+    MACIOIDEState *d = opaque;
+    IDEState *s = d->ide_if;
 
     ide_reset(&s[0]);
     ide_reset(&s[1]);
@@ -3631,21 +3735,27 @@ static void pmac_ide_reset(void *opaque)
 /* hd_table must contain 4 block drivers */
 /* PowerMac uses memory mapped registers, not I/O. Return the memory
    I/O index to access the ide. */
-int pmac_ide_init (BlockDriverState **hd_table, qemu_irq irq)
+int pmac_ide_init (BlockDriverState **hd_table, qemu_irq irq,
+		   void *dbdma, int channel, qemu_irq dma_irq)
 {
-    IDEState *ide_if;
+    MACIOIDEState *d;
     int pmac_ide_memory;
 
-    ide_if = qemu_mallocz(sizeof(IDEState) * 2);
-    ide_init2(&ide_if[0], hd_table[0], hd_table[1], irq);
+    d = qemu_mallocz(sizeof(MACIOIDEState));
+    ide_init2(d->ide_if, hd_table[0], hd_table[1], irq);
+
+    if (dbdma)
+        DBDMA_register_channel(dbdma, channel, dma_irq, pmac_ide_transfer, pmac_ide_flush, d);
 
     pmac_ide_memory = cpu_register_io_memory(0, pmac_ide_read,
-                                             pmac_ide_write, &ide_if[0]);
-    register_savevm("ide", 0, 1, pmac_ide_save, pmac_ide_load, &ide_if[0]);
-    qemu_register_reset(pmac_ide_reset, &ide_if[0]);
-    pmac_ide_reset(&ide_if[0]);
+                                             pmac_ide_write, d);
+    register_savevm("ide", 0, 1, pmac_ide_save, pmac_ide_load, d);
+    qemu_register_reset(pmac_ide_reset, d);
+    pmac_ide_reset(d);
+
     return pmac_ide_memory;
 }
+#endif /* TARGET_PPC */
 
 /***********************************************************/
 /* MMIO based ide port

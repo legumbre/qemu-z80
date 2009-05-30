@@ -31,7 +31,7 @@
 #include "net.h"
 #include "smbus.h"
 #include "boards.h"
-#include "console.h"
+#include "monitor.h"
 #include "fw_cfg.h"
 #include "virtio-blk.h"
 #include "virtio-balloon.h"
@@ -50,6 +50,7 @@
 /* Leave a chunk of memory at the top of RAM for the BIOS ACPI tables.  */
 #define ACPI_DATA_SIZE       0x10000
 #define BIOS_CFG_IOPORT 0x510
+#define FW_CFG_ACPI_TABLES (FW_CFG_ARCH_LOCAL + 0)
 
 #define MAX_IDE_BUS 2
 
@@ -204,6 +205,7 @@ static int boot_device2nibble(char boot_device)
  and used there as well */
 static int pc_boot_set(void *opaque, const char *boot_device)
 {
+    Monitor *mon = cur_mon;
 #define PC_MAX_BOOT_DEVICES 3
     RTCState *s = (RTCState *)opaque;
     int nbds, bds[3] = { 0, };
@@ -211,14 +213,14 @@ static int pc_boot_set(void *opaque, const char *boot_device)
 
     nbds = strlen(boot_device);
     if (nbds > PC_MAX_BOOT_DEVICES) {
-        term_printf("Too many boot devices for PC\n");
+        monitor_printf(mon, "Too many boot devices for PC\n");
         return(1);
     }
     for (i = 0; i < nbds; i++) {
         bds[i] = boot_device2nibble(boot_device[i]);
         if (bds[i] == 0) {
-            term_printf("Invalid boot device for PC: '%c'\n",
-                    boot_device[i]);
+            monitor_printf(mon, "Invalid boot device for PC: '%c'\n",
+                           boot_device[i]);
             return(1);
         }
     }
@@ -438,6 +440,8 @@ static void bochs_bios_init(void)
     fw_cfg = fw_cfg_init(BIOS_CFG_IOPORT, BIOS_CFG_IOPORT + 1, 0, 0);
     fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);
     fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
+    fw_cfg_add_bytes(fw_cfg, FW_CFG_ACPI_TABLES, (uint8_t *)acpi_tables,
+                     acpi_tables_len);
 }
 
 /* Generate an initial boot sector which sets state and jump to
@@ -1009,6 +1013,8 @@ vga_bios_error:
         else
             pci_nic_init(pci_bus, nd, -1, "ne2k_pci");
     }
+
+    qemu_system_hot_add_init();
 
     if (drive_get_max_bus(IF_IDE) >= MAX_IDE_BUS) {
         fprintf(stderr, "qemu: too many IDE bus\n");

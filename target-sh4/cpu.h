@@ -37,6 +37,8 @@
 #define SH_CPU_SH7750_ALL (SH_CPU_SH7750 | SH_CPU_SH7750S | SH_CPU_SH7750R)
 #define SH_CPU_SH7751_ALL (SH_CPU_SH7751 | SH_CPU_SH7751R)
 
+#define CPUState struct CPUSH4State
+
 #include "cpu-defs.h"
 
 #include "softfloat.h"
@@ -95,6 +97,7 @@ typedef struct tlb_t {
 
 enum sh_features {
     SH_FEATURE_SH4A = 1,
+    SH_FEATURE_BCR3_AND_BCR4 = 2,
 };
 
 typedef struct CPUSH4State {
@@ -139,6 +142,8 @@ typedef struct CPUSH4State {
     uint32_t prr;		/* Processor Revision Register */
     uint32_t cvr;		/* Cache Version Register */
 
+    uint32_t ldst;
+
      CPU_COMMON tlb_t utlb[UTLB_SIZE];	/* unified translation table */
     tlb_t itlb[ITLB_SIZE];	/* instruction translation table */
     void *intc_handle;
@@ -162,9 +167,10 @@ static inline void cpu_set_tls(CPUSH4State *env, target_ulong newtls)
   env->gbr = newtls;
 }
 
+void cpu_load_tlb(CPUSH4State * env);
+
 #include "softfloat.h"
 
-#define CPUState CPUSH4State
 #define cpu_init cpu_sh4_init
 #define cpu_exec cpu_sh4_exec
 #define cpu_gen_code cpu_sh4_gen_code

@@ -753,14 +753,13 @@ void cpu_dump_statistics (CPUState *env, FILE *f,
                           int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
                           int flags);
 
-void noreturn cpu_abort(CPUState *env, const char *fmt, ...)
+void QEMU_NORETURN cpu_abort(CPUState *env, const char *fmt, ...)
     __attribute__ ((__format__ (__printf__, 2, 3)));
 extern CPUState *first_cpu;
 extern CPUState *cpu_single_env;
 extern int64_t qemu_icount;
 extern int use_icount;
 
-#define CPU_INTERRUPT_EXIT   0x01 /* wants exit from main loop */
 #define CPU_INTERRUPT_HARD   0x02 /* hardware interrupt pending */
 #define CPU_INTERRUPT_EXITTB 0x04 /* exit the current TB (use for x86 a20 case) */
 #define CPU_INTERRUPT_TIMER  0x08 /* internal timer exception pending */
@@ -773,6 +772,8 @@ extern int use_icount;
 
 void cpu_interrupt(CPUState *s, int mask);
 void cpu_reset_interrupt(CPUState *env, int mask);
+
+void cpu_exit(CPUState *s);
 
 /* Breakpoint/watchpoint flags */
 #define BP_MEM_READ           0x01
@@ -909,6 +910,7 @@ int cpu_register_io_memory(int io_index,
                            CPUReadMemoryFunc **mem_read,
                            CPUWriteMemoryFunc **mem_write,
                            void *opaque);
+void cpu_unregister_io_memory(int table_address);
 CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index);
 CPUReadMemoryFunc **cpu_get_io_memory_read(int io_index);
 

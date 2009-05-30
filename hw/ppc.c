@@ -314,6 +314,66 @@ void ppc40x_irq_init (CPUState *env)
                                                   env, PPC40x_INPUT_NB);
 }
 
+/* PowerPC E500 internal IRQ controller */
+static void ppce500_set_irq (void *opaque, int pin, int level)
+{
+    CPUState *env = opaque;
+    int cur_level;
+
+    LOG_IRQ("%s: env %p pin %d level %d\n", __func__,
+                env, pin, level);
+    cur_level = (env->irq_input_state >> pin) & 1;
+    /* Don't generate spurious events */
+    if ((cur_level == 1 && level == 0) || (cur_level == 0 && level != 0)) {
+        switch (pin) {
+        case PPCE500_INPUT_MCK:
+            if (level) {
+                LOG_IRQ("%s: reset the PowerPC system\n",
+                            __func__);
+                qemu_system_reset_request();
+            }
+            break;
+        case PPCE500_INPUT_RESET_CORE:
+            if (level) {
+                LOG_IRQ("%s: reset the PowerPC core\n", __func__);
+                ppc_set_irq(env, PPC_INTERRUPT_MCK, level);
+            }
+            break;
+        case PPCE500_INPUT_CINT:
+            /* Level sensitive - active high */
+            LOG_IRQ("%s: set the critical IRQ state to %d\n",
+                        __func__, level);
+            ppc_set_irq(env, PPC_INTERRUPT_CEXT, level);
+            break;
+        case PPCE500_INPUT_INT:
+            /* Level sensitive - active high */
+            LOG_IRQ("%s: set the core IRQ state to %d\n",
+                        __func__, level);
+            ppc_set_irq(env, PPC_INTERRUPT_EXT, level);
+            break;
+        case PPCE500_INPUT_DEBUG:
+            /* Level sensitive - active high */
+            LOG_IRQ("%s: set the debug pin state to %d\n",
+                        __func__, level);
+            ppc_set_irq(env, PPC_INTERRUPT_DEBUG, level);
+            break;
+        default:
+            /* Unknown pin - do nothing */
+            LOG_IRQ("%s: unknown IRQ pin %d\n", __func__, pin);
+            return;
+        }
+        if (level)
+            env->irq_input_state |= 1 << pin;
+        else
+            env->irq_input_state &= ~(1 << pin);
+    }
+}
+
+void ppce500_irq_init (CPUState *env)
+{
+    env->irq_inputs = (void **)qemu_allocate_irqs(&ppce500_set_irq,
+                                        env, PPCE500_INPUT_NB);
+}
 /*****************************************************************************/
 /* PowerPC time base and decrementer emulation */
 struct ppc_tb_t {
@@ -645,8 +705,6 @@ clk_setup_cb cpu_ppc_tb_init (CPUState *env, uint32_t freq)
     ppc_tb_t *tb_env;
 
     tb_env = qemu_mallocz(sizeof(ppc_tb_t));
-    if (tb_env == NULL)
-        return NULL;
     env->tb_env = tb_env;
     /* Create new timer */
     tb_env->decr_timer = qemu_new_timer(vm_clock, &cpu_ppc_decr_cb, env);
@@ -915,9 +973,6 @@ clk_setup_cb ppc_emb_timers_init (CPUState *env, uint32_t freq)
     ppcemb_timer_t *ppcemb_timer;
 
     tb_env = qemu_mallocz(sizeof(ppc_tb_t));
-    if (tb_env == NULL) {
-        return NULL;
-    }
     env->tb_env = tb_env;
     ppcemb_timer = qemu_mallocz(sizeof(ppcemb_timer_t));
     tb_env->tb_freq = freq;
@@ -1024,8 +1079,6 @@ int ppc_dcr_init (CPUState *env, int (*read_error)(int dcrn),
     ppc_dcr_t *dcr_env;
 
     dcr_env = qemu_mallocz(sizeof(ppc_dcr_t));
-    if (dcr_env == NULL)
-        return -1;
     dcr_env->read_error = read_error;
     dcr_env->write_error = write_error;
     env->dcr_env = dcr_env;

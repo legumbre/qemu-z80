@@ -54,6 +54,8 @@
 
 #endif /* defined (TARGET_PPC64) */
 
+#define CPUState struct CPUPPCState
+
 #include "cpu-defs.h"
 
 #define REGX "%016" PRIx64
@@ -66,7 +68,8 @@
 
 #define TARGET_HAS_ICE 1
 
-#if defined (TARGET_PPC64)
+/* Load a 32 bit BIOS also on 64 bit machines */
+#if defined (TARGET_PPC64) && defined(CONFIG_USER_ONLY)
 #define ELF_MACHINE     EM_PPC64
 #else
 #define ELF_MACHINE     EM_PPC
@@ -308,6 +311,7 @@ struct ppc_spr_t {
 
 /* Altivec registers (128 bits) */
 union ppc_avr_t {
+    float32 f[4];
     uint8_t u8[16];
     uint16_t u16[8];
     uint32_t u32[4];
@@ -338,6 +342,12 @@ struct ppcemb_tlb_t {
 union ppc_tlb_t {
     ppc6xx_tlb_t tlb6;
     ppcemb_tlb_t tlbe;
+};
+
+typedef struct ppc_slb_t ppc_slb_t;
+struct ppc_slb_t {
+    uint64_t tmp64;
+    uint32_t tmp;
 };
 
 /*****************************************************************************/
@@ -580,6 +590,7 @@ struct CPUPPCState {
     /* Address space register */
     target_ulong asr;
     /* PowerPC 64 SLB area */
+    ppc_slb_t slb[64];
     int slb_nr;
 #endif
     /* segment registers */
@@ -610,8 +621,10 @@ struct CPUPPCState {
     uint32_t vscr;
     /* SPE registers */
     uint64_t spe_acc;
-    float_status spe_status;
     uint32_t spe_fscr;
+    /* SPE and Altivec can share a status since they will never be used
+     * simultaneously */
+    float_status vec_status;
 
     /* Internal devices resources */
     /* Time base and decrementer */
@@ -671,6 +684,7 @@ struct CPUPPCState {
 typedef struct mmu_ctx_t mmu_ctx_t;
 struct mmu_ctx_t {
     target_phys_addr_t raddr;      /* Real address              */
+    target_phys_addr_t eaddr;      /* Effective address         */
     int prot;                      /* Protection bits           */
     target_phys_addr_t pg_addr[2]; /* PTE tables base addresses */
     target_ulong ptem;             /* Virtual segment ID | API  */
@@ -710,7 +724,8 @@ void ppc_store_sdr1 (CPUPPCState *env, target_ulong value);
 #if defined(TARGET_PPC64)
 void ppc_store_asr (CPUPPCState *env, target_ulong value);
 target_ulong ppc_load_slb (CPUPPCState *env, int slb_nr);
-void ppc_store_slb (CPUPPCState *env, int slb_nr, target_ulong rs);
+target_ulong ppc_load_sr (CPUPPCState *env, int sr_nr);
+void ppc_store_slb (CPUPPCState *env, target_ulong rb, target_ulong rs);
 #endif /* defined(TARGET_PPC64) */
 void ppc_store_sr (CPUPPCState *env, int srnum, target_ulong value);
 #endif /* !defined(CONFIG_USER_ONLY) */
@@ -782,7 +797,6 @@ static always_inline uint64_t ppc_dump_gpr (CPUPPCState *env, int gprn)
 int ppc_dcr_read (ppc_dcr_t *dcr_env, int dcrn, target_ulong *valp);
 int ppc_dcr_write (ppc_dcr_t *dcr_env, int dcrn, target_ulong val);
 
-#define CPUState CPUPPCState
 #define cpu_init cpu_ppc_init
 #define cpu_exec cpu_ppc_exec
 #define cpu_gen_code cpu_ppc_gen_code
@@ -1349,6 +1363,16 @@ enum {
     PPCBookE_INPUT_INT        = 5,
     PPCBookE_INPUT_CINT       = 6,
     PPCBookE_INPUT_NB,
+};
+
+enum {
+    /* PowerPC E500 input pins */
+    PPCE500_INPUT_RESET_CORE = 0,
+    PPCE500_INPUT_MCK        = 1,
+    PPCE500_INPUT_CINT       = 3,
+    PPCE500_INPUT_INT        = 4,
+    PPCE500_INPUT_DEBUG      = 6,
+    PPCE500_INPUT_NB,
 };
 
 enum {

@@ -58,10 +58,6 @@ struct BlockDriver {
     int aiocb_size;
 
     const char *protocol_name;
-    int (*bdrv_pread)(BlockDriverState *bs, int64_t offset,
-                      uint8_t *buf, int count);
-    int (*bdrv_pwrite)(BlockDriverState *bs, int64_t offset,
-                       const uint8_t *buf, int count);
     int (*bdrv_truncate)(BlockDriverState *bs, int64_t offset);
     int64_t (*bdrv_getlength)(BlockDriverState *bs);
     int (*bdrv_write_compressed)(BlockDriverState *bs, int64_t sector_num,
@@ -84,6 +80,16 @@ struct BlockDriver {
 
     /* to control generic scsi devices */
     int (*bdrv_ioctl)(BlockDriverState *bs, unsigned long int req, void *buf);
+    int (*bdrv_sg_send_command)(BlockDriverState *bs, void *buf, int count);
+    int (*bdrv_sg_recv_response)(BlockDriverState *bs, void *buf, int count);
+    BlockDriverAIOCB *(*bdrv_sg_aio_read)(BlockDriverState *bs,
+                                          void *buf, int count,
+                                          BlockDriverCompletionFunc *cb,
+                                          void *opaque);
+    BlockDriverAIOCB *(*bdrv_sg_aio_write)(BlockDriverState *bs,
+                                           void *buf, int count,
+                                           BlockDriverCompletionFunc *cb,
+                                           void *opaque);
 
     BlockDriverAIOCB *free_aiocb;
     struct BlockDriver *next;
@@ -96,6 +102,7 @@ struct BlockDriverState {
     int removable; /* if true, the media can be removed */
     int locked;    /* if true, the media cannot temporarily be ejected */
     int encrypted; /* if true, the media is encrypted */
+    int valid_key; /* if true, a valid encryption key has been set */
     int sg;        /* if true, the device is a /dev/sg* */
     /* event callback when inserting/removing */
     void (*change_cb)(void *opaque);
@@ -121,12 +128,16 @@ struct BlockDriverState {
     uint64_t rd_ops;
     uint64_t wr_ops;
 
+    /* Whether the disk can expand beyond total_sectors */
+    int growable;
+
     /* NOTE: the following infos are only hints for real hardware
        drivers. They are not used by the block driver */
     int cyls, heads, secs, translation;
     int type;
     char device_name[32];
     BlockDriverState *next;
+    void *private;
 };
 
 struct BlockDriverAIOCB {

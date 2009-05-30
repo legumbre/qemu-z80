@@ -166,8 +166,6 @@ CPUM68KState *cpu_m68k_init(const char *cpu_model)
     static int inited;
 
     env = qemu_mallocz(sizeof(CPUM68KState));
-    if (!env)
-        return NULL;
     cpu_exec_init(env);
     if (!inited) {
         inited = 1;
@@ -454,11 +452,6 @@ uint32_t HELPER(addx_cc)(CPUState *env, uint32_t op1, uint32_t op2)
 uint32_t HELPER(xflag_lt)(uint32_t a, uint32_t b)
 {
     return a < b;
-}
-
-uint32_t HELPER(btest)(uint32_t x)
-{
-    return x != 0;
 }
 
 void HELPER(set_sr)(CPUState *env, uint32_t val)

@@ -101,8 +101,6 @@ static int parallels_open(BlockDriverState *bs, const char *filename, int flags)
 
     s->catalog_size = le32_to_cpu(ph.catalog_entries);
     s->catalog_bitmap = qemu_malloc(s->catalog_size * 4);
-    if (!s->catalog_bitmap)
-	goto fail;
     if (read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
 	s->catalog_size * 4)
 	goto fail;
@@ -166,11 +164,10 @@ static void parallels_close(BlockDriverState *bs)
 }
 
 BlockDriver bdrv_parallels = {
-    "parallels",
-    sizeof(BDRVParallelsState),
-    parallels_probe,
-    parallels_open,
-    parallels_read,
-    NULL,
-    parallels_close,
+    .format_name	= "parallels",
+    .instance_size	= sizeof(BDRVParallelsState),
+    .bdrv_probe		= parallels_probe,
+    .bdrv_open		= parallels_open,
+    .bdrv_read		= parallels_read,
+    .bdrv_close		= parallels_close,
 };

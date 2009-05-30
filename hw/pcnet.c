@@ -1985,7 +1985,7 @@ static void pci_physical_memory_read(void *dma_opaque, target_phys_addr_t addr,
     cpu_physical_memory_read(addr, buf, len);
 }
 
-void pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
+PCIDevice *pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
 {
     PCNetState *d;
     uint8_t *pci_conf;
@@ -2006,8 +2006,7 @@ void pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
     *(uint16_t *)&pci_conf[0x06] = cpu_to_le16(0x0280);
     pci_conf[0x08] = 0x10;
     pci_conf[0x09] = 0x00;
-    pci_conf[0x0a] = 0x00; // ethernet network controller
-    pci_conf[0x0b] = 0x02;
+    pci_config_set_class(pci_conf, PCI_CLASS_NETWORK_ETHERNET);
     pci_conf[0x0e] = 0x00; // header_type
 
     *(uint32_t *)&pci_conf[0x10] = cpu_to_le32(0x00000001);
@@ -2033,6 +2032,7 @@ void pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
     d->pci_dev = &d->dev;
 
     pcnet_common_init(d, nd);
+    return (PCIDevice *)d;
 }
 
 /* SPARC32 interface */
@@ -2090,8 +2090,6 @@ void lance_init(NICInfo *nd, target_phys_addr_t leaddr, void *dma_opaque,
     qemu_check_nic_model(nd, "lance");
 
     d = qemu_mallocz(sizeof(PCNetState));
-    if (!d)
-        return;
 
     lance_io_memory =
         cpu_register_io_memory(0, lance_mem_read, lance_mem_write, d);

@@ -230,7 +230,6 @@ enum {
 #ifdef VERBOSE
 # define GUEST_OS_BASE		0x5001
 static const char *vmsvga_guest_id[] = {
-    [0x00 ... 0x15] = "an unknown OS",
     [0x00] = "Dos",
     [0x01] = "Windows 3.1",
     [0x02] = "Windows 95",
@@ -240,8 +239,18 @@ static const char *vmsvga_guest_id[] = {
     [0x06] = "Windows 2000",
     [0x07] = "Linux",
     [0x08] = "OS/2",
+    [0x09] = "an unknown OS",
     [0x0a] = "BSD",
     [0x0b] = "Whistler",
+    [0x0c] = "an unknown OS",
+    [0x0d] = "an unknown OS",
+    [0x0e] = "an unknown OS",
+    [0x0f] = "an unknown OS",
+    [0x10] = "an unknown OS",
+    [0x11] = "an unknown OS",
+    [0x12] = "an unknown OS",
+    [0x13] = "an unknown OS",
+    [0x14] = "an unknown OS",
     [0x15] = "Windows 2003",
 };
 #endif
@@ -1204,8 +1213,6 @@ static void pci_vmsvga_map_mem(PCIDevice *pci_dev, int region_num,
                     iomemtype);
 }
 
-#define PCI_CLASS_BASE_DISPLAY		0x03
-#define PCI_CLASS_SUB_VGA		0x00
 #define PCI_CLASS_HEADERTYPE_00h	0x00
 
 void pci_vmsvga_init(PCIBus *bus, uint8_t *vga_ram_base,
@@ -1220,8 +1227,7 @@ void pci_vmsvga_init(PCIBus *bus, uint8_t *vga_ram_base,
     pci_config_set_vendor_id(s->card.config, PCI_VENDOR_ID_VMWARE);
     pci_config_set_device_id(s->card.config, SVGA_PCI_DEVICE_ID);
     s->card.config[PCI_COMMAND]		= 0x07;		/* I/O + Memory */
-    s->card.config[PCI_CLASS_DEVICE]	= PCI_CLASS_SUB_VGA;
-    s->card.config[0x0b]		= PCI_CLASS_BASE_DISPLAY;
+    pci_config_set_class(s->card.config, PCI_CLASS_DISPLAY_VGA);
     s->card.config[0x0c]		= 0x08;		/* Cache line size */
     s->card.config[0x0d]		= 0x40;		/* Latency timer */
     s->card.config[0x0e]		= PCI_CLASS_HEADERTYPE_00h;

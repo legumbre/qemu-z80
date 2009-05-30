@@ -57,11 +57,6 @@ extern uint16_t gen_opc_icount[OPC_BUF_SIZE];
 extern target_ulong gen_opc_jump_pc[2];
 extern uint32_t gen_opc_hflags[OPC_BUF_SIZE];
 
-typedef void (GenOpFunc)(void);
-typedef void (GenOpFunc1)(long);
-typedef void (GenOpFunc2)(long, long);
-typedef void (GenOpFunc3)(long, long, long);
-
 #include "qemu-log.h"
 
 void gen_intermediate_code(CPUState *env, struct TranslationBlock *tb);
@@ -85,7 +80,7 @@ TranslationBlock *tb_gen_code(CPUState *env,
                               target_ulong pc, target_ulong cs_base, int flags,
                               int cflags);
 void cpu_exec_init(CPUState *env);
-void noreturn cpu_loop_exit(void);
+void QEMU_NORETURN cpu_loop_exit(void);
 int page_unprotect(target_ulong address, unsigned long pc, void *puc);
 void tb_invalidate_phys_page_range(target_phys_addr_t start, target_phys_addr_t end,
                                    int is_cpu_write_access);

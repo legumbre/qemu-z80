@@ -730,10 +730,10 @@ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
     s->get_resolution((VGAState *)s, &width, &height);
 
     /* extra x, y */
-    sx = (src % (width * depth)) / depth;
-    sy = (src / (width * depth));
-    dx = (dst % (width *depth)) / depth;
-    dy = (dst / (width * depth));
+    sx = (src % ABS(s->cirrus_blt_srcpitch)) / depth;
+    sy = (src / ABS(s->cirrus_blt_srcpitch));
+    dx = (dst % ABS(s->cirrus_blt_dstpitch)) / depth;
+    dy = (dst / ABS(s->cirrus_blt_dstpitch));
 
     /* normalize width */
     w /= depth;
@@ -781,10 +781,9 @@ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
     /* we don't have to notify the display that this portion has
        changed since qemu_console_copy implies this */
 
-    if (!notify)
-	cirrus_invalidate_region(s, s->cirrus_blt_dstaddr,
-				 s->cirrus_blt_dstpitch, s->cirrus_blt_width,
-				 s->cirrus_blt_height);
+    cirrus_invalidate_region(s, s->cirrus_blt_dstaddr,
+				s->cirrus_blt_dstpitch, s->cirrus_blt_width,
+				s->cirrus_blt_height);
 }
 
 static int cirrus_bitblt_videotovideo_copy(CirrusVGAState * s)
@@ -2247,7 +2246,7 @@ static void cirrus_cursor_invalidate(VGAState *s1)
     CirrusVGAState *s = (CirrusVGAState *)s1;
     int size;
 
-    if (!s->sr[0x12] & CIRRUS_CURSOR_SHOW) {
+    if (!(s->sr[0x12] & CIRRUS_CURSOR_SHOW)) {
         size = 0;
     } else {
         if (s->sr[0x12] & CIRRUS_CURSOR_LARGE)
@@ -3378,8 +3377,7 @@ void pci_cirrus_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
     pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_CIRRUS);
     pci_config_set_device_id(pci_conf, device_id);
     pci_conf[0x04] = PCI_COMMAND_IOACCESS | PCI_COMMAND_MEMACCESS;
-    pci_conf[0x0a] = PCI_CLASS_SUB_VGA;
-    pci_conf[0x0b] = PCI_CLASS_BASE_DISPLAY;
+    pci_config_set_class(pci_conf, PCI_CLASS_DISPLAY_VGA);
     pci_conf[0x0e] = PCI_CLASS_HEADERTYPE_00h;
 
     /* setup VGA */

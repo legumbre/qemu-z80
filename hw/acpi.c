@@ -509,8 +509,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
     pci_conf[0x07] = 0x02;
     pci_conf[0x08] = 0x03; // revision number
     pci_conf[0x09] = 0x00;
-    pci_conf[0x0a] = 0x80; // other bridge device
-    pci_conf[0x0b] = 0x06; // bridge device
+    pci_config_set_class(pci_conf, PCI_CLASS_BRIDGE_OTHER);
     pci_conf[0x0e] = 0x00; // header_type
     pci_conf[0x3d] = 0x01; // interrupt pin 1
 
@@ -562,3 +561,357 @@ void qemu_system_powerdown(void)
     }
 }
 #endif
+
+#define GPE_BASE 0xafe0
+#define PCI_BASE 0xae00
+#define PCI_EJ_BASE 0xae08
+
+struct gpe_regs {
+    uint16_t sts; /* status */
+    uint16_t en;  /* enabled */
+};
+
+struct pci_status {
+    uint32_t up;
+    uint32_t down;
+};
+
+static struct gpe_regs gpe;
+static struct pci_status pci0_status;
+
+static uint32_t gpe_read_val(uint16_t val, uint32_t addr)
+{
+    if (addr & 1)
+        return (val >> 8) & 0xff;
+    return val & 0xff;
+}
+
+static uint32_t gpe_readb(void *opaque, uint32_t addr)
+{
+    uint32_t val = 0;
+    struct gpe_regs *g = opaque;
+    switch (addr) {
+        case GPE_BASE:
+        case GPE_BASE + 1:
+            val = gpe_read_val(g->sts, addr);
+            break;
+        case GPE_BASE + 2:
+        case GPE_BASE + 3:
+            val = gpe_read_val(g->en, addr);
+            break;
+        default:
+            break;
+    }
+
+#if defined(DEBUG)
+    printf("gpe read %lx == %lx\n", addr, val);
+#endif
+    return val;
+}
+
+static void gpe_write_val(uint16_t *cur, int addr, uint32_t val)
+{
+    if (addr & 1)
+        *cur = (*cur & 0xff) | (val << 8);
+    else
+        *cur = (*cur & 0xff00) | (val & 0xff);
+}
+
+static void gpe_reset_val(uint16_t *cur, int addr, uint32_t val)
+{
+    uint16_t x1, x0 = val & 0xff;
+    int shift = (addr & 1) ? 8 : 0;
+
+    x1 = (*cur >> shift) & 0xff;
+
+    x1 = x1 & ~x0;
+
+    *cur = (*cur & (0xff << (8 - shift))) | (x1 << shift);
+}
+
+static void gpe_writeb(void *opaque, uint32_t addr, uint32_t val)
+{
+    struct gpe_regs *g = opaque;
+    switch (addr) {
+        case GPE_BASE:
+        case GPE_BASE + 1:
+            gpe_reset_val(&g->sts, addr, val);
+            break;
+        case GPE_BASE + 2:
+        case GPE_BASE + 3:
+            gpe_write_val(&g->en, addr, val);
+            break;
+        default:
+            break;
+   }
+
+#if defined(DEBUG)
+    printf("gpe write %lx <== %d\n", addr, val);
+#endif
+}
+
+static uint32_t pcihotplug_read(void *opaque, uint32_t addr)
+{
+    uint32_t val = 0;
+    struct pci_status *g = opaque;
+    switch (addr) {
+        case PCI_BASE:
+            val = g->up;
+            break;
+        case PCI_BASE + 4:
+            val = g->down;
+            break;
+        default:
+            break;
+    }
+
+#if defined(DEBUG)
+    printf("pcihotplug read %lx == %lx\n", addr, val);
+#endif
+    return val;
+}
+
+static void pcihotplug_write(void *opaque, uint32_t addr, uint32_t val)
+{
+    struct pci_status *g = opaque;
+    switch (addr) {
+        case PCI_BASE:
+            g->up = val;
+            break;
+        case PCI_BASE + 4:
+            g->down = val;
+            break;
+   }
+
+#if defined(DEBUG)
+    printf("pcihotplug write %lx <== %d\n", addr, val);
+#endif
+}
+
+static uint32_t pciej_read(void *opaque, uint32_t addr)
+{
+#if defined(DEBUG)
+    printf("pciej read %lx == %lx\n", addr, val);
+#endif
+    return 0;
+}
+
+static void pciej_write(void *opaque, uint32_t addr, uint32_t val)
+{
+#if defined (TARGET_I386)
+    int slot = ffs(val) - 1;
+
+    pci_device_hot_remove_success(0, slot);
+#endif
+
+#if defined(DEBUG)
+    printf("pciej write %lx <== %d\n", addr, val);
+#endif
+}
+
+void qemu_system_hot_add_init(void)
+{
+    register_ioport_write(GPE_BASE, 4, 1, gpe_writeb, &gpe);
+    register_ioport_read(GPE_BASE, 4, 1,  gpe_readb, &gpe);
+
+    register_ioport_write(PCI_BASE, 8, 4, pcihotplug_write, &pci0_status);
+    register_ioport_read(PCI_BASE, 8, 4,  pcihotplug_read, &pci0_status);
+
+    register_ioport_write(PCI_EJ_BASE, 4, 4, pciej_write, NULL);
+    register_ioport_read(PCI_EJ_BASE, 4, 4,  pciej_read, NULL);
+}
+
+static void enable_device(struct pci_status *p, struct gpe_regs *g, int slot)
+{
+    g->sts |= 2;
+    p->up |= (1 << slot);
+}
+
+static void disable_device(struct pci_status *p, struct gpe_regs *g, int slot)
+{
+    g->sts |= 2;
+    p->down |= (1 << slot);
+}
+
+void qemu_system_device_hot_add(int bus, int slot, int state)
+{
+    pci0_status.up = 0;
+    pci0_status.down = 0;
+    if (state)
+        enable_device(&pci0_status, &gpe, slot);
+    else
+        disable_device(&pci0_status, &gpe, slot);
+    if (gpe.en & 2) {
+        qemu_set_irq(pm_state->irq, 1);
+        qemu_set_irq(pm_state->irq, 0);
+    }
+}
+
+struct acpi_table_header
+{
+    char signature [4];    /* ACPI signature (4 ASCII characters) */
+    uint32_t length;          /* Length of table, in bytes, including header */
+    uint8_t revision;         /* ACPI Specification minor version # */
+    uint8_t checksum;         /* To make sum of entire table == 0 */
+    char oem_id [6];       /* OEM identification */
+    char oem_table_id [8]; /* OEM table identification */
+    uint32_t oem_revision;    /* OEM revision number */
+    char asl_compiler_id [4]; /* ASL compiler vendor ID */
+    uint32_t asl_compiler_revision; /* ASL compiler revision number */
+} __attribute__((packed));
+
+char *acpi_tables;
+size_t acpi_tables_len;
+
+static int acpi_checksum(const uint8_t *data, int len)
+{
+    int sum, i;
+    sum = 0;
+    for(i = 0; i < len; i++)
+        sum += data[i];
+    return (-sum) & 0xff;
+}
+
+int acpi_table_add(const char *t)
+{
+    static const char *dfl_id = "QEMUQEMU";
+    char buf[1024], *p, *f;
+    struct acpi_table_header acpi_hdr;
+    unsigned long val;
+    size_t off;
+
+    memset(&acpi_hdr, 0, sizeof(acpi_hdr));
+  
+    if (get_param_value(buf, sizeof(buf), "sig", t)) {
+        strncpy(acpi_hdr.signature, buf, 4);
+    } else {
+        strncpy(acpi_hdr.signature, dfl_id, 4);
+    }
+    if (get_param_value(buf, sizeof(buf), "rev", t)) {
+        val = strtoul(buf, &p, 10);
+        if (val > 255 || *p != '\0')
+            goto out;
+    } else {
+        val = 1;
+    }
+    acpi_hdr.revision = (int8_t)val;
+
+    if (get_param_value(buf, sizeof(buf), "oem_id", t)) {
+        strncpy(acpi_hdr.oem_id, buf, 6);
+    } else {
+        strncpy(acpi_hdr.oem_id, dfl_id, 6);
+    }
+
+    if (get_param_value(buf, sizeof(buf), "oem_table_id", t)) {
+        strncpy(acpi_hdr.oem_table_id, buf, 8);
+    } else {
+        strncpy(acpi_hdr.oem_table_id, dfl_id, 8);
+    }
+
+    if (get_param_value(buf, sizeof(buf), "oem_rev", t)) {
+        val = strtol(buf, &p, 10);
+        if(*p != '\0')
+            goto out;
+    } else {
+        val = 1;
+    }
+    acpi_hdr.oem_revision = cpu_to_le32(val);
+
+    if (get_param_value(buf, sizeof(buf), "asl_compiler_id", t)) {
+        strncpy(acpi_hdr.asl_compiler_id, buf, 4);
+    } else {
+        strncpy(acpi_hdr.asl_compiler_id, dfl_id, 4);
+    }
+
+    if (get_param_value(buf, sizeof(buf), "asl_compiler_rev", t)) {
+        val = strtol(buf, &p, 10);
+        if(*p != '\0')
+            goto out;
+    } else {
+        val = 1;
+    }
+    acpi_hdr.asl_compiler_revision = cpu_to_le32(val);
+    
+    if (!get_param_value(buf, sizeof(buf), "data", t)) {
+         buf[0] = '\0';
+    }
+
+    acpi_hdr.length = sizeof(acpi_hdr);
+
+    f = buf;
+    while (buf[0]) {
+        struct stat s;
+        char *n = strchr(f, ':');
+        if (n)
+            *n = '\0';
+        if(stat(f, &s) < 0) {
+            fprintf(stderr, "Can't stat file '%s': %s\n", f, strerror(errno));
+            goto out;
+        }
+        acpi_hdr.length += s.st_size;
+        if (!n)
+            break;
+        *n = ':';
+        f = n + 1;
+    }
+
+    if (!acpi_tables) {
+        acpi_tables_len = sizeof(uint16_t);
+        acpi_tables = qemu_mallocz(acpi_tables_len);
+    }
+    p = acpi_tables + acpi_tables_len;
+    acpi_tables_len += sizeof(uint16_t) + acpi_hdr.length;
+    acpi_tables = qemu_realloc(acpi_tables, acpi_tables_len);
+
+    acpi_hdr.length = cpu_to_le32(acpi_hdr.length);
+    *(uint16_t*)p = acpi_hdr.length;
+    p += sizeof(uint16_t);
+    memcpy(p, &acpi_hdr, sizeof(acpi_hdr));
+    off = sizeof(acpi_hdr);
+
+    f = buf;
+    while (buf[0]) {
+        struct stat s;
+        int fd;
+        char *n = strchr(f, ':');
+        if (n)
+            *n = '\0';
+        fd = open(f, O_RDONLY);
+
+        if(fd < 0)
+            goto out;
+        if(fstat(fd, &s) < 0) {
+            close(fd);
+            goto out;
+        }
+
+        do {
+            int r;
+            r = read(fd, p + off, s.st_size);
+            if (r > 0) {
+                off += r;
+                s.st_size -= r;
+            } else if ((r < 0 && errno != EINTR) || r == 0) {
+                close(fd);
+                goto out;
+            }
+        } while(s.st_size);
+
+        close(fd);
+        if (!n)
+            break;
+        f = n + 1;
+    }
+
+    ((struct acpi_table_header*)p)->checksum = acpi_checksum((uint8_t*)p, off);
+    /* increase number of tables */
+    (*(uint16_t*)acpi_tables) =
+	    cpu_to_le32(le32_to_cpu(*(uint16_t*)acpi_tables) + 1);
+    return 0;
+out:
+    if (acpi_tables) {
+        free(acpi_tables);
+        acpi_tables = NULL;
+    }
+    return -1;
+}

@@ -156,7 +156,6 @@ static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5,	\
 }
 
 
-#define __NR_sys_exit __NR_exit
 #define __NR_sys_uname __NR_uname
 #define __NR_sys_faccessat __NR_faccessat
 #define __NR_sys_fchmodat __NR_fchmodat
@@ -198,7 +197,6 @@ static int gettid(void) {
     return -ENOSYS;
 }
 #endif
-_syscall1(int,sys_exit,int,status)
 _syscall1(int,sys_uname,struct new_utsname *,buf)
 #if defined(TARGET_NR_faccessat) && defined(__NR_faccessat)
 _syscall4(int,sys_faccessat,int,dirfd,const char *,pathname,int,mode,int,flags)
@@ -1140,11 +1138,19 @@ static abi_long do_socket(int domain, int type, int protocol)
     return get_errno(socket(domain, type, protocol));
 }
 
+/* MAX_SOCK_ADDR from linux/net/socket.c */
+#define MAX_SOCK_ADDR	128
+
 /* do_bind() Must return target values and target errnos. */
 static abi_long do_bind(int sockfd, abi_ulong target_addr,
                         socklen_t addrlen)
 {
-    void *addr = alloca(addrlen);
+    void *addr;
+
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
+
+    addr = alloca(addrlen);
 
     target_to_host_sockaddr(addr, target_addr, addrlen);
     return get_errno(bind(sockfd, addr, addrlen));
@@ -1154,7 +1160,12 @@ static abi_long do_bind(int sockfd, abi_ulong target_addr,
 static abi_long do_connect(int sockfd, abi_ulong target_addr,
                            socklen_t addrlen)
 {
-    void *addr = alloca(addrlen);
+    void *addr;
+
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
+
+    addr = alloca(addrlen);
 
     target_to_host_sockaddr(addr, target_addr, addrlen);
     return get_errno(connect(sockfd, addr, addrlen));
@@ -1226,6 +1237,9 @@ static abi_long do_accept(int fd, abi_ulong target_addr,
     if (get_user_u32(addrlen, target_addrlen_addr))
         return -TARGET_EFAULT;
 
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
+
     addr = alloca(addrlen);
 
     ret = get_errno(accept(fd, addr, &addrlen));
@@ -1248,6 +1262,9 @@ static abi_long do_getpeername(int fd, abi_ulong target_addr,
     if (get_user_u32(addrlen, target_addrlen_addr))
         return -TARGET_EFAULT;
 
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
+
     addr = alloca(addrlen);
 
     ret = get_errno(getpeername(fd, addr, &addrlen));
@@ -1267,8 +1284,14 @@ static abi_long do_getsockname(int fd, abi_ulong target_addr,
     void *addr;
     abi_long ret;
 
+    if (target_addr == 0)
+       return get_errno(accept(fd, NULL, NULL));
+
     if (get_user_u32(addrlen, target_addrlen_addr))
         return -TARGET_EFAULT;
+
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
 
     addr = alloca(addrlen);
 
@@ -1305,6 +1328,9 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
     void *host_msg;
     abi_long ret;
 
+    if (addrlen < 0 || addrlen > MAX_SOCK_ADDR)
+        return -TARGET_EINVAL;
+
     host_msg = lock_user(VERIFY_READ, msg, len, 1);
     if (!host_msg)
         return -TARGET_EFAULT;
@@ -1335,6 +1361,10 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
     if (target_addr) {
         if (get_user_u32(addrlen, target_addrlen)) {
             ret = -TARGET_EFAULT;
+            goto fail;
+        }
+        if (addrlen < 0 || addrlen > MAX_SOCK_ADDR) {
+            ret = -TARGET_EINVAL;
             goto fail;
         }
         addr = alloca(addrlen);
@@ -2904,7 +2934,10 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
         nptl_flags = flags;
         flags &= ~CLONE_NPTL_FLAGS2;
 
-        /* TODO: Implement CLONE_CHILD_CLEARTID.  */
+        if (nptl_flags & CLONE_CHILD_CLEARTID) {
+            ts->child_tidptr = child_tidptr;
+        }
+
         if (nptl_flags & CLONE_SETTLS)
             cpu_set_tls (new_env, newtls);
 
@@ -2929,6 +2962,7 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
         sigprocmask(SIG_BLOCK, &sigmask, &info.sigmask);
 
         ret = pthread_create(&info.thread, &attr, clone_func, &info);
+        /* TODO: Free new CPU state if thread creation failed.  */
 
         sigprocmask(SIG_SETMASK, &info.sigmask, NULL);
         pthread_attr_destroy(&attr);
@@ -2979,7 +3013,8 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             ts = (TaskState *)env->opaque;
             if (flags & CLONE_SETTLS)
                 cpu_set_tls (env, newtls);
-            /* TODO: Implement CLONE_CHILD_CLEARTID.  */
+            if (flags & CLONE_CHILD_CLEARTID)
+                ts->child_tidptr = child_tidptr;
 #endif
         } else {
             fork_end(0);
@@ -3396,19 +3431,57 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 
     switch(num) {
     case TARGET_NR_exit:
+#ifdef USE_NPTL
+      /* In old applications this may be used to implement _exit(2).
+         However in threaded applictions it is used for thread termination,
+         and _exit_group is used for application termination.
+         Do thread termination if we have more then one thread.  */
+      /* FIXME: This probably breaks if a signal arrives.  We should probably
+         be disabling signals.  */
+      if (first_cpu->next_cpu) {
+          CPUState **lastp;
+          CPUState *p;
+
+          cpu_list_lock();
+          lastp = &first_cpu;
+          p = first_cpu;
+          while (p && p != (CPUState *)cpu_env) {
+              lastp = &p->next_cpu;
+              p = p->next_cpu;
+          }
+          /* If we didn't find the CPU for this thread then something is
+             horribly wrong.  */
+          if (!p)
+              abort();
+          /* Remove the CPU from the list.  */
+          *lastp = p->next_cpu;
+          cpu_list_unlock();
+          TaskState *ts = ((CPUState *)cpu_env)->opaque;
+          if (ts->child_tidptr) {
+              put_user_u32(0, ts->child_tidptr);
+              sys_futex(g2h(ts->child_tidptr), FUTEX_WAKE, INT_MAX,
+                        NULL, NULL, 0);
+          }
+          /* TODO: Free CPU state.  */
+          pthread_exit(NULL);
+      }
+#endif
 #ifdef HAVE_GPROF
         _mcleanup();
 #endif
         gdb_exit(cpu_env, arg1);
-        /* XXX: should free thread stack and CPU env */
-        sys_exit(arg1);
+        _exit(arg1);
         ret = 0; /* avoid warning */
         break;
     case TARGET_NR_read:
-        if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
-            goto efault;
-        ret = get_errno(read(arg1, p, arg3));
-        unlock_user(p, arg2, ret);
+        if (arg3 == 0)
+            ret = 0;
+        else {
+            if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
+                goto efault;
+            ret = get_errno(read(arg1, p, arg3));
+            unlock_user(p, arg2, ret);
+        }
         break;
     case TARGET_NR_write:
         if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
@@ -3909,10 +3982,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         goto unimplemented;
 #endif
     case TARGET_NR_acct:
-        if (!(p = lock_user_string(arg1)))
-            goto efault;
-        ret = get_errno(acct(path(p)));
-        unlock_user(p, arg1, 0);
+        if (arg1 == 0) {
+            ret = get_errno(acct(NULL));
+        } else {
+            if (!(p = lock_user_string(arg1)))
+                goto efault;
+            ret = get_errno(acct(path(p)));
+            unlock_user(p, arg1, 0);
+        }
         break;
 #ifdef TARGET_NR_umount2 /* not on alpha */
     case TARGET_NR_umount2:
@@ -4370,13 +4447,21 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
     case TARGET_NR_readlink:
         {
-            void *p2;
+            void *p2, *temp;
             p = lock_user_string(arg1);
             p2 = lock_user(VERIFY_WRITE, arg2, arg3, 0);
             if (!p || !p2)
                 ret = -TARGET_EFAULT;
-            else
-                ret = get_errno(readlink(path(p), p2, arg3));
+            else {
+                if (strncmp((const char *)p, "/proc/self/exe", 14) == 0) {
+                    char real[PATH_MAX];
+                    temp = realpath(exec_path,real);
+                    ret = (temp==NULL) ? get_errno(-1) : strlen(real) ;
+                    snprintf((char *)p2, arg3, "%s", real);
+                    }
+                else
+                    ret = get_errno(readlink(path(p), p2, arg3));
+            }
             unlock_user(p2, arg2, ret);
             unlock_user(p, arg1, 0);
         }

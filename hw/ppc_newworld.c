@@ -25,24 +25,45 @@
 #include "hw.h"
 #include "ppc.h"
 #include "ppc_mac.h"
+#include "mac_dbdma.h"
 #include "nvram.h"
 #include "pc.h"
 #include "pci.h"
 #include "net.h"
 #include "sysemu.h"
 #include "boards.h"
+#include "fw_cfg.h"
 #include "escc.h"
+#include "openpic.h"
 
 #define MAX_IDE_BUS 2
+#define VGA_BIOS_SIZE 65536
+#define CFG_ADDR 0xf0000510
+
+/* debug UniNorth */
+//#define DEBUG_UNIN
+
+#ifdef DEBUG_UNIN
+#define UNIN_DPRINTF(fmt, args...) \
+do { printf("UNIN: " fmt , ##args); } while (0)
+#else
+#define UNIN_DPRINTF(fmt, args...)
+#endif
 
 /* UniN device */
 static void unin_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 {
+    UNIN_DPRINTF("writel addr " TARGET_FMT_plx " val %x\n", addr, value);
 }
 
 static uint32_t unin_readl (void *opaque, target_phys_addr_t addr)
 {
-    return 0;
+    uint32_t value;
+
+    value = 0;
+    UNIN_DPRINTF("readl addr " TARGET_FMT_plx " val %x\n", addr, value);
+
+    return value;
 }
 
 static CPUWriteMemoryFunc *unin_write[] = {
@@ -57,6 +78,12 @@ static CPUReadMemoryFunc *unin_read[] = {
     &unin_readl,
 };
 
+static int fw_cfg_boot_set(void *opaque, const char *boot_device)
+{
+    fw_cfg_add_i16(opaque, FW_CFG_BOOT_DEVICE, boot_device[0]);
+    return 0;
+}
+
 /* PowerPC Mac99 hardware initialisation */
 static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
                              const char *boot_device,
@@ -70,28 +97,25 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
     qemu_irq *pic, **openpic_irqs;
     int unin_memory;
     int linux_boot, i;
-    unsigned long bios_offset, vga_bios_offset;
+    ram_addr_t ram_offset, vga_ram_offset, bios_offset, vga_bios_offset;
     uint32_t kernel_base, kernel_size, initrd_base, initrd_size;
     PCIBus *pci_bus;
-    nvram_t nvram;
-#if 0
     MacIONVRAMState *nvr;
     int nvram_mem_index;
-#endif
-    m48t59_t *m48t59;
     int vga_bios_size, bios_size;
     qemu_irq *dummy_irq;
     int pic_mem_index, dbdma_mem_index, cuda_mem_index, escc_mem_index;
-    int ide_mem_index[2];
     int ppc_boot_device;
     int index;
     BlockDriverState *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
+    void *fw_cfg;
+    void *dbdma;
 
     linux_boot = (kernel_filename != NULL);
 
     /* init CPUs */
     if (cpu_model == NULL)
-        cpu_model = "default";
+        cpu_model = "G4";
     for (i = 0; i < smp_cpus; i++) {
         env = cpu_init(cpu_model);
         if (!env) {
@@ -106,37 +130,30 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
         qemu_register_reset(&cpu_ppc_reset, env);
         envs[i] = env;
     }
-    if (env->nip < 0xFFF80000) {
-        /* Special test for PowerPC 601:
-         * the boot vector is at 0xFFF00100, then we need a 1MB BIOS.
-         * But the NVRAM is located at 0xFFF04000...
-         */
-        cpu_abort(env, "Mac99 hardware can not handle 1 MB BIOS\n");
-    }
 
     /* allocate RAM */
-    cpu_register_physical_memory(0, ram_size, IO_MEM_RAM);
+    ram_offset = qemu_ram_alloc(ram_size);
+    cpu_register_physical_memory(0, ram_size, ram_offset);
+
+    /* allocate VGA RAM */
+    vga_ram_offset = qemu_ram_alloc(vga_ram_size);
 
     /* allocate and load BIOS */
-    bios_offset = ram_size + vga_ram_size;
+    bios_offset = qemu_ram_alloc(BIOS_SIZE);
     if (bios_name == NULL)
-        bios_name = BIOS_FILENAME;
+        bios_name = PROM_FILENAME;
     snprintf(buf, sizeof(buf), "%s/%s", bios_dir, bios_name);
-    bios_size = load_image(buf, phys_ram_base + bios_offset);
+    cpu_register_physical_memory(PROM_ADDR, BIOS_SIZE, bios_offset | IO_MEM_ROM);
+
+    /* Load OpenBIOS (ELF) */
+    bios_size = load_elf(buf, 0, NULL, NULL, NULL);
     if (bios_size < 0 || bios_size > BIOS_SIZE) {
         cpu_abort(env, "qemu: could not load PowerPC bios '%s'\n", buf);
         exit(1);
     }
-    bios_size = (bios_size + 0xfff) & ~0xfff;
-    if (bios_size > 0x00080000) {
-        /* As the NVRAM is located at 0xFFF04000, we cannot use 1 MB BIOSes */
-        cpu_abort(env, "Mac99 hardware can not handle 1 MB BIOS\n");
-    }
-    cpu_register_physical_memory((uint32_t)(-bios_size),
-                                 bios_size, bios_offset | IO_MEM_ROM);
 
     /* allocate and load VGA BIOS */
-    vga_bios_offset = bios_offset + bios_size;
+    vga_bios_offset = qemu_ram_alloc(VGA_BIOS_SIZE);
     snprintf(buf, sizeof(buf), "%s/%s", bios_dir, VGABIOS_FILENAME);
     vga_bios_size = load_image(buf, phys_ram_base + vga_bios_offset + 8);
     if (vga_bios_size < 0) {
@@ -154,12 +171,26 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
                      vga_bios_size);
         vga_bios_size += 8;
     }
-    vga_bios_size = (vga_bios_size + 0xfff) & ~0xfff;
 
     if (linux_boot) {
+        uint64_t lowaddr = 0;
         kernel_base = KERNEL_LOAD_ADDR;
-        /* now we can load the kernel */
-        kernel_size = load_image(kernel_filename, phys_ram_base + kernel_base);
+
+        /* Now we can load the kernel. The first step tries to load the kernel
+           supposing PhysAddr = 0x00000000. If that was wrong the kernel is
+           loaded again, the new PhysAddr being computed from lowaddr. */
+        kernel_size = load_elf(kernel_filename, kernel_base, NULL, &lowaddr, NULL);
+        if (kernel_size > 0 && lowaddr != KERNEL_LOAD_ADDR) {
+            kernel_size = load_elf(kernel_filename, (2 * kernel_base) - lowaddr,
+                                   NULL, 0, NULL);
+        }
+        if (kernel_size < 0)
+            kernel_size = load_aout(kernel_filename, kernel_base,
+                                    ram_size - kernel_base);
+        if (kernel_size < 0)
+            kernel_size = load_image_targphys(kernel_filename,
+                                              kernel_base,
+                                              ram_size - kernel_base);
         if (kernel_size < 0) {
             cpu_abort(env, "qemu: could not load kernel '%s'\n",
                       kernel_filename);
@@ -256,8 +287,8 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
     pic = openpic_init(NULL, &pic_mem_index, smp_cpus, openpic_irqs, NULL);
     pci_bus = pci_pmac_init(pic);
     /* init basic PC hardware */
-    pci_vga_init(pci_bus, phys_ram_base + ram_size,
-                 ram_size, vga_ram_size,
+    pci_vga_init(pci_bus, phys_ram_base + vga_ram_offset,
+                 vga_ram_offset, vga_ram_size,
                  vga_bios_offset, vga_bios_size);
 
     /* XXX: suppress that */
@@ -280,22 +311,19 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
         else
             hd[i] = NULL;
     }
-#if 1
-    ide_mem_index[0] = pmac_ide_init(&hd[0], pic[0x13]);
-    ide_mem_index[1] = pmac_ide_init(&hd[2], pic[0x14]);
-#else
-    pci_cmd646_ide_init(pci_bus, &hd[0], 0);
-#endif
+    dbdma = DBDMA_init(&dbdma_mem_index);
+    pci_cmd646_ide_init(pci_bus, hd, 0);
+
     /* cuda also initialize ADB */
     cuda_init(&cuda_mem_index, pic[0x19]);
 
     adb_kbd_init(&adb_bus);
     adb_mouse_init(&adb_bus);
 
-    dbdma_init(&dbdma_mem_index);
 
-    macio_init(pci_bus, 0x0022, 0, pic_mem_index, dbdma_mem_index,
-               cuda_mem_index, NULL, 2, ide_mem_index, escc_mem_index);
+    macio_init(pci_bus, PCI_DEVICE_ID_APPLE_UNI_N_KEYL, 0, pic_mem_index,
+               dbdma_mem_index, cuda_mem_index, NULL, 0, NULL,
+               escc_mem_index);
 
     if (usb_enabled) {
         usb_ohci_init_pci(pci_bus, 3, -1);
@@ -303,37 +331,35 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
 
     if (graphic_depth != 15 && graphic_depth != 32 && graphic_depth != 8)
         graphic_depth = 15;
-#if 0 /* XXX: this is ugly but needed for now, or OHW won't boot */
+
     /* The NewWorld NVRAM is not located in the MacIO device */
-    nvr = macio_nvram_init(&nvram_mem_index, 0x2000);
+    nvr = macio_nvram_init(&nvram_mem_index, 0x2000, 1);
     pmac_format_nvram_partition(nvr, 0x2000);
     macio_nvram_map(nvr, 0xFFF04000);
-    nvram.opaque = nvr;
-    nvram.read_fn = &macio_nvram_read;
-    nvram.write_fn = &macio_nvram_write;
-#else
-    m48t59 = m48t59_init(dummy_irq[8], 0xFFF04000, 0x0074, NVRAM_SIZE, 59);
-    nvram.opaque = m48t59;
-    nvram.read_fn = &m48t59_read;
-    nvram.write_fn = &m48t59_write;
-#endif
-    PPC_NVRAM_set_params(&nvram, NVRAM_SIZE, "MAC99", ram_size,
-                         ppc_boot_device, kernel_base, kernel_size,
-                         kernel_cmdline,
-                         initrd_base, initrd_size,
-                         /* XXX: need an option to load a NVRAM image */
-                         0,
-                         graphic_width, graphic_height, graphic_depth);
     /* No PCI init: the BIOS will do it */
 
-    /* Special port to get debug messages from Open-Firmware */
-    register_ioport_write(0x0F00, 4, 1, &PPC_debug_write, NULL);
+    fw_cfg = fw_cfg_init(0, 0, CFG_ADDR, CFG_ADDR + 2);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);
+    fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
+    fw_cfg_add_i16(fw_cfg, FW_CFG_MACHINE_ID, ARCH_MAC99);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_ADDR, kernel_base);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_SIZE, kernel_size);
+    if (kernel_cmdline) {
+        fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_CMDLINE, CMDLINE_ADDR);
+        pstrcpy_targphys(CMDLINE_ADDR, TARGET_PAGE_SIZE, kernel_cmdline);
+    } else {
+        fw_cfg_add_i32(fw_cfg, FW_CFG_KERNEL_CMDLINE, 0);
+    }
+    fw_cfg_add_i32(fw_cfg, FW_CFG_INITRD_ADDR, initrd_base);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_INITRD_SIZE, initrd_size);
+    fw_cfg_add_i16(fw_cfg, FW_CFG_BOOT_DEVICE, ppc_boot_device);
+    qemu_register_boot_set(fw_cfg_boot_set, fw_cfg);
 }
 
 QEMUMachine core99_machine = {
     .name = "mac99",
     .desc = "Mac99 based PowerMAC",
     .init = ppc_core99_init,
-    .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
+    .ram_require = BIOS_SIZE + VGA_BIOS_SIZE + VGA_RAM_SIZE,
     .max_cpus = MAX_CPUS,
 };

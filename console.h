@@ -43,8 +43,8 @@ struct mouse_transform_info_s {
     int a[7];
 };
 
-void do_info_mice(void);
-void do_mouse_set(int index);
+void do_info_mice(Monitor *mon);
+void do_mouse_set(Monitor *mon, int index);
 
 /* keysym is a unicode code except for special keys (see QEMU_KEY_xxx
    constants) */
@@ -113,11 +113,18 @@ struct DisplayChangeListener {
     struct DisplayChangeListener *next;
 };
 
+struct DisplayAllocator {
+    DisplaySurface* (*create_displaysurface)(int width, int height);
+    DisplaySurface* (*resize_displaysurface)(DisplaySurface *surface, int width, int height);
+    void (*free_displaysurface)(DisplaySurface *surface);
+};
+
 struct DisplayState {
     struct DisplaySurface *surface;
     void *opaque;
     struct QEMUTimer *gui_timer;
 
+    struct DisplayAllocator* allocator;
     struct DisplayChangeListener* listeners;
 
     void (*mouse_set)(int x, int y, int on);
@@ -129,14 +136,39 @@ struct DisplayState {
 
 void register_displaystate(DisplayState *ds);
 DisplayState *get_displaystate(void);
-DisplaySurface* qemu_create_displaysurface(int width, int height, int bpp, int linesize);
-DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
-                                           int width, int height, int bpp, int linesize);
 DisplaySurface* qemu_create_displaysurface_from(int width, int height, int bpp,
                                                 int linesize, uint8_t *data);
-void qemu_free_displaysurface(DisplaySurface *surface);
 PixelFormat qemu_different_endianness_pixelformat(int bpp);
 PixelFormat qemu_default_pixelformat(int bpp);
+
+extern struct DisplayAllocator default_allocator;
+DisplayAllocator *register_displayallocator(DisplayState *ds, DisplayAllocator *da);
+DisplaySurface* defaultallocator_create_displaysurface(int width, int height);
+DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface, int width, int height);
+void defaultallocator_free_displaysurface(DisplaySurface *surface);
+
+static inline DisplaySurface* qemu_create_displaysurface(DisplayState *ds, int width, int height)
+{
+    return ds->allocator->create_displaysurface(width, height);    
+}
+
+static inline DisplaySurface* qemu_resize_displaysurface(DisplayState *ds, int width, int height)
+{
+    return ds->allocator->resize_displaysurface(ds->surface, width, height);
+}
+
+static inline void qemu_free_displaysurface(DisplayState *ds)
+{
+    ds->allocator->free_displaysurface(ds->surface);
+}
+
+static inline int is_surface_bgr(DisplaySurface *surface)
+{
+    if (surface->pf.bits_per_pixel == 32 && surface->pf.rshift == 0)
+        return 1;
+    else
+        return 0;
+}
 
 static inline int is_buffer_shared(DisplaySurface *surface)
 {
@@ -287,38 +319,9 @@ void vnc_display_init(DisplayState *ds);
 void vnc_display_close(DisplayState *ds);
 int vnc_display_open(DisplayState *ds, const char *display);
 int vnc_display_password(DisplayState *ds, const char *password);
-void do_info_vnc(void);
+void do_info_vnc(Monitor *mon);
 
 /* curses.c */
 void curses_display_init(DisplayState *ds, int full_screen);
-
-/* x_keymap.c */
-extern uint8_t _translate_keycode(const int key);
-
-/* FIXME: term_printf et al should probably go elsewhere so everything
-   does not need to include console.h  */
-/* monitor.c */
-void monitor_init(CharDriverState *hd, int show_banner);
-void term_puts(const char *str);
-void term_vprintf(const char *fmt, va_list ap);
-void term_printf(const char *fmt, ...) __attribute__ ((__format__ (__printf__, 1, 2)));
-void term_print_filename(const char *filename);
-void term_flush(void);
-void term_print_help(void);
-void monitor_readline(const char *prompt, int is_password,
-                      char *buf, int buf_size);
-void monitor_suspend(void);
-void monitor_resume(void);
-
-/* readline.c */
-typedef void ReadLineFunc(void *opaque, const char *str);
-
-extern int completion_index;
-void add_completion(const char *str);
-void readline_handle_byte(int ch);
-void readline_find_completion(const char *cmdline);
-const char *readline_get_history(unsigned int index);
-void readline_start(const char *prompt, int is_password,
-                    ReadLineFunc *readline_func, void *opaque);
 
 #endif

@@ -11,6 +11,7 @@
 #include "usb.h"
 #include "block.h"
 #include "scsi-disk.h"
+#include "console.h"
 
 //#define DEBUG_MSD
 
@@ -548,13 +549,9 @@ USBDevice *usb_msd_init(const char *filename)
     }
 
     s = qemu_mallocz(sizeof(MSDState));
-    if (!s)
-        return NULL;
 
     bdrv = bdrv_new("usb");
     if (bdrv_open2(bdrv, filename, 0, drv) < 0)
-        goto fail;
-    if (qemu_key_check(bdrv, filename))
         goto fail;
     s->bs = bdrv;
 
@@ -575,4 +572,11 @@ USBDevice *usb_msd_init(const char *filename)
  fail:
     qemu_free(s);
     return NULL;
+}
+
+BlockDriverState *usb_msd_get_bdrv(USBDevice *dev)
+{
+    MSDState *s = (MSDState *)dev;
+
+    return s->bs;
 }

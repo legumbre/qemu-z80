@@ -28,6 +28,7 @@
 #include "disas.h"
 #include "tcg-op.h"
 #include "qemu-common.h"
+#include "host-utils.h"
 
 #include "helper.h"
 #define GEN_HELPER 1
@@ -278,7 +279,9 @@ static always_inline void gen_exception (DisasContext *ctx, uint32_t excp)
 static always_inline void gen_debug_exception (DisasContext *ctx)
 {
     TCGv_i32 t0;
-    gen_update_nip(ctx, ctx->nip);
+
+    if (ctx->exception != POWERPC_EXCP_BRANCH)
+        gen_update_nip(ctx, ctx->nip);
     t0 = tcg_const_i32(EXCP_DEBUG);
     gen_helper_raise_exception(t0);
     tcg_temp_free_i32(t0);
@@ -509,8 +512,10 @@ enum {
     PPC_ALTIVEC        = 0x0000000001000000ULL,
     /*   PowerPC 2.03 SPE extension                                          */
     PPC_SPE            = 0x0000000002000000ULL,
-    /*   PowerPC 2.03 SPE floating-point extension                           */
-    PPC_SPEFPU         = 0x0000000004000000ULL,
+    /*   PowerPC 2.03 SPE single-precision floating-point extension          */
+    PPC_SPE_SINGLE     = 0x0000000004000000ULL,
+    /*   PowerPC 2.03 SPE double-precision floating-point extension          */
+    PPC_SPE_DOUBLE     = 0x0000000008000000ULL,
 
     /* Optional memory control instructions                                  */
     PPC_MEM_TLBIA      = 0x0000000010000000ULL,
@@ -599,6 +604,7 @@ enum {
 
 #if defined(DO_PPC_STATISTICS)
 #define GEN_OPCODE(name, op1, op2, op3, invl, _typ)                           \
+extern opcode_t opc_##name;                                                   \
 OPCODES_SECTION opcode_t opc_##name = {                                       \
     .opc1 = op1,                                                              \
     .opc2 = op2,                                                              \
@@ -628,6 +634,7 @@ OPCODES_SECTION opcode_t opc_##name = {                                       \
 }
 #else
 #define GEN_OPCODE(name, op1, op2, op3, invl, _typ)                           \
+extern opcode_t opc_##name;                                                   \
 OPCODES_SECTION opcode_t opc_##name = {                                       \
     .opc1 = op1,                                                              \
     .opc2 = op2,                                                              \
@@ -641,6 +648,7 @@ OPCODES_SECTION opcode_t opc_##name = {                                       \
     .oname = stringify(name),                                                 \
 }
 #define GEN_OPCODE2(name, onam, op1, op2, op3, invl, _typ)                    \
+extern opcode_t opc_##name;                                                   \
 OPCODES_SECTION opcode_t opc_##name = {                                       \
     .opc1 = op1,                                                              \
     .opc2 = op2,                                                              \
@@ -656,6 +664,7 @@ OPCODES_SECTION opcode_t opc_##name = {                                       \
 #endif
 
 #define GEN_OPCODE_MARK(name)                                                 \
+extern opcode_t opc_##name;                                                   \
 OPCODES_SECTION opcode_t opc_##name = {                                       \
     .opc1 = 0xFF,                                                             \
     .opc2 = 0xFF,                                                             \
@@ -2411,9 +2420,10 @@ GEN_HANDLER(mtfsb1, 0x3F, 0x06, 0x01, 0x001FF800, PPC_FLOAT)
 }
 
 /* mtfsf */
-GEN_HANDLER(mtfsf, 0x3F, 0x07, 0x16, 0x02010000, PPC_FLOAT)
+GEN_HANDLER(mtfsf, 0x3F, 0x07, 0x16, 0x00010000, PPC_FLOAT)
 {
     TCGv_i32 t0;
+    int L = ctx->opcode & 0x02000000;
 
     if (unlikely(!ctx->fpu_enabled)) {
         gen_exception(ctx, POWERPC_EXCP_FPU);
@@ -2422,7 +2432,10 @@ GEN_HANDLER(mtfsf, 0x3F, 0x07, 0x16, 0x02010000, PPC_FLOAT)
     /* NIP cannot be restored if the memory exception comes from an helper */
     gen_update_nip(ctx, ctx->nip - 4);
     gen_reset_fpstatus();
-    t0 = tcg_const_i32(FM(ctx->opcode));
+    if (L)
+        t0 = tcg_const_i32(0xff);
+    else
+        t0 = tcg_const_i32(FM(ctx->opcode));
     gen_helper_store_fpscr(cpu_fpr[rB(ctx->opcode)], t0);
     tcg_temp_free_i32(t0);
     if (unlikely(Rc(ctx->opcode) != 0)) {
@@ -2567,35 +2580,16 @@ static always_inline void gen_qemu_ld16u(DisasContext *ctx, TCGv arg1, TCGv arg2
 {
     tcg_gen_qemu_ld16u(arg1, arg2, ctx->mem_idx);
     if (unlikely(ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap16_i32(t0, t0);
-        tcg_gen_extu_i32_tl(arg1, t0);
-        tcg_temp_free_i32(t0);
-#else
-        tcg_gen_bswap16_i32(arg1, arg1);
-#endif
+        tcg_gen_bswap16_tl(arg1, arg1);
     }
 }
 
 static always_inline void gen_qemu_ld16s(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
     if (unlikely(ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0;
         tcg_gen_qemu_ld16u(arg1, arg2, ctx->mem_idx);
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap16_i32(t0, t0);
-        tcg_gen_extu_i32_tl(arg1, t0);
+        tcg_gen_bswap16_tl(arg1, arg1);
         tcg_gen_ext16s_tl(arg1, arg1);
-        tcg_temp_free_i32(t0);
-#else
-        tcg_gen_qemu_ld16u(arg1, arg2, ctx->mem_idx);
-        tcg_gen_bswap16_i32(arg1, arg1);
-        tcg_gen_ext16s_i32(arg1, arg1);
-#endif
     } else {
         tcg_gen_qemu_ld16s(arg1, arg2, ctx->mem_idx);
     }
@@ -2605,29 +2599,17 @@ static always_inline void gen_qemu_ld32u(DisasContext *ctx, TCGv arg1, TCGv arg2
 {
     tcg_gen_qemu_ld32u(arg1, arg2, ctx->mem_idx);
     if (unlikely(ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap_i32(t0, t0);
-        tcg_gen_extu_i32_tl(arg1, t0);
-        tcg_temp_free_i32(t0);
-#else
-        tcg_gen_bswap_i32(arg1, arg1);
-#endif
+        tcg_gen_bswap32_tl(arg1, arg1);
     }
 }
 
 #if defined(TARGET_PPC64)
 static always_inline void gen_qemu_ld32s(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
-    if (unlikely(ctx->mem_idx)) {
-        TCGv_i32 t0;
+    if (unlikely(ctx->le_mode)) {
         tcg_gen_qemu_ld32u(arg1, arg2, ctx->mem_idx);
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap_i32(t0, t0);
-        tcg_gen_ext_i32_tl(arg1, t0);
-        tcg_temp_free_i32(t0);
+        tcg_gen_bswap32_tl(arg1, arg1);
+        tcg_gen_ext32s_tl(arg1, arg1);
     } else
         tcg_gen_qemu_ld32s(arg1, arg2, ctx->mem_idx);
 }
@@ -2637,7 +2619,7 @@ static always_inline void gen_qemu_ld64(DisasContext *ctx, TCGv_i64 arg1, TCGv a
 {
     tcg_gen_qemu_ld64(arg1, arg2, ctx->mem_idx);
     if (unlikely(ctx->le_mode)) {
-        tcg_gen_bswap_i64(arg1, arg1);
+        tcg_gen_bswap64_i64(arg1, arg1);
     }
 }
 
@@ -2649,25 +2631,11 @@ static always_inline void gen_qemu_st8(DisasContext *ctx, TCGv arg1, TCGv arg2)
 static always_inline void gen_qemu_st16(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
     if (unlikely(ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0;
-        TCGv t1;
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_ext16u_i32(t0, t0);
-        tcg_gen_bswap16_i32(t0, t0);
-        t1 = tcg_temp_new();
-        tcg_gen_extu_i32_tl(t1, t0);
-        tcg_temp_free_i32(t0);
-        tcg_gen_qemu_st16(t1, arg2, ctx->mem_idx);
-        tcg_temp_free(t1);
-#else
         TCGv t0 = tcg_temp_new();
         tcg_gen_ext16u_tl(t0, arg1);
-        tcg_gen_bswap16_i32(t0, t0);
+        tcg_gen_bswap16_tl(t0, t0);
         tcg_gen_qemu_st16(t0, arg2, ctx->mem_idx);
         tcg_temp_free(t0);
-#endif
     } else {
         tcg_gen_qemu_st16(arg1, arg2, ctx->mem_idx);
     }
@@ -2676,23 +2644,11 @@ static always_inline void gen_qemu_st16(DisasContext *ctx, TCGv arg1, TCGv arg2)
 static always_inline void gen_qemu_st32(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
     if (unlikely(ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0;
-        TCGv t1;
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap_i32(t0, t0);
-        t1 = tcg_temp_new();
-        tcg_gen_extu_i32_tl(t1, t0);
-        tcg_temp_free_i32(t0);
-        tcg_gen_qemu_st32(t1, arg2, ctx->mem_idx);
-        tcg_temp_free(t1);
-#else
-        TCGv t0 = tcg_temp_new_i32();
-        tcg_gen_bswap_i32(t0, arg1);
+        TCGv t0 = tcg_temp_new();
+        tcg_gen_ext32u_tl(t0, arg1);
+        tcg_gen_bswap32_tl(t0, t0);
         tcg_gen_qemu_st32(t0, arg2, ctx->mem_idx);
         tcg_temp_free(t0);
-#endif
     } else {
         tcg_gen_qemu_st32(arg1, arg2, ctx->mem_idx);
     }
@@ -2702,7 +2658,7 @@ static always_inline void gen_qemu_st64(DisasContext *ctx, TCGv_i64 arg1, TCGv a
 {
     if (unlikely(ctx->le_mode)) {
         TCGv_i64 t0 = tcg_temp_new_i64();
-        tcg_gen_bswap_i64(t0, arg1);
+        tcg_gen_bswap64_i64(t0, arg1);
         tcg_gen_qemu_st64(t0, arg2, ctx->mem_idx);
         tcg_temp_free_i64(t0);
     } else
@@ -2980,15 +2936,7 @@ static void always_inline gen_qemu_ld16ur(DisasContext *ctx, TCGv arg1, TCGv arg
 {
     tcg_gen_qemu_ld16u(arg1, arg2, ctx->mem_idx);
     if (likely(!ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap16_i32(t0, t0);
-        tcg_gen_extu_i32_tl(arg1, t0);
-        tcg_temp_free_i32(t0);
-#else
-        tcg_gen_bswap16_i32(arg1, arg1);
-#endif
+        tcg_gen_bswap16_tl(arg1, arg1);
     }
 }
 GEN_LDX(lhbr, ld16ur, 0x16, 0x18, PPC_INTEGER);
@@ -2998,15 +2946,7 @@ static void always_inline gen_qemu_ld32ur(DisasContext *ctx, TCGv arg1, TCGv arg
 {
     tcg_gen_qemu_ld32u(arg1, arg2, ctx->mem_idx);
     if (likely(!ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap_i32(t0, t0);
-        tcg_gen_extu_i32_tl(arg1, t0);
-        tcg_temp_free_i32(t0);
-#else
-        tcg_gen_bswap_i32(arg1, arg1);
-#endif
+        tcg_gen_bswap32_tl(arg1, arg1);
     }
 }
 GEN_LDX(lwbr, ld32ur, 0x16, 0x10, PPC_INTEGER);
@@ -3015,25 +2955,11 @@ GEN_LDX(lwbr, ld32ur, 0x16, 0x10, PPC_INTEGER);
 static void always_inline gen_qemu_st16r(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
     if (likely(!ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0;
-        TCGv t1;
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_ext16u_i32(t0, t0);
-        tcg_gen_bswap16_i32(t0, t0);
-        t1 = tcg_temp_new();
-        tcg_gen_extu_i32_tl(t1, t0);
-        tcg_temp_free_i32(t0);
-        tcg_gen_qemu_st16(t1, arg2, ctx->mem_idx);
-        tcg_temp_free(t1);
-#else
         TCGv t0 = tcg_temp_new();
         tcg_gen_ext16u_tl(t0, arg1);
-        tcg_gen_bswap16_i32(t0, t0);
+        tcg_gen_bswap16_tl(t0, t0);
         tcg_gen_qemu_st16(t0, arg2, ctx->mem_idx);
         tcg_temp_free(t0);
-#endif
     } else {
         tcg_gen_qemu_st16(arg1, arg2, ctx->mem_idx);
     }
@@ -3044,23 +2970,11 @@ GEN_STX(sthbr, st16r, 0x16, 0x1C, PPC_INTEGER);
 static void always_inline gen_qemu_st32r(DisasContext *ctx, TCGv arg1, TCGv arg2)
 {
     if (likely(!ctx->le_mode)) {
-#if defined(TARGET_PPC64)
-        TCGv_i32 t0;
-        TCGv t1;
-        t0 = tcg_temp_new_i32();
-        tcg_gen_trunc_tl_i32(t0, arg1);
-        tcg_gen_bswap_i32(t0, t0);
-        t1 = tcg_temp_new();
-        tcg_gen_extu_i32_tl(t1, t0);
-        tcg_temp_free_i32(t0);
-        tcg_gen_qemu_st32(t1, arg2, ctx->mem_idx);
-        tcg_temp_free(t1);
-#else
-        TCGv t0 = tcg_temp_new_i32();
-        tcg_gen_bswap_i32(t0, arg1);
+        TCGv t0 = tcg_temp_new();
+        tcg_gen_ext32u_tl(t0, arg1);
+        tcg_gen_bswap32_tl(t0, t0);
         tcg_gen_qemu_st32(t0, arg2, ctx->mem_idx);
         tcg_temp_free(t0);
-#endif
     } else {
         tcg_gen_qemu_st32(arg1, arg2, ctx->mem_idx);
     }
@@ -3832,19 +3746,38 @@ GEN_HANDLER(mcrxr, 0x1F, 0x00, 0x10, 0x007FF801, PPC_MISC)
     tcg_gen_andi_tl(cpu_xer, cpu_xer, ~(1 << XER_SO | 1 << XER_OV | 1 << XER_CA));
 }
 
-/* mfcr */
+/* mfcr mfocrf */
 GEN_HANDLER(mfcr, 0x1F, 0x13, 0x00, 0x00000801, PPC_MISC)
 {
     uint32_t crm, crn;
 
     if (likely(ctx->opcode & 0x00100000)) {
         crm = CRM(ctx->opcode);
-        if (likely((crm ^ (crm - 1)) == 0)) {
-            crn = ffs(crm);
+        if (likely(crm && ((crm & (crm - 1)) == 0))) {
+            crn = ctz32 (crm);
             tcg_gen_extu_i32_tl(cpu_gpr[rD(ctx->opcode)], cpu_crf[7 - crn]);
+            tcg_gen_shli_tl(cpu_gpr[rD(ctx->opcode)],
+                            cpu_gpr[rD(ctx->opcode)], crn * 4);
         }
     } else {
-        gen_helper_load_cr(cpu_gpr[rD(ctx->opcode)]);
+        TCGv_i32 t0 = tcg_temp_new_i32();
+        tcg_gen_mov_i32(t0, cpu_crf[0]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[1]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[2]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[3]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[4]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[5]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[6]);
+        tcg_gen_shli_i32(t0, t0, 4);
+        tcg_gen_or_i32(t0, t0, cpu_crf[7]);
+        tcg_gen_extu_i32_tl(cpu_gpr[rD(ctx->opcode)], t0);
+        tcg_temp_free_i32(t0);
     }
 }
 
@@ -3925,22 +3858,30 @@ GEN_HANDLER(mftb, 0x1F, 0x13, 0x0B, 0x00000001, PPC_MFTB)
     gen_op_mfspr(ctx);
 }
 
-/* mtcrf */
+/* mtcrf mtocrf*/
 GEN_HANDLER(mtcrf, 0x1F, 0x10, 0x04, 0x00000801, PPC_MISC)
 {
     uint32_t crm, crn;
 
     crm = CRM(ctx->opcode);
-    if (likely((ctx->opcode & 0x00100000) || (crm ^ (crm - 1)) == 0)) {
-        TCGv_i32 temp = tcg_temp_new_i32();
-        crn = ffs(crm);
-        tcg_gen_trunc_tl_i32(temp, cpu_gpr[rS(ctx->opcode)]);
-        tcg_gen_shri_i32(cpu_crf[7 - crn], temp, crn * 4);
-        tcg_gen_andi_i32(cpu_crf[7 - crn], cpu_crf[7 - crn], 0xf);
-        tcg_temp_free_i32(temp);
+    if (likely((ctx->opcode & 0x00100000))) {
+        if (crm && ((crm & (crm - 1)) == 0)) {
+            TCGv_i32 temp = tcg_temp_new_i32();
+            crn = ctz32 (crm);
+            tcg_gen_trunc_tl_i32(temp, cpu_gpr[rS(ctx->opcode)]);
+            tcg_gen_shri_i32(temp, temp, crn * 4);
+            tcg_gen_andi_i32(cpu_crf[7 - crn], temp, 0xf);
+            tcg_temp_free_i32(temp);
+        }
     } else {
-        TCGv_i32 temp = tcg_const_i32(crm);
-        gen_helper_store_cr(cpu_gpr[rS(ctx->opcode)], temp);
+        TCGv_i32 temp = tcg_temp_new_i32();
+        tcg_gen_trunc_tl_i32(temp, cpu_gpr[rS(ctx->opcode)]);
+        for (crn = 0 ; crn < 8 ; crn++) {
+            if (crm & (1 << crn)) {
+                    tcg_gen_shri_i32(cpu_crf[7 - crn], temp, crn * 4);
+                    tcg_gen_andi_i32(cpu_crf[7 - crn], cpu_crf[7 - crn], 0xf);
+            }
+        }
         tcg_temp_free_i32(temp);
     }
 }
@@ -4287,7 +4228,7 @@ GEN_HANDLER2(mfsr_64b, "mfsr", 0x1F, 0x13, 0x12, 0x0010F801, PPC_SEGMENT_64B)
         return;
     }
     t0 = tcg_const_tl(SR(ctx->opcode));
-    gen_helper_load_slb(cpu_gpr[rD(ctx->opcode)], t0);
+    gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], t0);
     tcg_temp_free(t0);
 #endif
 }
@@ -4307,7 +4248,7 @@ GEN_HANDLER2(mfsrin_64b, "mfsrin", 0x1F, 0x13, 0x14, 0x001F0001,
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
-    gen_helper_load_slb(cpu_gpr[rD(ctx->opcode)], t0);
+    gen_helper_load_sr(cpu_gpr[rD(ctx->opcode)], t0);
     tcg_temp_free(t0);
 #endif
 }
@@ -4324,7 +4265,7 @@ GEN_HANDLER2(mtsr_64b, "mtsr", 0x1F, 0x12, 0x06, 0x0010F801, PPC_SEGMENT_64B)
         return;
     }
     t0 = tcg_const_tl(SR(ctx->opcode));
-    gen_helper_store_slb(t0, cpu_gpr[rS(ctx->opcode)]);
+    gen_helper_store_sr(t0, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(t0);
 #endif
 }
@@ -4344,10 +4285,25 @@ GEN_HANDLER2(mtsrin_64b, "mtsrin", 0x1F, 0x12, 0x07, 0x001F0001,
     t0 = tcg_temp_new();
     tcg_gen_shri_tl(t0, cpu_gpr[rB(ctx->opcode)], 28);
     tcg_gen_andi_tl(t0, t0, 0xF);
-    gen_helper_store_slb(t0, cpu_gpr[rS(ctx->opcode)]);
+    gen_helper_store_sr(t0, cpu_gpr[rS(ctx->opcode)]);
     tcg_temp_free(t0);
 #endif
 }
+
+/* slbmte */
+GEN_HANDLER2(slbmte, "slbmte", 0x1F, 0x12, 0x0C, 0x00000000, PPC_SEGMENT_64B)
+{
+#if defined(CONFIG_USER_ONLY)
+    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+#else
+    if (unlikely(!ctx->mem_idx)) {
+        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
+        return;
+    }
+    gen_helper_store_slb(cpu_gpr[rB(ctx->opcode)], cpu_gpr[rS(ctx->opcode)]);
+#endif
+}
+
 #endif /* defined(TARGET_PPC64) */
 
 /***                      Lookaside buffer management                      ***/
@@ -4363,6 +4319,20 @@ GEN_HANDLER(tlbia, 0x1F, 0x12, 0x0B, 0x03FFFC01, PPC_MEM_TLBIA)
         return;
     }
     gen_helper_tlbia();
+#endif
+}
+
+/* tlbiel */
+GEN_HANDLER(tlbiel, 0x1F, 0x12, 0x08, 0x03FF0001, PPC_MEM_TLBIE)
+{
+#if defined(CONFIG_USER_ONLY)
+    gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+#else
+    if (unlikely(!ctx->mem_idx)) {
+        gen_inval_exception(ctx, POWERPC_EXCP_PRIV_OPC);
+        return;
+    }
+    gen_helper_tlbie(cpu_gpr[rB(ctx->opcode)]);
 #endif
 }
 
@@ -6263,20 +6233,19 @@ GEN_HANDLER(mfvscr, 0x04, 0x2, 0x18, 0x001ff800, PPC_ALTIVEC)
     t = tcg_temp_new_i32();
     tcg_gen_ld_i32(t, cpu_env, offsetof(CPUState, vscr));
     tcg_gen_extu_i32_i64(cpu_avrl[rD(ctx->opcode)], t);
-    tcg_temp_free(t);
+    tcg_temp_free_i32(t);
 }
 
 GEN_HANDLER(mtvscr, 0x04, 0x2, 0x19, 0x03ff0000, PPC_ALTIVEC)
 {
-    TCGv_i32 t;
+    TCGv_ptr p;
     if (unlikely(!ctx->altivec_enabled)) {
         gen_exception(ctx, POWERPC_EXCP_VPU);
         return;
     }
-    t = tcg_temp_new_i32();
-    tcg_gen_trunc_i64_i32(t, cpu_avrl[rD(ctx->opcode)]);
-    tcg_gen_st_i32(t, cpu_env, offsetof(CPUState, vscr));
-    tcg_temp_free_i32(t);
+    p = gen_avr_ptr(rD(ctx->opcode));
+    gen_helper_mtvscr(p);
+    tcg_temp_free_ptr(p);
 }
 
 /* Logical operations */
@@ -6396,6 +6365,10 @@ GEN_VXFORM(vsum4sbs, 4, 28);
 GEN_VXFORM(vsum4shs, 4, 25);
 GEN_VXFORM(vsum2sws, 4, 26);
 GEN_VXFORM(vsumsws, 4, 30);
+GEN_VXFORM(vaddfp, 5, 0);
+GEN_VXFORM(vsubfp, 5, 1);
+GEN_VXFORM(vmaxfp, 5, 16);
+GEN_VXFORM(vminfp, 5, 17);
 
 #define GEN_VXRFORM1(opname, name, str, opc2, opc3)                     \
     GEN_HANDLER2(name, str, 0x4, opc2, opc3, 0x00000000, PPC_ALTIVEC)   \
@@ -6427,6 +6400,10 @@ GEN_VXRFORM(vcmpgtsw, 3, 14)
 GEN_VXRFORM(vcmpgtub, 3, 8)
 GEN_VXRFORM(vcmpgtuh, 3, 9)
 GEN_VXRFORM(vcmpgtuw, 3, 10)
+GEN_VXRFORM(vcmpeqfp, 3, 3)
+GEN_VXRFORM(vcmpgefp, 3, 7)
+GEN_VXRFORM(vcmpgtfp, 3, 11)
+GEN_VXRFORM(vcmpbfp, 3, 15)
 
 #define GEN_VXFORM_SIMM(name, opc2, opc3)                               \
     GEN_HANDLER(name, 0x04, opc2, opc3, 0x00000000, PPC_ALTIVEC)        \
@@ -6469,6 +6446,13 @@ GEN_VXFORM_NOA(vupklsb, 7, 10);
 GEN_VXFORM_NOA(vupklsh, 7, 11);
 GEN_VXFORM_NOA(vupkhpx, 7, 13);
 GEN_VXFORM_NOA(vupklpx, 7, 15);
+GEN_VXFORM_NOA(vrefp, 5, 4);
+GEN_VXFORM_NOA(vrsqrtefp, 5, 5);
+GEN_VXFORM_NOA(vlogefp, 5, 7);
+GEN_VXFORM_NOA(vrfim, 5, 8);
+GEN_VXFORM_NOA(vrfin, 5, 9);
+GEN_VXFORM_NOA(vrfip, 5, 10);
+GEN_VXFORM_NOA(vrfiz, 5, 11);
 
 #define GEN_VXFORM_SIMM(name, opc2, opc3)                               \
     GEN_HANDLER(name, 0x04, opc2, opc3, 0x00000000, PPC_ALTIVEC)        \
@@ -6507,11 +6491,15 @@ GEN_VXFORM_NOA(vupklpx, 7, 15);
 GEN_VXFORM_UIMM(vspltb, 6, 8);
 GEN_VXFORM_UIMM(vsplth, 6, 9);
 GEN_VXFORM_UIMM(vspltw, 6, 10);
+GEN_VXFORM_UIMM(vcfux, 5, 12);
+GEN_VXFORM_UIMM(vcfsx, 5, 13);
+GEN_VXFORM_UIMM(vctuxs, 5, 14);
+GEN_VXFORM_UIMM(vctsxs, 5, 15);
 
 GEN_HANDLER(vsldoi, 0x04, 0x16, 0xFF, 0x00000400, PPC_ALTIVEC)
 {
     TCGv_ptr ra, rb, rd;
-    TCGv sh;
+    TCGv_i32 sh;
     if (unlikely(!ctx->altivec_enabled)) {
         gen_exception(ctx, POWERPC_EXCP_VPU);
         return;
@@ -6524,7 +6512,7 @@ GEN_HANDLER(vsldoi, 0x04, 0x16, 0xFF, 0x00000400, PPC_ALTIVEC)
     tcg_temp_free_ptr(ra);
     tcg_temp_free_ptr(rb);
     tcg_temp_free_ptr(rd);
-    tcg_temp_free(sh);
+    tcg_temp_free_i32(sh);
 }
 
 #define GEN_VAFORM_PAIRED(name0, name1, opc2)                           \
@@ -6574,6 +6562,7 @@ GEN_VAFORM_PAIRED(vmsumubm, vmsummbm, 18)
 GEN_VAFORM_PAIRED(vmsumuhm, vmsumuhs, 19)
 GEN_VAFORM_PAIRED(vmsumshm, vmsumshs, 20)
 GEN_VAFORM_PAIRED(vsel, vperm, 21)
+GEN_VAFORM_PAIRED(vmaddfp, vnmsubfp, 23)
 
 /***                           SPE extension                               ***/
 /* Register moves */
@@ -7867,20 +7856,20 @@ GEN_SPEFPUOP_COMP_64(evfststlt);
 GEN_SPEFPUOP_COMP_64(evfststeq);
 
 /* Opcodes definitions */
-GEN_SPE(evfsadd,        evfssub,       0x00, 0x0A, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(evfsabs,        evfsnabs,      0x02, 0x0A, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(evfsneg,        speundef,      0x03, 0x0A, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(evfsmul,        evfsdiv,       0x04, 0x0A, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(evfscmpgt,      evfscmplt,     0x06, 0x0A, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(evfscmpeq,      speundef,      0x07, 0x0A, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(evfscfui,       evfscfsi,      0x08, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfscfuf,       evfscfsf,      0x09, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfsctui,       evfsctsi,      0x0A, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfsctuf,       evfsctsf,      0x0B, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfsctuiz,      speundef,      0x0C, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfsctsiz,      speundef,      0x0D, 0x0A, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(evfststgt,      evfststlt,     0x0E, 0x0A, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(evfststeq,      speundef,      0x0F, 0x0A, 0x00600000, PPC_SPEFPU); //
+GEN_SPE(evfsadd,        evfssub,       0x00, 0x0A, 0x00000000, PPC_SPE_SINGLE); //
+GEN_SPE(evfsabs,        evfsnabs,      0x02, 0x0A, 0x0000F800, PPC_SPE_SINGLE); //
+GEN_SPE(evfsneg,        speundef,      0x03, 0x0A, 0x0000F800, PPC_SPE_SINGLE); //
+GEN_SPE(evfsmul,        evfsdiv,       0x04, 0x0A, 0x00000000, PPC_SPE_SINGLE); //
+GEN_SPE(evfscmpgt,      evfscmplt,     0x06, 0x0A, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(evfscmpeq,      speundef,      0x07, 0x0A, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(evfscfui,       evfscfsi,      0x08, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfscfuf,       evfscfsf,      0x09, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfsctui,       evfsctsi,      0x0A, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfsctuf,       evfsctsf,      0x0B, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfsctuiz,      speundef,      0x0C, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfsctsiz,      speundef,      0x0D, 0x0A, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(evfststgt,      evfststlt,     0x0E, 0x0A, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(evfststeq,      speundef,      0x0F, 0x0A, 0x00600000, PPC_SPE_SINGLE); //
 
 /* Single precision floating-point operations */
 /* Arithmetic */
@@ -7935,20 +7924,20 @@ GEN_SPEFPUOP_COMP_32(efststlt);
 GEN_SPEFPUOP_COMP_32(efststeq);
 
 /* Opcodes definitions */
-GEN_SPE(efsadd,         efssub,        0x00, 0x0B, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(efsabs,         efsnabs,       0x02, 0x0B, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(efsneg,         speundef,      0x03, 0x0B, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(efsmul,         efsdiv,        0x04, 0x0B, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(efscmpgt,       efscmplt,      0x06, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efscmpeq,       efscfd,        0x07, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efscfui,        efscfsi,       0x08, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efscfuf,        efscfsf,       0x09, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efsctui,        efsctsi,       0x0A, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efsctuf,        efsctsf,       0x0B, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efsctuiz,       speundef,      0x0C, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efsctsiz,       speundef,      0x0D, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efststgt,       efststlt,      0x0E, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efststeq,       speundef,      0x0F, 0x0B, 0x00600000, PPC_SPEFPU); //
+GEN_SPE(efsadd,         efssub,        0x00, 0x0B, 0x00000000, PPC_SPE_SINGLE); //
+GEN_SPE(efsabs,         efsnabs,       0x02, 0x0B, 0x0000F800, PPC_SPE_SINGLE); //
+GEN_SPE(efsneg,         speundef,      0x03, 0x0B, 0x0000F800, PPC_SPE_SINGLE); //
+GEN_SPE(efsmul,         efsdiv,        0x04, 0x0B, 0x00000000, PPC_SPE_SINGLE); //
+GEN_SPE(efscmpgt,       efscmplt,      0x06, 0x0B, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(efscmpeq,       efscfd,        0x07, 0x0B, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(efscfui,        efscfsi,       0x08, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efscfuf,        efscfsf,       0x09, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efsctui,        efsctsi,       0x0A, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efsctuf,        efsctsf,       0x0B, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efsctuiz,       speundef,      0x0C, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efsctsiz,       speundef,      0x0D, 0x0B, 0x00180000, PPC_SPE_SINGLE); //
+GEN_SPE(efststgt,       efststlt,      0x0E, 0x0B, 0x00600000, PPC_SPE_SINGLE); //
+GEN_SPE(efststeq,       speundef,      0x0F, 0x0B, 0x00600000, PPC_SPE_SINGLE); //
 
 /* Double precision floating-point operations */
 /* Arithmetic */
@@ -8019,22 +8008,22 @@ GEN_SPEFPUOP_COMP_64(efdtstlt);
 GEN_SPEFPUOP_COMP_64(efdtsteq);
 
 /* Opcodes definitions */
-GEN_SPE(efdadd,         efdsub,        0x10, 0x0B, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(efdcfuid,       efdcfsid,      0x11, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdabs,         efdnabs,       0x12, 0x0B, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(efdneg,         speundef,      0x13, 0x0B, 0x0000F800, PPC_SPEFPU); //
-GEN_SPE(efdmul,         efddiv,        0x14, 0x0B, 0x00000000, PPC_SPEFPU); //
-GEN_SPE(efdctuidz,      efdctsidz,     0x15, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdcmpgt,       efdcmplt,      0x16, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efdcmpeq,       efdcfs,        0x17, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efdcfui,        efdcfsi,       0x18, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdcfuf,        efdcfsf,       0x19, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdctui,        efdctsi,       0x1A, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdctuf,        efdctsf,       0x1B, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdctuiz,       speundef,      0x1C, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdctsiz,       speundef,      0x1D, 0x0B, 0x00180000, PPC_SPEFPU); //
-GEN_SPE(efdtstgt,       efdtstlt,      0x1E, 0x0B, 0x00600000, PPC_SPEFPU); //
-GEN_SPE(efdtsteq,       speundef,      0x1F, 0x0B, 0x00600000, PPC_SPEFPU); //
+GEN_SPE(efdadd,         efdsub,        0x10, 0x0B, 0x00000000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdcfuid,       efdcfsid,      0x11, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdabs,         efdnabs,       0x12, 0x0B, 0x0000F800, PPC_SPE_DOUBLE); //
+GEN_SPE(efdneg,         speundef,      0x13, 0x0B, 0x0000F800, PPC_SPE_DOUBLE); //
+GEN_SPE(efdmul,         efddiv,        0x14, 0x0B, 0x00000000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdctuidz,      efdctsidz,     0x15, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdcmpgt,       efdcmplt,      0x16, 0x0B, 0x00600000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdcmpeq,       efdcfs,        0x17, 0x0B, 0x00600000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdcfui,        efdcfsi,       0x18, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdcfuf,        efdcfsf,       0x19, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdctui,        efdctsi,       0x1A, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdctuf,        efdctsf,       0x1B, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdctuiz,       speundef,      0x1C, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdctsiz,       speundef,      0x1D, 0x0B, 0x00180000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdtstgt,       efdtstlt,      0x1E, 0x0B, 0x00600000, PPC_SPE_DOUBLE); //
+GEN_SPE(efdtsteq,       speundef,      0x1F, 0x0B, 0x00600000, PPC_SPE_DOUBLE); //
 
 /* End opcode list */
 GEN_OPCODE_MARK(end);

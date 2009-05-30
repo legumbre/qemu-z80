@@ -26,6 +26,7 @@
 #include <ctype.h>
 #include "hw.h"
 #include "qemu-char.h"
+#include "etraxfs.h"
 
 #define D(x)
 
@@ -233,8 +234,6 @@ void etraxfs_ser_init(CPUState *env, qemu_irq *irq, CharDriverState *chr,
 	int ser_regs;
 
 	s = qemu_mallocz(sizeof *s);
-	if (!s)
-		return;
 
 	s->env = env;
 	s->irq = irq;

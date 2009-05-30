@@ -63,6 +63,11 @@
 #include <sys/dkio.h>
 #endif
 
+#ifdef __DragonFly__
+#include <sys/ioctl.h>
+#include <sys/diskslice.h>
+#endif
+
 //#define DEBUG_FLOPPY
 
 //#define DEBUG_BLOCK
@@ -353,6 +358,17 @@ static int raw_pread(BlockDriverState *bs, int64_t offset,
     return raw_pread_aligned(bs, offset, buf, count) + sum;
 }
 
+static int raw_read(BlockDriverState *bs, int64_t sector_num,
+                    uint8_t *buf, int nb_sectors)
+{
+    int ret;
+
+    ret = raw_pread(bs, sector_num * 512, buf, nb_sectors * 512);
+    if (ret == (nb_sectors * 512))
+        ret = 0;
+    return ret;
+}
+
 /*
  * offset and count are in bytes and possibly not aligned. For files opened
  * with O_DIRECT, necessary alignments are ensured before calling
@@ -429,6 +445,16 @@ static int raw_pwrite(BlockDriverState *bs, int64_t offset,
         }
     }
     return raw_pwrite_aligned(bs, offset, buf, count) + sum;
+}
+
+static int raw_write(BlockDriverState *bs, int64_t sector_num,
+                     const uint8_t *buf, int nb_sectors)
+{
+    int ret;
+    ret = raw_pwrite(bs, sector_num * 512, buf, nb_sectors * 512);
+    if (ret == (nb_sectors * 512))
+        ret = 0;
+    return ret;
 }
 
 #ifdef CONFIG_AIO
@@ -533,8 +559,6 @@ static int posix_aio_init(void)
         return 0;
 
     s = qemu_malloc(sizeof(PosixAioState));
-    if (s == NULL)
-        return -ENOMEM;
 
     sigfillset(&act.sa_mask);
     act.sa_flags = 0; /* do not restart syscalls to interrupt select() */
@@ -598,6 +622,25 @@ static void raw_aio_em_cb(void* opaque)
     qemu_aio_release(acb);
 }
 
+static void raw_aio_remove(RawAIOCB *acb)
+{
+    RawAIOCB **pacb;
+
+    /* remove the callback from the queue */
+    pacb = &posix_aio_state->first_aio;
+    for(;;) {
+        if (*pacb == NULL) {
+            fprintf(stderr, "raw_aio_remove: aio request not found!\n");
+            break;
+        } else if (*pacb == acb) {
+            *pacb = acb->next;
+            qemu_aio_release(acb);
+            break;
+        }
+        pacb = &(*pacb)->next;
+    }
+}
+
 static BlockDriverAIOCB *raw_aio_read(BlockDriverState *bs,
         int64_t sector_num, uint8_t *buf, int nb_sectors,
         BlockDriverCompletionFunc *cb, void *opaque)
@@ -623,7 +666,7 @@ static BlockDriverAIOCB *raw_aio_read(BlockDriverState *bs,
     if (!acb)
         return NULL;
     if (qemu_paio_read(&acb->aiocb) < 0) {
-        qemu_aio_release(acb);
+        raw_aio_remove(acb);
         return NULL;
     }
     return &acb->common;
@@ -654,7 +697,7 @@ static BlockDriverAIOCB *raw_aio_write(BlockDriverState *bs,
     if (!acb)
         return NULL;
     if (qemu_paio_write(&acb->aiocb) < 0) {
-        qemu_aio_release(acb);
+        raw_aio_remove(acb);
         return NULL;
     }
     return &acb->common;
@@ -664,7 +707,6 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
 {
     int ret;
     RawAIOCB *acb = (RawAIOCB *)blockacb;
-    RawAIOCB **pacb;
 
     ret = qemu_paio_cancel(acb->aiocb.aio_fildes, &acb->aiocb);
     if (ret == QEMU_PAIO_NOTCANCELED) {
@@ -673,18 +715,7 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
         while (qemu_paio_error(&acb->aiocb) == EINPROGRESS);
     }
 
-    /* remove the callback from the queue */
-    pacb = &posix_aio_state->first_aio;
-    for(;;) {
-        if (*pacb == NULL) {
-            break;
-        } else if (*pacb == acb) {
-            *pacb = acb->next;
-            qemu_aio_release(acb);
-            break;
-        }
-        pacb = &acb->next;
-    }
+    raw_aio_remove(acb);
 }
 #else /* CONFIG_AIO */
 static int posix_aio_init(void)
@@ -740,7 +771,7 @@ static int64_t  raw_getlength(BlockDriverState *bs)
     BDRVRawState *s = bs->opaque;
     int fd = s->fd;
     int64_t size;
-#ifdef _BSD
+#ifdef HOST_BSD
     struct stat sb;
 #endif
 #ifdef __sun__
@@ -753,10 +784,19 @@ static int64_t  raw_getlength(BlockDriverState *bs)
     if (ret < 0)
         return ret;
 
-#ifdef _BSD
+#ifdef HOST_BSD
     if (!fstat(fd, &sb) && (S_IFCHR & sb.st_mode)) {
 #ifdef DIOCGMEDIASIZE
 	if (ioctl(fd, DIOCGMEDIASIZE, (off_t *)&size))
+#elif defined(DIOCGPART)
+        {
+                struct partinfo pi;
+                if (ioctl(fd, DIOCGPART, &pi) == 0)
+                        size = pi.media_size;
+                else
+                        size = 0;
+        }
+        if (size == 0)
 #endif
 #ifdef CONFIG_COCOA
         size = LONG_LONG_MAX;
@@ -824,8 +864,8 @@ BlockDriver bdrv_raw = {
     .aiocb_size = sizeof(RawAIOCB),
 #endif
 
-    .bdrv_pread = raw_pread,
-    .bdrv_pwrite = raw_pwrite,
+    .bdrv_read = raw_read,
+    .bdrv_write = raw_write,
     .bdrv_truncate = raw_truncate,
     .bdrv_getlength = raw_getlength,
 };
@@ -1160,33 +1200,59 @@ static int raw_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
 }
 #endif /* !linux */
 
+static int raw_sg_send_command(BlockDriverState *bs, void *buf, int count)
+{
+    return raw_pwrite(bs, -1, buf, count);
+}
+
+static int raw_sg_recv_response(BlockDriverState *bs, void *buf, int count)
+{
+    return raw_pread(bs, -1, buf, count);
+}
+
+static BlockDriverAIOCB *raw_sg_aio_read(BlockDriverState *bs,
+                                         void *buf, int count,
+                                         BlockDriverCompletionFunc *cb,
+                                         void *opaque)
+{
+    return raw_aio_read(bs, 0, buf, -(int64_t)count, cb, opaque);
+}
+
+static BlockDriverAIOCB *raw_sg_aio_write(BlockDriverState *bs,
+                                          void *buf, int count,
+                                          BlockDriverCompletionFunc *cb,
+                                          void *opaque)
+{
+    return raw_aio_write(bs, 0, buf, -(int64_t)count, cb, opaque);
+}
+
 BlockDriver bdrv_host_device = {
-    "host_device",
-    sizeof(BDRVRawState),
-    NULL, /* no probe for protocols */
-    hdev_open,
-    NULL,
-    NULL,
-    raw_close,
-    NULL,
-    raw_flush,
+    .format_name	= "host_device",
+    .instance_size	= sizeof(BDRVRawState),
+    .bdrv_open		= hdev_open,
+    .bdrv_close		= raw_close,
+    .bdrv_flush		= raw_flush,
 
 #ifdef CONFIG_AIO
-    .bdrv_aio_read = raw_aio_read,
-    .bdrv_aio_write = raw_aio_write,
-    .bdrv_aio_cancel = raw_aio_cancel,
-    .aiocb_size = sizeof(RawAIOCB),
+    .bdrv_aio_read	= raw_aio_read,
+    .bdrv_aio_write	= raw_aio_write,
+    .bdrv_aio_cancel	= raw_aio_cancel,
+    .aiocb_size		= sizeof(RawAIOCB),
 #endif
 
-    .bdrv_pread = raw_pread,
-    .bdrv_pwrite = raw_pwrite,
-    .bdrv_getlength = raw_getlength,
+    .bdrv_read          = raw_read,
+    .bdrv_write         = raw_write,
+    .bdrv_getlength	= raw_getlength,
 
     /* removable device support */
-    .bdrv_is_inserted = raw_is_inserted,
-    .bdrv_media_changed = raw_media_changed,
-    .bdrv_eject = raw_eject,
-    .bdrv_set_locked = raw_set_locked,
+    .bdrv_is_inserted	= raw_is_inserted,
+    .bdrv_media_changed	= raw_media_changed,
+    .bdrv_eject		= raw_eject,
+    .bdrv_set_locked	= raw_set_locked,
     /* generic scsi device */
-    .bdrv_ioctl = raw_ioctl,
+    .bdrv_ioctl		= raw_ioctl,
+    .bdrv_sg_send_command  = raw_sg_send_command,
+    .bdrv_sg_recv_response = raw_sg_recv_response,
+    .bdrv_sg_aio_read      = raw_sg_aio_read,
+    .bdrv_sg_aio_write     = raw_sg_aio_write,
 };

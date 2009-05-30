@@ -149,8 +149,6 @@ static int bochs_open(BlockDriverState *bs, const char *filename, int flags)
 
     s->catalog_size = le32_to_cpu(bochs.extra.redolog.catalog);
     s->catalog_bitmap = qemu_malloc(s->catalog_size * 4);
-    if (!s->catalog_bitmap)
-	goto fail;
     if (read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
 	s->catalog_size * 4)
 	goto fail;
@@ -244,11 +242,10 @@ static void bochs_close(BlockDriverState *bs)
 }
 
 BlockDriver bdrv_bochs = {
-    "bochs",
-    sizeof(BDRVBochsState),
-    bochs_probe,
-    bochs_open,
-    bochs_read,
-    NULL,
-    bochs_close,
+    .format_name	= "bochs",
+    .instance_size	= sizeof(BDRVBochsState),
+    .bdrv_probe		= bochs_probe,
+    .bdrv_open		= bochs_open,
+    .bdrv_read		= bochs_read,
+    .bdrv_close		= bochs_close,
 };

@@ -25,8 +25,7 @@
 #include <stdio.h>
 #include "hw.h"
 #include "net.h"
-
-#include "etraxfs_dma.h"
+#include "etraxfs.h"
 
 #define D(x)
 
@@ -564,12 +563,8 @@ void *etraxfs_eth_init(NICInfo *nd, CPUState *env,
 	qemu_check_nic_model(nd, "fseth");
 
 	dma = qemu_mallocz(sizeof *dma * 2);
-	if (!dma)
-		return NULL;
 
 	eth = qemu_mallocz(sizeof *eth);
-	if (!eth)
-		goto err;
 
 	dma[0].client.push = eth_tx_push;
 	dma[0].client.opaque = eth;
@@ -595,8 +590,4 @@ void *etraxfs_eth_init(NICInfo *nd, CPUState *env,
 	eth->vc->link_status_changed = eth_set_link;
 
 	return dma;
-  err:
-	qemu_free(eth);
-	qemu_free(dma);
-	return NULL;
 }

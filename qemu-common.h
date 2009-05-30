@@ -2,15 +2,9 @@
 #ifndef QEMU_COMMON_H
 #define QEMU_COMMON_H
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define WINVER 0x0501  /* needed for ipv6 bits */
-#include <windows.h>
-#endif
+#define QEMU_NORETURN __attribute__ ((__noreturn__))
 
-#define noreturn __attribute__ ((__noreturn__))
-
-/* Hack around the mess dyngen-exec.h causes: We need noreturn in files that
+/* Hack around the mess dyngen-exec.h causes: We need QEMU_NORETURN in files that
    cannot include the following headers without conflicts. This condition has
    to be removed once dyngen is gone. */
 #ifndef __DYNGEN_EXEC_H__
@@ -144,7 +138,7 @@ void *get_mmap_addr(unsigned long size);
 
 /* Error handling.  */
 
-void noreturn hw_error(const char *fmt, ...)
+void QEMU_NORETURN hw_error(const char *fmt, ...)
     __attribute__ ((__format__ (__printf__, 1, 2)));
 
 /* IO callbacks.  */
@@ -168,6 +162,7 @@ typedef struct BlockDriverState BlockDriverState;
 typedef struct DisplayState DisplayState;
 typedef struct DisplayChangeListener DisplayChangeListener;
 typedef struct DisplaySurface DisplaySurface;
+typedef struct DisplayAllocator DisplayAllocator;
 typedef struct PixelFormat PixelFormat;
 typedef struct TextConsole TextConsole;
 typedef TextConsole QEMUConsole;
@@ -201,8 +196,12 @@ typedef struct QEMUIOVector {
 void qemu_iovec_init(QEMUIOVector *qiov, int alloc_hint);
 void qemu_iovec_add(QEMUIOVector *qiov, void *base, size_t len);
 void qemu_iovec_destroy(QEMUIOVector *qiov);
+void qemu_iovec_reset(QEMUIOVector *qiov);
 void qemu_iovec_to_buffer(QEMUIOVector *qiov, void *buf);
 void qemu_iovec_from_buffer(QEMUIOVector *qiov, const void *buf, size_t count);
+
+struct Monitor;
+typedef struct Monitor Monitor;
 
 #endif /* dyngen-exec.h hack */
 

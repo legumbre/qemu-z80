@@ -24,6 +24,7 @@
 
 #include <stdio.h>
 #include "hw.h"
+#include "pc.h"
 #include "etraxfs.h"
 
 #define D(x)
@@ -135,11 +136,11 @@ static CPUWriteMemoryFunc *pic_write[] = {
 	&pic_writel,
 };
 
-void pic_info(void)
+void pic_info(Monitor *mon)
 {
 }
 
-void irq_info(void)
+void irq_info(Monitor *mon)
 {
 }
 
@@ -192,8 +193,6 @@ struct etraxfs_pic *etraxfs_pic_init(CPUState *env, target_phys_addr_t base)
 
 	pic = qemu_mallocz(sizeof *pic);
 	pic->internal = fs = qemu_mallocz(sizeof *fs);
-	if (!fs || !pic)
-		goto err;
 
 	fs->env = env;
 	pic->irq = qemu_allocate_irqs(irq_handler, fs, 30);
@@ -204,8 +203,4 @@ struct etraxfs_pic *etraxfs_pic_init(CPUState *env, target_phys_addr_t base)
 	cpu_register_physical_memory(base, 0x14, intr_vect_regs);
 
 	return pic;
-  err:
-	free(pic);
-	free(fs);
-	return NULL;
 }

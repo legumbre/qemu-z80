@@ -155,14 +155,13 @@ typedef struct UHCI_QH {
 static UHCIAsync *uhci_async_alloc(UHCIState *s)
 {
     UHCIAsync *async = qemu_malloc(sizeof(UHCIAsync));
-    if (async) {
-        memset(&async->packet, 0, sizeof(async->packet));
-        async->valid = 0;
-        async->td    = 0;
-        async->token = 0;
-        async->done  = 0;
-        async->next  = NULL;
-    }
+
+    memset(&async->packet, 0, sizeof(async->packet));
+    async->valid = 0;
+    async->td    = 0;
+    async->token = 0;
+    async->done  = 0;
+    async->next  = NULL;
 
     return async;
 }
@@ -1084,8 +1083,7 @@ void usb_uhci_piix3_init(PCIBus *bus, int devfn)
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371SB_2);
     pci_conf[0x08] = 0x01; // revision number
     pci_conf[0x09] = 0x00;
-    pci_conf[0x0a] = 0x03;
-    pci_conf[0x0b] = 0x0c;
+    pci_config_set_class(pci_conf, PCI_CLASS_SERIAL_USB);
     pci_conf[0x0e] = 0x00; // header_type
     pci_conf[0x3d] = 4; // interrupt pin 3
     pci_conf[0x60] = 0x10; // release number
@@ -1119,8 +1117,7 @@ void usb_uhci_piix4_init(PCIBus *bus, int devfn)
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371AB_2);
     pci_conf[0x08] = 0x01; // revision number
     pci_conf[0x09] = 0x00;
-    pci_conf[0x0a] = 0x03;
-    pci_conf[0x0b] = 0x0c;
+    pci_config_set_class(pci_conf, PCI_CLASS_SERIAL_USB);
     pci_conf[0x0e] = 0x00; // header_type
     pci_conf[0x3d] = 4; // interrupt pin 3
     pci_conf[0x60] = 0x10; // release number

@@ -1613,8 +1613,7 @@ static void gen_arith (CPUState *env, DisasContext *ctx, uint32_t opc,
         opn = "and";
         break;
     case OPC_NOR:
-        tcg_gen_or_tl(t0, t0, t1);
-        tcg_gen_not_tl(t0, t0);
+        tcg_gen_nor_tl(t0, t0, t1);
         opn = "nor";
         break;
     case OPC_OR:
@@ -1772,42 +1771,41 @@ static void gen_arith (CPUState *env, DisasContext *ctx, uint32_t opc,
 static void gen_HILO (DisasContext *ctx, uint32_t opc, int reg)
 {
     const char *opn = "hilo";
-    TCGv t0 = tcg_temp_local_new();
 
     if (reg == 0 && (opc == OPC_MFHI || opc == OPC_MFLO)) {
         /* Treat as NOP. */
         MIPS_DEBUG("NOP");
-        goto out;
+        return;
     }
     switch (opc) {
     case OPC_MFHI:
-        tcg_gen_mov_tl(t0, cpu_HI[0]);
-        gen_store_gpr(t0, reg);
+        tcg_gen_mov_tl(cpu_gpr[reg], cpu_HI[0]);
         opn = "mfhi";
         break;
     case OPC_MFLO:
-        tcg_gen_mov_tl(t0, cpu_LO[0]);
-        gen_store_gpr(t0, reg);
+        tcg_gen_mov_tl(cpu_gpr[reg], cpu_LO[0]);
         opn = "mflo";
         break;
     case OPC_MTHI:
-        gen_load_gpr(t0, reg);
-        tcg_gen_mov_tl(cpu_HI[0], t0);
+        if (reg != 0)
+            tcg_gen_mov_tl(cpu_HI[0], cpu_gpr[reg]);
+        else
+            tcg_gen_movi_tl(cpu_HI[0], 0);
         opn = "mthi";
         break;
     case OPC_MTLO:
-        gen_load_gpr(t0, reg);
-        tcg_gen_mov_tl(cpu_LO[0], t0);
+        if (reg != 0)
+            tcg_gen_mov_tl(cpu_LO[0], cpu_gpr[reg]);
+        else
+            tcg_gen_movi_tl(cpu_LO[0], 0);
         opn = "mtlo";
         break;
     default:
         MIPS_INVAL(opn);
         generate_exception(ctx, EXCP_RI);
-        goto out;
+        return;
     }
     MIPS_DEBUG("%s %s", opn, regnames[reg]);
- out:
-    tcg_temp_free(t0);
 }
 
 static void gen_muldiv (DisasContext *ctx, uint32_t opc,
@@ -5451,25 +5449,25 @@ static void gen_cp0 (CPUState *env, DisasContext *ctx, uint32_t opc, int rt, int
         break;
     case OPC_TLBWI:
         opn = "tlbwi";
-        if (!env->tlb->do_tlbwi)
+        if (!env->tlb->helper_tlbwi)
             goto die;
         gen_helper_tlbwi();
         break;
     case OPC_TLBWR:
         opn = "tlbwr";
-        if (!env->tlb->do_tlbwr)
+        if (!env->tlb->helper_tlbwr)
             goto die;
         gen_helper_tlbwr();
         break;
     case OPC_TLBP:
         opn = "tlbp";
-        if (!env->tlb->do_tlbp)
+        if (!env->tlb->helper_tlbp)
             goto die;
         gen_helper_tlbp();
         break;
     case OPC_TLBR:
         opn = "tlbr";
-        if (!env->tlb->do_tlbr)
+        if (!env->tlb->helper_tlbr)
             goto die;
         gen_helper_tlbr();
         break;
@@ -8476,8 +8474,6 @@ CPUMIPSState *cpu_mips_init (const char *cpu_model)
     if (!def)
         return NULL;
     env = qemu_mallocz(sizeof(CPUMIPSState));
-    if (!env)
-        return NULL;
     env->cpu_model = def;
 
     cpu_exec_init(env);

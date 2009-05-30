@@ -28,7 +28,7 @@
 #undef TCG_TARGET_WORDS_BIGENDIAN
 #undef TCG_TARGET_HAS_div_i32
 #undef TCG_TARGET_HAS_div_i64
-#undef TCG_TARGET_HAS_bswap_i32
+#undef TCG_TARGET_HAS_bswap32_i32
 #define TCG_TARGET_HAS_ext8s_i32
 #define TCG_TARGET_HAS_ext16s_i32
 #define TCG_TARGET_HAS_neg_i32
@@ -64,7 +64,6 @@ enum {
     TCG_AREG0 = TCG_REG_R7,
     TCG_AREG1 = TCG_REG_R4,
     TCG_AREG2 = TCG_REG_R5,
-    TCG_AREG3 = TCG_REG_R6,
 };
 
 static inline void flush_icache_range(unsigned long start, unsigned long stop)

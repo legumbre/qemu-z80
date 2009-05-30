@@ -36,6 +36,7 @@
 #include "disas.h"
 #include "tcg-op.h"
 #include "helper.h"
+#include "mmu.h"
 #include "crisv32-decode.h"
 #include "qemu-common.h"
 
@@ -2632,7 +2633,8 @@ static unsigned int dec_movem_mr(DisasContext *dc)
 		tmp32 = tcg_temp_new_i32();
 		tcg_gen_addi_tl(addr, cpu_R[dc->op1], i * 8);
 		gen_load(dc, tmp32, addr, 4, 0);
-	}
+	} else
+		TCGV_UNUSED(tmp32);
 	tcg_temp_free(addr);
 
 	for (i = 0; i < (nr >> 1); i++) {
@@ -3399,8 +3401,6 @@ CPUCRISState *cpu_cris_init (const char *cpu_model)
 	int i;
 
 	env = qemu_mallocz(sizeof(CPUCRISState));
-	if (!env)
-		return NULL;
 
 	cpu_exec_init(env);
 	cpu_reset(env);
@@ -3471,6 +3471,7 @@ void cpu_reset (CPUCRISState *env)
 	/* start in user mode with interrupts enabled.  */
 	env->pregs[PR_CCS] |= U_FLAG | I_FLAG;
 #else
+	cris_mmu_init(env);
 	env->pregs[PR_CCS] = 0;
 #endif
 }

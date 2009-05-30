@@ -447,8 +447,7 @@ int virtqueue_pop(VirtQueue *vq, VirtQueueElement *elem)
             sg->iov_len = 2 << 20;
 
         sg->iov_base = qemu_malloc(sg->iov_len);
-        if (sg->iov_base && 
-            !(vring_desc_flags(vq, i) & VRING_DESC_F_WRITE)) {
+        if (!(vring_desc_flags(vq, i) & VRING_DESC_F_WRITE)) {
             cpu_physical_memory_read(vring_desc_addr(vq, i),
                                      sg->iov_base,
                                      sg->iov_len);
@@ -738,6 +737,9 @@ void virtio_notify(VirtIODevice *vdev, VirtQueue *vq)
 
 void virtio_notify_config(VirtIODevice *vdev)
 {
+    if (!(vdev->status & VIRTIO_CONFIG_S_DRIVER_OK))
+        return;
+
     vdev->isr |= 0x03;
     virtio_update_irq(vdev);
 }
@@ -808,9 +810,8 @@ void virtio_load(VirtIODevice *vdev, QEMUFile *f)
 VirtIODevice *virtio_init_pci(PCIBus *bus, const char *name,
                               uint16_t vendor, uint16_t device,
                               uint16_t subvendor, uint16_t subdevice,
-                              uint8_t class_code, uint8_t subclass_code,
-                              uint8_t pif, size_t config_size,
-                              size_t struct_size)
+                              uint16_t class_code, uint8_t pif,
+                              size_t config_size, size_t struct_size)
 {
     VirtIODevice *vdev;
     PCIDevice *pci_dev;
@@ -836,8 +837,7 @@ VirtIODevice *virtio_init_pci(PCIBus *bus, const char *name,
     config[0x08] = VIRTIO_PCI_ABI_VERSION;
 
     config[0x09] = pif;
-    config[0x0a] = subclass_code;
-    config[0x0b] = class_code;
+    pci_config_set_class(config, class_code);
     config[0x0e] = 0x00;
 
     config[0x2c] = subvendor & 0xFF;

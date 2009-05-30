@@ -13,6 +13,7 @@
 #include "hw.h"
 #include "pci.h"
 #include "scsi-disk.h"
+#include "block_int.h"
 
 //#define DEBUG_LSI
 //#define DEBUG_LSI_REG
@@ -1368,6 +1369,8 @@ static uint8_t lsi_reg_readb(LSIState *s, int offset)
     CASE_GET_REG32(dsa, 0x10)
     case 0x14: /* ISTAT0 */
         return s->istat0;
+    case 0x15: /* ISTAT1 */
+        return s->istat1;
     case 0x16: /* MBOX0 */
         return s->mbox0;
     case 0x17: /* MBOX1 */
@@ -1958,6 +1961,19 @@ void lsi_scsi_attach(void *opaque, BlockDriverState *bd, int id)
     s->scsi_dev[id] = scsi_generic_init(bd, 1, lsi_command_complete, s);
     if (s->scsi_dev[id] == NULL)
         s->scsi_dev[id] = scsi_disk_init(bd, 1, lsi_command_complete, s);
+    bd->private = &s->pci_dev;
+}
+
+static int lsi_scsi_uninit(PCIDevice *d)
+{
+    LSIState *s = (LSIState *) d;
+
+    cpu_unregister_io_memory(s->mmio_io_addr);
+    cpu_unregister_io_memory(s->ram_io_addr);
+
+    qemu_free(s->queue);
+
+    return 0;
 }
 
 void *lsi_scsi_init(PCIBus *bus, int devfn)
@@ -1979,7 +1995,7 @@ void *lsi_scsi_init(PCIBus *bus, int devfn)
     /* PCI device ID (word) */
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_LSI_53C895A);
     /* PCI base class code */
-    pci_conf[0x0b] = 0x01;
+    pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_SCSI);
     /* PCI subsystem ID */
     pci_conf[0x2e] = 0x00;
     pci_conf[0x2f] = 0x10;
@@ -2002,6 +2018,7 @@ void *lsi_scsi_init(PCIBus *bus, int devfn)
     s->queue = qemu_malloc(sizeof(lsi_queue));
     s->queue_len = 1;
     s->active_commands = 0;
+    s->pci_dev.unregister = lsi_scsi_uninit;
 
     lsi_soft_reset(s);
 

@@ -26,6 +26,7 @@
 #include "hw.h"
 #include "sysemu.h"
 #include "qemu-timer.h"
+#include "etraxfs.h"
 
 #define D(x)
 
@@ -321,8 +322,6 @@ void etraxfs_timer_init(CPUState *env, qemu_irq *irqs, qemu_irq *nmi,
 	int timer_regs;
 
 	t = qemu_mallocz(sizeof *t);
-	if (!t)
-		return;
 
 	t->bh_t0 = qemu_bh_new(timer0_hit, t);
 	t->bh_t1 = qemu_bh_new(timer1_hit, t);

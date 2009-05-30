@@ -433,8 +433,7 @@ static void pci_reset(EEPRO100State * s)
     PCI_CONFIG_8(PCI_REVISION_ID, 0x08);
     /* PCI Class Code */
     PCI_CONFIG_8(0x09, 0x00);
-    PCI_CONFIG_8(PCI_SUBCLASS_CODE, 0x00);      // ethernet network controller
-    PCI_CONFIG_8(PCI_CLASS_CODE, 0x02); // network controller
+    pci_config_set_class(pci_conf, PCI_CLASS_NETWORK_ETHERNET);
     /* PCI Cache Line Size */
     /* check cache line size!!! */
     //~ PCI_CONFIG_8(0x0c, 0x00);
@@ -1736,7 +1735,7 @@ static void nic_save(QEMUFile * f, void *opaque)
     qemu_put_buffer(f, s->configuration, sizeof(s->configuration));
 }
 
-static void nic_init(PCIBus * bus, NICInfo * nd,
+static PCIDevice *nic_init(PCIBus * bus, NICInfo * nd,
                      const char *name, uint32_t device)
 {
     PCIEEPRO100State *d;
@@ -1784,22 +1783,23 @@ static void nic_init(PCIBus * bus, NICInfo * nd,
     qemu_register_reset(nic_reset, s);
 
     register_savevm(name, -1, 3, nic_save, nic_load, s);
+    return (PCIDevice *)d;
 }
 
-void pci_i82551_init(PCIBus * bus, NICInfo * nd, int devfn)
+PCIDevice *pci_i82551_init(PCIBus * bus, NICInfo * nd, int devfn)
 {
-    nic_init(bus, nd, "i82551", i82551);
+    return nic_init(bus, nd, "i82551", i82551);
     //~ uint8_t *pci_conf = d->dev.config;
 }
 
-void pci_i82557b_init(PCIBus * bus, NICInfo * nd, int devfn)
+PCIDevice *pci_i82557b_init(PCIBus * bus, NICInfo * nd, int devfn)
 {
-    nic_init(bus, nd, "i82557b", i82557B);
+    return nic_init(bus, nd, "i82557b", i82557B);
 }
 
-void pci_i82559er_init(PCIBus * bus, NICInfo * nd, int devfn)
+PCIDevice *pci_i82559er_init(PCIBus * bus, NICInfo * nd, int devfn)
 {
-    nic_init(bus, nd, "i82559er", i82559ER);
+    return nic_init(bus, nd, "i82559er", i82559ER);
 }
 
 /* eof */

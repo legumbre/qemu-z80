@@ -25,6 +25,16 @@
 #include "ppc_mac.h"
 #include "pci.h"
 
+/* debug UniNorth */
+//#define DEBUG_UNIN
+
+#ifdef DEBUG_UNIN
+#define UNIN_DPRINTF(fmt, args...) \
+do { printf("UNIN: " fmt , ##args); } while (0)
+#else
+#define UNIN_DPRINTF(fmt, args...)
+#endif
+
 typedef target_phys_addr_t pci_addr_t;
 #include "pci_host.h"
 
@@ -34,21 +44,13 @@ static void pci_unin_main_config_writel (void *opaque, target_phys_addr_t addr,
                                          uint32_t val)
 {
     UNINState *s = opaque;
-    int i;
 
+    UNIN_DPRINTF("config_writel addr " TARGET_FMT_plx " val %x\n", addr, val);
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap32(val);
 #endif
 
-    for (i = 11; i < 32; i++) {
-        if ((val & (1 << i)) != 0)
-            break;
-    }
-#if 0
-    s->config_reg = 0x80000000 | (1 << 16) | (val & 0x7FC) | (i << 11);
-#else
-    s->config_reg = 0x80000000 | (0 << 16) | (val & 0x7FC) | (i << 11);
-#endif
+    s->config_reg = val;
 }
 
 static uint32_t pci_unin_main_config_readl (void *opaque,
@@ -56,13 +58,12 @@ static uint32_t pci_unin_main_config_readl (void *opaque,
 {
     UNINState *s = opaque;
     uint32_t val;
-    int devfn;
 
-    devfn = (s->config_reg >> 8) & 0xFF;
-    val = (1 << (devfn >> 3)) | ((devfn & 0x07) << 8) | (s->config_reg & 0xFC);
+    val = s->config_reg;
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap32(val);
 #endif
+    UNIN_DPRINTF("config_readl addr " TARGET_FMT_plx " val %x\n", addr, val);
 
     return val;
 }
@@ -91,31 +92,20 @@ static CPUReadMemoryFunc *pci_unin_main_read[] = {
     &pci_host_data_readl,
 };
 
-#if 0
-
 static void pci_unin_config_writel (void *opaque, target_phys_addr_t addr,
                                     uint32_t val)
 {
     UNINState *s = opaque;
 
-#ifdef TARGET_WORDS_BIGENDIAN
-    val = bswap32(val);
-#endif
-    s->config_reg = 0x80000000 | (val & ~0x00000001);
+    s->config_reg = val;
 }
 
 static uint32_t pci_unin_config_readl (void *opaque,
                                        target_phys_addr_t addr)
 {
     UNINState *s = opaque;
-    uint32_t val;
 
-    val = (s->config_reg | 0x00000001) & ~0x80000000;
-#ifdef TARGET_WORDS_BIGENDIAN
-    val = bswap32(val);
-#endif
-
-    return val;
+    return s->config_reg;
 }
 
 static CPUWriteMemoryFunc *pci_unin_config_write[] = {
@@ -130,6 +120,7 @@ static CPUReadMemoryFunc *pci_unin_config_read[] = {
     &pci_unin_config_readl,
 };
 
+#if 0
 static CPUWriteMemoryFunc *pci_unin_write[] = {
     &pci_host_pci_writeb,
     &pci_host_pci_writew,
@@ -154,6 +145,27 @@ static void pci_unin_set_irq(qemu_irq *pic, int irq_num, int level)
     qemu_set_irq(pic[irq_num + 8], level);
 }
 
+static void pci_unin_save(QEMUFile* f, void *opaque)
+{
+    PCIDevice *d = opaque;
+
+    pci_device_save(d, f);
+}
+
+static int pci_unin_load(QEMUFile* f, void *opaque, int version_id)
+{
+    PCIDevice *d = opaque;
+
+    if (version_id != 1)
+        return -EINVAL;
+
+    return pci_device_load(d, f);
+}
+
+static void pci_unin_reset(void *opaque)
+{
+}
+
 PCIBus *pci_pmac_init(qemu_irq *pic)
 {
     UNINState *s;
@@ -175,10 +187,9 @@ PCIBus *pci_pmac_init(qemu_irq *pic)
     d = pci_register_device(s->bus, "Uni-north main", sizeof(PCIDevice),
                             11 << 3, NULL, NULL);
     pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_APPLE);
-    pci_config_set_device_id(d->config, 0x001f); // device_id
+    pci_config_set_device_id(d->config, PCI_DEVICE_ID_APPLE_UNI_N_PCI);
     d->config[0x08] = 0x00; // revision
-    d->config[0x0A] = 0x00; // class_sub = pci host
-    d->config[0x0B] = 0x06; // class_base = PCI_bridge
+    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
     d->config[0x0C] = 0x08; // cache_line_size
     d->config[0x0D] = 0x10; // latency_timer
     d->config[0x0E] = 0x00; // header_type
@@ -188,11 +199,10 @@ PCIBus *pci_pmac_init(qemu_irq *pic)
     /* pci-to-pci bridge */
     d = pci_register_device("Uni-north bridge", sizeof(PCIDevice), 0, 13 << 3,
                             NULL, NULL);
-    pci_config_set_vendor_id(d->config, 0x1011); // vendor_id : TI
-    pci_config_set_device_id(d->config, 0x0026); // device_id
+    pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_DEC);
+    pci_config_set_device_id(d->config, PCI_DEVICE_ID_DEC_21154);
     d->config[0x08] = 0x05; // revision
-    d->config[0x0A] = 0x04; // class_sub = pci2pci
-    d->config[0x0B] = 0x06; // class_base = PCI_bridge
+    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_PCI);
     d->config[0x0C] = 0x08; // cache_line_size
     d->config[0x0D] = 0x20; // latency_timer
     d->config[0x0E] = 0x01; // header_type
@@ -213,28 +223,25 @@ PCIBus *pci_pmac_init(qemu_irq *pic)
     d->config[0x27] = 0x7F;
     // d->config[0x34] = 0xdc // capabilities_pointer
 #endif
-#if 0 // XXX: not needed for now
+
     /* Uninorth AGP bus */
-    s = &pci_bridge[1];
     pci_mem_config = cpu_register_io_memory(0, pci_unin_config_read,
                                             pci_unin_config_write, s);
-    pci_mem_data = cpu_register_io_memory(0, pci_unin_read,
-                                          pci_unin_write, s);
+    pci_mem_data = cpu_register_io_memory(0, pci_unin_main_read,
+                                          pci_unin_main_write, s);
     cpu_register_physical_memory(0xf0800000, 0x1000, pci_mem_config);
     cpu_register_physical_memory(0xf0c00000, 0x1000, pci_mem_data);
 
-    d = pci_register_device("Uni-north AGP", sizeof(PCIDevice), 0, 11 << 3,
-                            NULL, NULL);
+    d = pci_register_device(s->bus, "Uni-north AGP", sizeof(PCIDevice),
+                            11 << 3, NULL, NULL);
     pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_APPLE);
     pci_config_set_device_id(d->config, PCI_DEVICE_ID_APPLE_UNI_N_AGP);
     d->config[0x08] = 0x00; // revision
-    d->config[0x0A] = 0x00; // class_sub = pci host
-    d->config[0x0B] = 0x06; // class_base = PCI_bridge
+    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
     d->config[0x0C] = 0x08; // cache_line_size
     d->config[0x0D] = 0x10; // latency_timer
     d->config[0x0E] = 0x00; // header_type
     //    d->config[0x34] = 0x80; // capabilities_pointer
-#endif
 
 #if 0 // XXX: not needed for now
     /* Uninorth internal bus */
@@ -249,14 +256,17 @@ PCIBus *pci_pmac_init(qemu_irq *pic)
     d = pci_register_device("Uni-north internal", sizeof(PCIDevice),
                             3, 11 << 3, NULL, NULL);
     pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_APPLE);
-    pci_config_set_device_id(d->config, 0x001E); // device_id
+    pci_config_set_device_id(d->config, PCI_DEVICE_ID_APPLE_UNI_N_I_PCI);
     d->config[0x08] = 0x00; // revision
-    d->config[0x0A] = 0x00; // class_sub = pci host
-    d->config[0x0B] = 0x06; // class_base = PCI_bridge
+    pci_config_set_class(d->config, PCI_CLASS_BRIDGE_HOST);
     d->config[0x0C] = 0x08; // cache_line_size
     d->config[0x0D] = 0x10; // latency_timer
     d->config[0x0E] = 0x00; // header_type
     d->config[0x34] = 0x00; // capabilities_pointer
 #endif
+    register_savevm("uninorth", 0, 1, pci_unin_save, pci_unin_load, d);
+    qemu_register_reset(pci_unin_reset, d);
+    pci_unin_reset(d);
+
     return s->bus;
 }

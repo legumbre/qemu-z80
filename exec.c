@@ -179,7 +179,7 @@ static void io_mem_init(void);
 CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];
 void *io_mem_opaque[IO_MEM_NB_ENTRIES];
-static int io_mem_nb;
+static char io_mem_used[IO_MEM_NB_ENTRIES];
 static int io_mem_watch;
 #endif
 
@@ -368,8 +368,10 @@ static PhysPageDesc *phys_page_find_alloc(target_phys_addr_t index, int alloc)
             return NULL;
         pd = qemu_vmalloc(sizeof(PhysPageDesc) * L2_SIZE);
         *lp = pd;
-        for (i = 0; i < L2_SIZE; i++)
+        for (i = 0; i < L2_SIZE; i++) {
           pd[i].phys_offset = IO_MEM_UNASSIGNED;
+          pd[i].region_offset = (index + i) << TARGET_PAGE_BITS;
+        }
     }
     return ((PhysPageDesc *)pd) + (index & (L2_SIZE - 1));
 }
@@ -452,7 +454,7 @@ static void code_gen_alloc(unsigned long tb_size)
             exit(1);
         }
     }
-#elif defined(__FreeBSD__)
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
     {
         int flags;
         void *addr = NULL;
@@ -476,10 +478,6 @@ static void code_gen_alloc(unsigned long tb_size)
     }
 #else
     code_gen_buffer = qemu_malloc(code_gen_buffer_size);
-    if (!code_gen_buffer) {
-        fprintf(stderr, "Could not allocate dynamic translator buffer\n");
-        exit(1);
-    }
     map_exec(code_gen_buffer, code_gen_buffer_size);
 #endif
 #endif /* !USE_STATIC_CODE_GEN_BUFFER */
@@ -525,6 +523,9 @@ static int cpu_common_load(QEMUFile *f, void *opaque, int version_id)
 
     qemu_get_be32s(f, &env->halted);
     qemu_get_be32s(f, &env->interrupt_request);
+    /* 0x01 was CPU_INTERRUPT_EXIT. This line can be removed when the
+       version_id is increased. */
+    env->interrupt_request &= ~0x01;
     tlb_flush(env, 1);
 
     return 0;
@@ -536,6 +537,9 @@ void cpu_exec_init(CPUState *env)
     CPUState **penv;
     int cpu_index;
 
+#if defined(CONFIG_USER_ONLY)
+    cpu_list_lock();
+#endif
     env->next_cpu = NULL;
     penv = &first_cpu;
     cpu_index = 0;
@@ -547,6 +551,9 @@ void cpu_exec_init(CPUState *env)
     TAILQ_INIT(&env->breakpoints);
     TAILQ_INIT(&env->watchpoints);
     *penv = env;
+#if defined(CONFIG_USER_ONLY)
+    cpu_list_unlock();
+#endif
 #if defined(CPU_SAVE_VERSION) && !defined(CONFIG_USER_ONLY)
     register_savevm("cpu_common", cpu_index, CPU_COMMON_SAVE_VERSION,
                     cpu_common_save, cpu_common_load, env);
@@ -825,8 +832,6 @@ static void build_page_bitmap(PageDesc *p)
     TranslationBlock *tb;
 
     p->code_bitmap = qemu_mallocz(TARGET_PAGE_SIZE / 8);
-    if (!p->code_bitmap)
-        return;
 
     tb = p->first_tb;
     while (tb != NULL) {
@@ -1318,8 +1323,6 @@ int cpu_watchpoint_insert(CPUState *env, target_ulong addr, target_ulong len,
         return -EINVAL;
     }
     wp = qemu_malloc(sizeof(*wp));
-    if (!wp)
-        return -ENOMEM;
 
     wp->vaddr = addr;
     wp->len_mask = len_mask;
@@ -1384,8 +1387,6 @@ int cpu_breakpoint_insert(CPUState *env, target_ulong pc, int flags,
     CPUBreakpoint *bp;
 
     bp = qemu_malloc(sizeof(*bp));
-    if (!bp)
-        return -ENOMEM;
 
     bp->pc = pc;
     bp->flags = flags;
@@ -1456,9 +1457,13 @@ void cpu_single_step(CPUState *env, int enabled)
 #if defined(TARGET_HAS_ICE)
     if (env->singlestep_enabled != enabled) {
         env->singlestep_enabled = enabled;
-        /* must flush all the translated code to avoid inconsistancies */
-        /* XXX: only flush what is necessary */
-        tb_flush(env);
+        if (kvm_enabled())
+            kvm_update_guest_debug(env, 0);
+        else {
+            /* must flush all the translated code to avoid inconsistancies */
+            /* XXX: only flush what is necessary */
+            tb_flush(env);
+        }
     }
 #endif
 }
@@ -1500,51 +1505,58 @@ void cpu_set_log_filename(const char *filename)
     cpu_set_log(loglevel);
 }
 
-/* mask must never be zero, except for A20 change call */
-void cpu_interrupt(CPUState *env, int mask)
+static void cpu_unlink_tb(CPUState *env)
 {
-#if !defined(USE_NPTL)
-    TranslationBlock *tb;
-    static spinlock_t interrupt_lock = SPIN_LOCK_UNLOCKED;
-#endif
-    int old_mask;
-
-    old_mask = env->interrupt_request;
-    /* FIXME: This is probably not threadsafe.  A different thread could
-       be in the middle of a read-modify-write operation.  */
-    env->interrupt_request |= mask;
 #if defined(USE_NPTL)
     /* FIXME: TB unchaining isn't SMP safe.  For now just ignore the
        problem and hope the cpu will stop of its own accord.  For userspace
        emulation this often isn't actually as bad as it sounds.  Often
        signals are used primarily to interrupt blocking syscalls.  */
 #else
+    TranslationBlock *tb;
+    static spinlock_t interrupt_lock = SPIN_LOCK_UNLOCKED;
+
+    tb = env->current_tb;
+    /* if the cpu is currently executing code, we must unlink it and
+       all the potentially executing TB */
+    if (tb && !testandset(&interrupt_lock)) {
+        env->current_tb = NULL;
+        tb_reset_jump_recursive(tb);
+        resetlock(&interrupt_lock);
+    }
+#endif
+}
+
+/* mask must never be zero, except for A20 change call */
+void cpu_interrupt(CPUState *env, int mask)
+{
+    int old_mask;
+
+    old_mask = env->interrupt_request;
+    env->interrupt_request |= mask;
+
     if (use_icount) {
         env->icount_decr.u16.high = 0xffff;
 #ifndef CONFIG_USER_ONLY
-        /* CPU_INTERRUPT_EXIT isn't a real interrupt.  It just means
-           an async event happened and we need to process it.  */
         if (!can_do_io(env)
-            && (mask & ~(old_mask | CPU_INTERRUPT_EXIT)) != 0) {
+            && (mask & ~old_mask) != 0) {
             cpu_abort(env, "Raised interrupt while not in I/O function");
         }
 #endif
     } else {
-        tb = env->current_tb;
-        /* if the cpu is currently executing code, we must unlink it and
-           all the potentially executing TB */
-        if (tb && !testandset(&interrupt_lock)) {
-            env->current_tb = NULL;
-            tb_reset_jump_recursive(tb);
-            resetlock(&interrupt_lock);
-        }
+        cpu_unlink_tb(env);
     }
-#endif
 }
 
 void cpu_reset_interrupt(CPUState *env, int mask)
 {
     env->interrupt_request &= ~mask;
+}
+
+void cpu_exit(CPUState *env)
+{
+    env->exit_request = 1;
+    cpu_unlink_tb(env);
 }
 
 const CPULogItem cpu_log_items[] = {
@@ -2290,6 +2302,9 @@ void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
     if (kvm_enabled())
         kvm_set_phys_mem(start_addr, size, phys_offset);
 
+    if (phys_offset == IO_MEM_UNASSIGNED) {
+        region_offset = start_addr;
+    }
     region_offset &= TARGET_PAGE_MASK;
     size = (size + TARGET_PAGE_SIZE - 1) & TARGET_PAGE_MASK;
     end_addr = start_addr + (target_phys_addr_t)size;
@@ -2337,7 +2352,7 @@ void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
                 if (need_subpage || phys_offset & IO_MEM_SUBWIDTH) {
                     subpage = subpage_init((addr & TARGET_PAGE_MASK),
                                            &p->phys_offset, IO_MEM_UNASSIGNED,
-                                           0);
+                                           addr & TARGET_PAGE_MASK);
                     subpage_register(subpage, start_addr2, end_addr2,
                                      phys_offset, region_offset);
                     p->region_offset = 0;
@@ -2795,27 +2810,42 @@ static void *subpage_init (target_phys_addr_t base, ram_addr_t *phys,
     int subpage_memory;
 
     mmio = qemu_mallocz(sizeof(subpage_t));
-    if (mmio != NULL) {
-        mmio->base = base;
-        subpage_memory = cpu_register_io_memory(0, subpage_read, subpage_write, mmio);
+
+    mmio->base = base;
+    subpage_memory = cpu_register_io_memory(0, subpage_read, subpage_write, mmio);
 #if defined(DEBUG_SUBPAGE)
-        printf("%s: %p base " TARGET_FMT_plx " len %08x %d\n", __func__,
-               mmio, base, TARGET_PAGE_SIZE, subpage_memory);
+    printf("%s: %p base " TARGET_FMT_plx " len %08x %d\n", __func__,
+           mmio, base, TARGET_PAGE_SIZE, subpage_memory);
 #endif
-        *phys = subpage_memory | IO_MEM_SUBPAGE;
-        subpage_register(mmio, 0, TARGET_PAGE_SIZE - 1, orig_memory,
+    *phys = subpage_memory | IO_MEM_SUBPAGE;
+    subpage_register(mmio, 0, TARGET_PAGE_SIZE - 1, orig_memory,
                          region_offset);
-    }
 
     return mmio;
 }
 
+static int get_free_io_mem_idx(void)
+{
+    int i;
+
+    for (i = 0; i<IO_MEM_NB_ENTRIES; i++)
+        if (!io_mem_used[i]) {
+            io_mem_used[i] = 1;
+            return i;
+        }
+
+    return -1;
+}
+
 static void io_mem_init(void)
 {
+    int i;
+
     cpu_register_io_memory(IO_MEM_ROM >> IO_MEM_SHIFT, error_mem_read, unassigned_mem_write, NULL);
     cpu_register_io_memory(IO_MEM_UNASSIGNED >> IO_MEM_SHIFT, unassigned_mem_read, unassigned_mem_write, NULL);
     cpu_register_io_memory(IO_MEM_NOTDIRTY >> IO_MEM_SHIFT, error_mem_read, notdirty_mem_write, NULL);
-    io_mem_nb = 5;
+    for (i=0; i<5; i++)
+        io_mem_used[i] = 1;
 
     io_mem_watch = cpu_register_io_memory(0, watch_mem_read,
                                           watch_mem_write, NULL);
@@ -2840,9 +2870,9 @@ int cpu_register_io_memory(int io_index,
     int i, subwidth = 0;
 
     if (io_index <= 0) {
-        if (io_mem_nb >= IO_MEM_NB_ENTRIES)
-            return -1;
-        io_index = io_mem_nb++;
+        io_index = get_free_io_mem_idx();
+        if (io_index == -1)
+            return io_index;
     } else {
         if (io_index >= IO_MEM_NB_ENTRIES)
             return -1;
@@ -2856,6 +2886,19 @@ int cpu_register_io_memory(int io_index,
     }
     io_mem_opaque[io_index] = opaque;
     return (io_index << IO_MEM_SHIFT) | subwidth;
+}
+
+void cpu_unregister_io_memory(int io_table_address)
+{
+    int i;
+    int io_index = io_table_address >> IO_MEM_SHIFT;
+
+    for (i=0;i < 3; i++) {
+        io_mem_read[io_index][i] = unassigned_mem_read[i];
+        io_mem_write[io_index][i] = unassigned_mem_write[i];
+    }
+    io_mem_opaque[io_index] = NULL;
+    io_mem_used[io_index] = 0;
 }
 
 CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index)
@@ -2937,25 +2980,26 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
 
         if (is_write) {
             if ((pd & ~TARGET_PAGE_MASK) != IO_MEM_RAM) {
+                target_phys_addr_t addr1 = addr;
                 io_index = (pd >> IO_MEM_SHIFT) & (IO_MEM_NB_ENTRIES - 1);
                 if (p)
-                    addr = (addr & ~TARGET_PAGE_MASK) + p->region_offset;
+                    addr1 = (addr & ~TARGET_PAGE_MASK) + p->region_offset;
                 /* XXX: could force cpu_single_env to NULL to avoid
                    potential bugs */
-                if (l >= 4 && ((addr & 3) == 0)) {
+                if (l >= 4 && ((addr1 & 3) == 0)) {
                     /* 32 bit write access */
                     val = ldl_p(buf);
-                    io_mem_write[io_index][2](io_mem_opaque[io_index], addr, val);
+                    io_mem_write[io_index][2](io_mem_opaque[io_index], addr1, val);
                     l = 4;
-                } else if (l >= 2 && ((addr & 1) == 0)) {
+                } else if (l >= 2 && ((addr1 & 1) == 0)) {
                     /* 16 bit write access */
                     val = lduw_p(buf);
-                    io_mem_write[io_index][1](io_mem_opaque[io_index], addr, val);
+                    io_mem_write[io_index][1](io_mem_opaque[io_index], addr1, val);
                     l = 2;
                 } else {
                     /* 8 bit write access */
                     val = ldub_p(buf);
-                    io_mem_write[io_index][0](io_mem_opaque[io_index], addr, val);
+                    io_mem_write[io_index][0](io_mem_opaque[io_index], addr1, val);
                     l = 1;
                 }
             } else {
@@ -2975,23 +3019,24 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
         } else {
             if ((pd & ~TARGET_PAGE_MASK) > IO_MEM_ROM &&
                 !(pd & IO_MEM_ROMD)) {
+                target_phys_addr_t addr1 = addr;
                 /* I/O case */
                 io_index = (pd >> IO_MEM_SHIFT) & (IO_MEM_NB_ENTRIES - 1);
                 if (p)
-                    addr = (addr & ~TARGET_PAGE_MASK) + p->region_offset;
-                if (l >= 4 && ((addr & 3) == 0)) {
+                    addr1 = (addr & ~TARGET_PAGE_MASK) + p->region_offset;
+                if (l >= 4 && ((addr1 & 3) == 0)) {
                     /* 32 bit read access */
-                    val = io_mem_read[io_index][2](io_mem_opaque[io_index], addr);
+                    val = io_mem_read[io_index][2](io_mem_opaque[io_index], addr1);
                     stl_p(buf, val);
                     l = 4;
-                } else if (l >= 2 && ((addr & 1) == 0)) {
+                } else if (l >= 2 && ((addr1 & 1) == 0)) {
                     /* 16 bit read access */
-                    val = io_mem_read[io_index][1](io_mem_opaque[io_index], addr);
+                    val = io_mem_read[io_index][1](io_mem_opaque[io_index], addr1);
                     stw_p(buf, val);
                     l = 2;
                 } else {
                     /* 8 bit read access */
-                    val = io_mem_read[io_index][0](io_mem_opaque[io_index], addr);
+                    val = io_mem_read[io_index][0](io_mem_opaque[io_index], addr1);
                     stb_p(buf, val);
                     l = 1;
                 }

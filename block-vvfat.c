@@ -78,7 +78,7 @@ typedef struct array_t {
 
 static inline void array_init(array_t* array,unsigned int item_size)
 {
-    array->pointer=0;
+    array->pointer = NULL;
     array->size=0;
     array->next=0;
     array->item_size=item_size;
@@ -129,7 +129,7 @@ static inline void* array_insert(array_t* array,unsigned int index,unsigned int 
 	int increment=count*array->item_size;
 	array->pointer=qemu_realloc(array->pointer,array->size+increment);
 	if(!array->pointer)
-	    return 0;
+            return NULL;
 	array->size+=increment;
     }
     memmove(array->pointer+(index+count)*array->item_size,
@@ -159,7 +159,7 @@ static inline int array_roll(array_t* array,int index_to,int index_from,int coun
     is=array->item_size;
     from=array->pointer+index_from*is;
     to=array->pointer+index_to*is;
-    buf=malloc(is*count);
+    buf=qemu_malloc(is*count);
     memcpy(buf,from,is*count);
 
     if(index_to<index_from)
@@ -604,8 +604,8 @@ static inline direntry_t* create_short_and_long_name(BDRVVVFATState* s,
 	unsigned int directory_start, const char* filename, int is_dot)
 {
     int i,j,long_index=s->directory.next;
-    direntry_t* entry=0;
-    direntry_t* entry_long=0;
+    direntry_t* entry = NULL;
+    direntry_t* entry_long = NULL;
 
     if(is_dot) {
 	entry=array_get_next(&(s->directory));
@@ -696,7 +696,7 @@ static int read_directory(BDRVVVFATState* s, int mapping_index)
     int first_cluster = mapping->begin;
     int parent_index = mapping->info.dir.parent_mapping_index;
     mapping_t* parent_mapping = (mapping_t*)
-	(parent_index >= 0 ? array_get(&(s->mapping), parent_index) : 0);
+        (parent_index >= 0 ? array_get(&(s->mapping), parent_index) : NULL);
     int first_cluster_of_parent = parent_mapping ? parent_mapping->begin : -1;
 
     DIR* dir=opendir(dirname);
@@ -725,8 +725,7 @@ static int read_directory(BDRVVVFATState* s, int mapping_index)
 	if(first_cluster == 0 && (is_dotdot || is_dot))
 	    continue;
 
-	buffer=(char*)malloc(length);
-	assert(buffer);
+	buffer=(char*)qemu_malloc(length);
 	snprintf(buffer,length,"%s/%s",dirname,entry->d_name);
 
 	if(stat(buffer,&st)<0) {
@@ -847,8 +846,7 @@ static int init_directories(BDRVVVFATState* s,
     memset(&(s->first_sectors[0]),0,0x40*0x200);
 
     s->cluster_size=s->sectors_per_cluster*0x200;
-    s->cluster_buffer=malloc(s->cluster_size);
-    assert(s->cluster_buffer);
+    s->cluster_buffer=qemu_malloc(s->cluster_size);
 
     /*
      * The formula: sc = spf+1+spf*spc*(512*8/fat_type),
@@ -1127,10 +1125,10 @@ static inline mapping_t* find_mapping_for_cluster(BDRVVVFATState* s,int cluster_
     int index=find_mapping_for_cluster_aux(s,cluster_num,0,s->mapping.next);
     mapping_t* mapping;
     if(index>=s->mapping.next)
-	return 0;
+        return NULL;
     mapping=array_get(&(s->mapping),index);
     if(mapping->begin>cluster_num)
-	return 0;
+        return NULL;
     assert(mapping->begin<=cluster_num && mapping->end>cluster_num);
     return mapping;
 }
@@ -1728,7 +1726,7 @@ static int check_directory_consistency(BDRVVVFATState *s,
 	int cluster_num, const char* path)
 {
     int ret = 0;
-    unsigned char* cluster = malloc(s->cluster_size);
+    unsigned char* cluster = qemu_malloc(s->cluster_size);
     direntry_t* direntries = (direntry_t*)cluster;
     mapping_t* mapping = find_mapping_for_cluster(s, cluster_num);
 
@@ -1869,7 +1867,7 @@ DLOG(checkpoint());
      */
     if (s->fat2 == NULL) {
 	int size = 0x200 * s->sectors_per_fat;
-	s->fat2 = malloc(size);
+	s->fat2 = qemu_malloc(size);
 	memcpy(s->fat2, s->fat.pointer, size);
     }
     check = vvfat_read(s->bs,
@@ -2211,7 +2209,7 @@ static int commit_one_file(BDRVVVFATState* s,
     uint32_t first_cluster = c;
     mapping_t* mapping = find_mapping_for_cluster(s, c);
     uint32_t size = filesize_of_direntry(direntry);
-    char* cluster = malloc(s->cluster_size);
+    char* cluster = qemu_malloc(s->cluster_size);
     uint32_t i;
     int fd = 0;
 
@@ -2373,7 +2371,7 @@ static int handle_renames_and_mkdirs(BDRVVVFATState* s)
 			    mapping_t* m = find_mapping_for_cluster(s,
 				    begin_of_direntry(d));
 			    int l = strlen(m->path);
-			    char* new_path = malloc(l + diff + 1);
+			    char* new_path = qemu_malloc(l + diff + 1);
 
 			    assert(!strncmp(m->path, mapping->path, l2));
 
@@ -2774,7 +2772,7 @@ static int enable_write_target(BDRVVVFATState *s)
 
     array_init(&(s->commits), sizeof(commit_t));
 
-    s->qcow_filename = malloc(1024);
+    s->qcow_filename = qemu_malloc(1024);
     get_tmp_filename(s->qcow_filename, 1024);
     if (bdrv_create(&bdrv_qcow,
 		s->qcow_filename, s->sector_count, "fat:", 0) < 0)
@@ -2807,17 +2805,14 @@ static void vvfat_close(BlockDriverState *bs)
 }
 
 BlockDriver bdrv_vvfat = {
-    "vvfat",
-    sizeof(BDRVVVFATState),
-    NULL, /* no probe for protocols */
-    vvfat_open,
-    vvfat_read,
-    vvfat_write,
-    vvfat_close,
-    NULL, /* ??? Not sure if we can do any meaningful flushing.  */
-    NULL,
-    vvfat_is_allocated,
-    .protocol_name = "fat",
+    .format_name	= "vvfat",
+    .instance_size	= sizeof(BDRVVVFATState),
+    .bdrv_open		= vvfat_open,
+    .bdrv_read		= vvfat_read,
+    .bdrv_write		= vvfat_write,
+    .bdrv_close		= vvfat_close,
+    .bdrv_is_allocated	= vvfat_is_allocated,
+    .protocol_name	= "fat",
 };
 
 #ifdef DEBUG
