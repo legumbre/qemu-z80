@@ -138,9 +138,6 @@ enum {
     zx_pixfmt_15rgb,
     zx_pixfmt_16rgb,
     zx_pixfmt_32rgb,
-    zx_pixfmt_32bgr,
-    zx_pixfmt_15bgr,
-    zx_pixfmt_16bgr,
     NB_DEPTHS
 };
 
@@ -149,9 +146,6 @@ static zx_draw_line_func *zx_draw_line_table[NB_DEPTHS] = {
     zx_draw_glyph_line_16,
     zx_draw_glyph_line_16,
     zx_draw_glyph_line_32,
-    zx_draw_glyph_line_32,
-    zx_draw_glyph_line_16,
-    zx_draw_glyph_line_16,
 };
 
 static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
@@ -159,9 +153,6 @@ static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
     rgb_to_pixel15_dup,
     rgb_to_pixel16_dup,
     rgb_to_pixel32_dup,
-    rgb_to_pixel32bgr_dup,
-    rgb_to_pixel15bgr_dup,
-    rgb_to_pixel16bgr_dup,
 };
 
 static inline int get_pixfmt_index(DisplayState *s)
@@ -171,23 +162,11 @@ static inline int get_pixfmt_index(DisplayState *s)
     case 8:
         return zx_pixfmt_8;
     case 15:
-        if (s->bgr) {
-            return zx_pixfmt_15bgr;
-        } else {
-            return zx_pixfmt_15rgb;
-        }
+        return zx_pixfmt_15rgb;
     case 16:
-        if (s->bgr) {
-            return zx_pixfmt_16bgr;
-        } else {
-            return zx_pixfmt_16rgb;
-        }
+        return zx_pixfmt_16rgb;
     case 32:
-        if (s->bgr) {
-            return zx_pixfmt_32bgr;
-        } else {
-            return zx_pixfmt_32rgb;
-        }
+        return zx_pixfmt_32rgb;
     }
 }
 
@@ -300,19 +279,19 @@ static void zx_update_display(void *opaque)
         inited = 1;
     }
 
+    if (unlikely(ds_get_width(s->ds) != s->twidth ||
+                 ds_get_height(s->ds) != s->theight)) {
+        qemu_console_resize(s->console, s->twidth, s->theight);
+        s->invalidate = 1;
+        s->prevborder = -1;
+    }
+
     if (!dirty) {
         for (addr = 0; addr < 0x1b00; addr += TARGET_PAGE_SIZE) {
             if (cpu_physical_memory_get_dirty(addr, VGA_DIRTY_FLAG)) {
                 dirty = 1;
             }
         }
-    }
-
-    if (ds_get_width(s->ds) != s->twidth ||
-        ds_get_height(s->ds) != s->theight) {
-        qemu_console_resize(s->console, s->twidth, s->theight);
-        s->invalidate = 1;
-        s->prevborder = -1;
     }
 
     if (dirty) {
@@ -385,7 +364,6 @@ void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
     s->console = graphic_console_init(ds, zx_update_display,
                                       zx_invalidate_display,
                                       NULL, NULL, s);
-    qemu_console_resize(s->console, s->twidth, s->theight);
 
     s->bwidth = 32;
     s->bheight = 24;
