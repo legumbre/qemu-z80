@@ -99,6 +99,11 @@ static int cpu_z80_find_by_name(const char *name)
 /* NOTE: must be called outside the CPU execute loop */
 void cpu_reset(CPUZ80State *env)
 {
+    if (qemu_loglevel_mask(CPU_LOG_RESET)) {
+        qemu_log("CPU Reset (CPU %d)\n", env->cpu_index);
+        log_cpu_state(env, 0);
+    }
+
     memset(env, 0, offsetof(CPUZ80State, breakpoints));
 
     tlb_flush(env, 1);
