@@ -44,9 +44,6 @@ CPUZ80State *cpu_z80_init(const char *model)
         return NULL;
     }
     env = qemu_mallocz(sizeof(CPUZ80State));
-    if (!env) {
-        return NULL;
-    }
     cpu_exec_init(env);
 
     /* init various static tables */

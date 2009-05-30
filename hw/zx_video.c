@@ -354,9 +354,6 @@ void zx_video_init(uint8_t *zx_vram_base)
     int zx_io_memory;
 
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
-    if (!s) {
-        return;
-    }
     zxvstate = s;
     s->invalidate = 1;
     s->prevborder = -1;
