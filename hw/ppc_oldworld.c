@@ -121,11 +121,11 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
     m48t59_t *m48t59;
     int linux_boot, i;
     ram_addr_t ram_offset, vga_ram_offset, bios_offset, vga_bios_offset;
-    uint32_t kernel_base, kernel_size, initrd_base, initrd_size;
+    uint32_t kernel_base, initrd_base;
+    int32_t kernel_size, initrd_size;
     PCIBus *pci_bus;
     MacIONVRAMState *nvr;
     int vga_bios_size, bios_size;
-    qemu_irq *dummy_irq;
     int pic_mem_index, nvram_mem_index, dbdma_mem_index, cuda_mem_index;
     int escc_mem_index, ide_mem_index[2];
     int ppc_boot_device;
@@ -207,10 +207,16 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
     }
 
     if (linux_boot) {
+        uint64_t lowaddr = 0;
         kernel_base = KERNEL_LOAD_ADDR;
-        /* now we can load the kernel */
-        kernel_size = load_elf(kernel_filename, kernel_base - 0xc0000000ULL,
-                               NULL, NULL, NULL);
+        /* Now we can load the kernel. The first step tries to load the kernel
+           supposing PhysAddr = 0x00000000. If that was wrong the kernel is
+           loaded again, the new PhysAddr being computed from lowaddr. */
+        kernel_size = load_elf(kernel_filename, kernel_base, NULL, &lowaddr, NULL);
+        if (kernel_size > 0 && lowaddr != KERNEL_LOAD_ADDR) {
+            kernel_size = load_elf(kernel_filename, (2 * kernel_base) - lowaddr,
+                                   NULL, 0, NULL);
+        }
         if (kernel_size < 0)
             kernel_size = load_aout(kernel_filename, kernel_base,
                                     ram_size - kernel_base);
@@ -301,9 +307,6 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
                  vga_ram_offset, vga_ram_size,
                  vga_bios_offset, vga_bios_size);
 
-    /* XXX: suppress that */
-    dummy_irq = i8259_init(NULL);
-
     escc_mem_index = escc_init(0x80013000, pic[0x0f], pic[0x10], serial_hds[0],
                                serial_hds[1], ESCC_CLOCK, 4);
 
@@ -364,7 +367,7 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
     if (graphic_depth != 15 && graphic_depth != 32 && graphic_depth != 8)
         graphic_depth = 15;
 
-    m48t59 = m48t59_init(dummy_irq[8], 0xFFF04000, 0x0074, NVRAM_SIZE, 59);
+    m48t59 = m48t59_init(0, 0xFFF04000, 0x0074, NVRAM_SIZE, 59);
     nvram.opaque = m48t59;
     nvram.read_fn = &m48t59_read;
     nvram.write_fn = &m48t59_write;
@@ -376,9 +379,6 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
                          0,
                          graphic_width, graphic_height, graphic_depth);
     /* No PCI init: the BIOS will do it */
-
-    /* Special port to get debug messages from Open-Firmware */
-    register_ioport_write(0x0F00, 4, 1, &PPC_debug_write, NULL);
 
     fw_cfg = fw_cfg_init(0, 0, CFG_ADDR, CFG_ADDR + 2);
     fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);

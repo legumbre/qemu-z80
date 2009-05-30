@@ -83,6 +83,7 @@ struct PixelFormat {
     uint32_t rmask, gmask, bmask, amask;
     uint8_t rshift, gshift, bshift, ashift;
     uint8_t rmax, gmax, bmax, amax;
+    uint8_t rbits, gbits, bbits, abits;
 };
 
 struct DisplaySurface {
@@ -134,6 +135,8 @@ DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
 DisplaySurface* qemu_create_displaysurface_from(int width, int height, int bpp,
                                                 int linesize, uint8_t *data);
 void qemu_free_displaysurface(DisplaySurface *surface);
+PixelFormat qemu_different_endianness_pixelformat(int bpp);
+PixelFormat qemu_default_pixelformat(int bpp);
 
 static inline int is_buffer_shared(DisplaySurface *surface)
 {
@@ -265,7 +268,8 @@ void vga_hw_text_update(console_ch_t *chardata);
 
 int is_graphic_console(void);
 int is_fixedsize_console(void);
-CharDriverState *text_console_init(DisplayState *ds, const char *p);
+CharDriverState *text_console_init(const char *p);
+void text_consoles_set_display(DisplayState *ds);
 void console_select(unsigned int index);
 void console_color_init(DisplayState *ds);
 void qemu_console_resize(DisplayState *ds, int width, int height);

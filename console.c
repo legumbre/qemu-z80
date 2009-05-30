@@ -139,6 +139,11 @@ struct TextConsole {
     TextCell *cells;
     int text_x[2], text_y[2], cursor_invalidate;
 
+    int update_x0;
+    int update_y0;
+    int update_x1;
+    int update_y1;
+
     enum TTYState state;
     int esc_params[MAX_ESC_PARAMS];
     int nb_esc_params;
@@ -537,6 +542,18 @@ static inline void text_update_xy(TextConsole *s, int x, int y)
     s->text_y[1] = MAX(s->text_y[1], y);
 }
 
+static void invalidate_xy(TextConsole *s, int x, int y)
+{
+    if (s->update_x0 > x * FONT_WIDTH)
+        s->update_x0 = x * FONT_WIDTH;
+    if (s->update_y0 > y * FONT_HEIGHT)
+        s->update_y0 = y * FONT_HEIGHT;
+    if (s->update_x1 < (x + 1) * FONT_WIDTH)
+        s->update_x1 = (x + 1) * FONT_WIDTH;
+    if (s->update_y1 < (y + 1) * FONT_HEIGHT)
+        s->update_y1 = (y + 1) * FONT_HEIGHT;
+}
+
 static void update_xy(TextConsole *s, int x, int y)
 {
     TextCell *c;
@@ -556,8 +573,7 @@ static void update_xy(TextConsole *s, int x, int y)
             c = &s->cells[y1 * s->width + x];
             vga_putcharxy(s->ds, x, y2, c->ch,
                           &(c->t_attrib));
-            dpy_update(s->ds, x * FONT_WIDTH, y2 * FONT_HEIGHT,
-                       FONT_WIDTH, FONT_HEIGHT);
+            invalidate_xy(s, x, y2);
         }
     }
 }
@@ -591,8 +607,7 @@ static void console_show_cursor(TextConsole *s, int show)
             } else {
                 vga_putcharxy(s->ds, x, y, c->ch, &(c->t_attrib));
             }
-            dpy_update(s->ds, x * FONT_WIDTH, y * FONT_HEIGHT,
-                       FONT_WIDTH, FONT_HEIGHT);
+            invalidate_xy(s, x, y);
         }
     }
 }
@@ -626,8 +641,8 @@ static void console_refresh(TextConsole *s)
         if (++y1 == s->total_height)
             y1 = 0;
     }
-    dpy_update(s->ds, 0, 0, ds_get_width(s->ds), ds_get_height(s->ds));
     console_show_cursor(s, 1);
+    dpy_update(s->ds, 0, 0, ds_get_width(s->ds), ds_get_height(s->ds));
 }
 
 static void console_scroll(int ydelta)
@@ -703,8 +718,10 @@ static void console_put_lf(TextConsole *s)
             vga_fill_rect(s->ds, 0, (s->height - 1) * FONT_HEIGHT,
                           s->width * FONT_WIDTH, FONT_HEIGHT,
                           color_table[0][s->t_attrib_default.bgcol]);
-            dpy_update(s->ds, 0, 0,
-                       s->width * FONT_WIDTH, s->height * FONT_HEIGHT);
+            s->update_x0 = 0;
+            s->update_y0 = 0;
+            s->update_x1 = s->width * FONT_WIDTH;
+            s->update_y1 = s->height * FONT_HEIGHT;
         }
     }
 }
@@ -1050,8 +1067,13 @@ void console_select(unsigned int index)
     if (s) {
         DisplayState *ds = s->ds;
         active_console = s;
-        ds->surface = qemu_resize_displaysurface(ds->surface, s->g_width,
-                                                s->g_height, 32, 4 * s->g_width);
+        if (ds_get_bits_per_pixel(s->ds)) {
+            ds->surface = qemu_resize_displaysurface(ds->surface, s->g_width,
+                    s->g_height, 32, 4 * s->g_width);
+        } else {
+            s->ds->surface->width = s->width;
+            s->ds->surface->height = s->height;
+        }
         dpy_resize(s->ds);
         vga_hw_invalidate();
     }
@@ -1062,11 +1084,20 @@ static int console_puts(CharDriverState *chr, const uint8_t *buf, int len)
     TextConsole *s = chr->opaque;
     int i;
 
+    s->update_x0 = s->width * FONT_WIDTH;
+    s->update_y0 = s->height * FONT_HEIGHT;
+    s->update_x1 = 0;
+    s->update_y1 = 0;
     console_show_cursor(s, 0);
     for(i = 0; i < len; i++) {
         console_putchar(s, buf[i]);
     }
     console_show_cursor(s, 1);
+    if (ds_get_bits_per_pixel(s->ds) && s->update_x0 < s->update_x1) {
+        dpy_update(s->ds, s->update_x0, s->update_y0,
+                   s->update_x1 - s->update_x0,
+                   s->update_y1 - s->update_y0);
+    }
     return len;
 }
 
@@ -1160,6 +1191,11 @@ void kbd_put_keysym(int keysym)
 static void text_console_invalidate(void *opaque)
 {
     TextConsole *s = (TextConsole *) opaque;
+    if (!ds_get_bits_per_pixel(s->ds) && s->console_type == TEXT_CONSOLE) {
+        s->g_width = ds_get_width(s->ds);
+        s->g_height = ds_get_height(s->ds);
+        text_console_resize(s);
+    }
     console_refresh(s);
 }
 
@@ -1190,12 +1226,13 @@ static void text_console_update(void *opaque, console_ch_t *chardata)
     }
 }
 
-static TextConsole *get_graphic_console() {
+static TextConsole *get_graphic_console(DisplayState *ds)
+{
     int i;
     TextConsole *s;
     for (i = 0; i < nb_consoles; i++) {
         s = consoles[i];
-        if (s->console_type == GRAPHIC_CONSOLE)
+        if (s->console_type == GRAPHIC_CONSOLE && s->ds == ds)
             return s;
     }
     return NULL;
@@ -1241,7 +1278,7 @@ DisplayState *graphic_console_init(vga_hw_update_ptr update,
 {
     TextConsole *s;
     DisplayState *ds;
-    
+
     ds = (DisplayState *) qemu_mallocz(sizeof(DisplayState));
     if (ds == NULL)
         return NULL;
@@ -1259,7 +1296,7 @@ DisplayState *graphic_console_init(vga_hw_update_ptr update,
     s->hw_text_update = text_update;
     s->hw = opaque;
 
-    register_displaystate(ds); 
+    register_displaystate(ds);
     return ds;
 }
 
@@ -1278,27 +1315,27 @@ void console_color_init(DisplayState *ds)
     int i, j;
     for (j = 0; j < 2; j++) {
         for (i = 0; i < 8; i++) {
-            color_table[j][i] = col_expand(ds, 
+            color_table[j][i] = col_expand(ds,
                    vga_get_color(ds, color_table_rgb[j][i]));
         }
     }
 }
 
-CharDriverState *text_console_init(DisplayState *ds, const char *p)
+static int n_text_consoles;
+static CharDriverState *text_consoles[128];
+static char *text_console_strs[128];
+
+static void text_console_do_init(CharDriverState *chr, DisplayState *ds, const char *p)
 {
-    CharDriverState *chr;
     TextConsole *s;
     unsigned width;
     unsigned height;
     static int color_inited;
 
-    chr = qemu_mallocz(sizeof(CharDriverState));
-    if (!chr)
-        return NULL;
     s = new_console(ds, (p == 0) ? TEXT_CONSOLE : TEXT_CONSOLE_FIXED_SIZE);
     if (!s) {
         free(chr);
-        return NULL;
+        return;
     }
     chr->opaque = s;
     chr->chr_write = console_puts;
@@ -1351,19 +1388,51 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     s->t_attrib_default.unvisible = 0;
     s->t_attrib_default.fgcol = COLOR_WHITE;
     s->t_attrib_default.bgcol = COLOR_BLACK;
-
     /* set current text attributes to default */
     s->t_attrib = s->t_attrib_default;
     text_console_resize(s);
 
     qemu_chr_reset(chr);
+    if (chr->init)
+        chr->init(chr);
+}
+
+CharDriverState *text_console_init(const char *p)
+{
+    CharDriverState *chr;
+
+    chr = qemu_mallocz(sizeof(CharDriverState));
+    if (!chr)
+        return NULL;
+
+    if (n_text_consoles == 128) {
+        fprintf(stderr, "Too many text consoles\n");
+        exit(1);
+    }
+    text_consoles[n_text_consoles] = chr;
+    text_console_strs[n_text_consoles] = p ? qemu_strdup(p) : NULL;
+    n_text_consoles++;
 
     return chr;
 }
 
+void text_consoles_set_display(DisplayState *ds)
+{
+    int i;
+
+    for (i = 0; i < n_text_consoles; i++) {
+        text_console_do_init(text_consoles[i], ds, text_console_strs[i]);
+        qemu_free(text_console_strs[i]);
+    }
+
+    n_text_consoles = 0;
+}
+
 void qemu_console_resize(DisplayState *ds, int width, int height)
 {
-    TextConsole *s = get_graphic_console();
+    TextConsole *s = get_graphic_console(ds);
+    if (!s) return;
+
     s->g_width = width;
     s->g_height = height;
     if (is_graphic_console()) {
@@ -1380,7 +1449,7 @@ void qemu_console_copy(DisplayState *ds, int src_x, int src_y,
     }
 }
 
-static PixelFormat qemu_default_pixelformat(int bpp)
+PixelFormat qemu_different_endianness_pixelformat(int bpp)
 {
     PixelFormat pf;
 
@@ -1391,17 +1460,55 @@ static PixelFormat qemu_default_pixelformat(int bpp)
     pf.depth = bpp == 32 ? 24 : bpp;
 
     switch (bpp) {
-        case 8:
-            pf.rmask = 0x000000E0;
-            pf.gmask = 0x0000001C;
-            pf.bmask = 0x00000003;
-            pf.rmax = 7;
-            pf.gmax = 7;
-            pf.bmax = 3;
-            pf.rshift = 5;
-            pf.gshift = 2;
-            pf.bshift = 0;
+        case 24:
+            pf.rmask = 0x000000FF;
+            pf.gmask = 0x0000FF00;
+            pf.bmask = 0x00FF0000;
+            pf.rmax = 255;
+            pf.gmax = 255;
+            pf.bmax = 255;
+            pf.rshift = 0;
+            pf.gshift = 8;
+            pf.bshift = 16;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
             break;
+        case 32:
+            pf.rmask = 0x0000FF00;
+            pf.gmask = 0x00FF0000;
+            pf.bmask = 0xFF000000;
+            pf.amask = 0x00000000;
+            pf.amax = 255;
+            pf.rmax = 255;
+            pf.gmax = 255;
+            pf.bmax = 255;
+            pf.ashift = 0;
+            pf.rshift = 8;
+            pf.gshift = 16;
+            pf.bshift = 24;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
+            pf.abits = 8;
+            break;
+        default:
+            break;
+    }
+    return pf;
+}
+
+PixelFormat qemu_default_pixelformat(int bpp)
+{
+    PixelFormat pf;
+
+    memset(&pf, 0x00, sizeof(PixelFormat));
+
+    pf.bits_per_pixel = bpp;
+    pf.bytes_per_pixel = bpp / 8;
+    pf.depth = bpp == 32 ? 24 : bpp;
+
+    switch (bpp) {
         case 16:
             pf.rmask = 0x0000F800;
             pf.gmask = 0x000007E0;
@@ -1412,9 +1519,11 @@ static PixelFormat qemu_default_pixelformat(int bpp)
             pf.rshift = 11;
             pf.gshift = 5;
             pf.bshift = 0;
+            pf.rbits = 5;
+            pf.gbits = 6;
+            pf.bbits = 5;
             break;
         case 24:
-        case 32:
             pf.rmask = 0x00FF0000;
             pf.gmask = 0x0000FF00;
             pf.bmask = 0x000000FF;
@@ -1424,6 +1533,25 @@ static PixelFormat qemu_default_pixelformat(int bpp)
             pf.rshift = 16;
             pf.gshift = 8;
             pf.bshift = 0;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
+        case 32:
+            pf.rmask = 0x00FF0000;
+            pf.gmask = 0x0000FF00;
+            pf.bmask = 0x000000FF;
+            pf.amax = 255;
+            pf.rmax = 255;
+            pf.gmax = 255;
+            pf.bmax = 255;
+            pf.ashift = 24;
+            pf.rshift = 16;
+            pf.gshift = 8;
+            pf.bshift = 0;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
+            pf.abits = 8;
             break;
         default:
             break;

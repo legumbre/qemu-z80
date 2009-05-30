@@ -422,6 +422,7 @@ typedef struct IDEState {
     int atapi_dma; /* true if dma is requested for the packet cmd */
     /* ATA DMA state */
     int io_buffer_size;
+    QEMUIOVector iovec;
     /* PIO transfer handling */
     int req_nb_sectors; /* number of sectors per interrupt */
     EndTransferFunc *end_transfer_func;
@@ -457,6 +458,8 @@ static inline int media_is_cd(IDEState *s)
 #define BM_STATUS_DMAING 0x01
 #define BM_STATUS_ERROR  0x02
 #define BM_STATUS_INT    0x04
+#define BM_STATUS_DMA_RETRY  0x08
+#define BM_STATUS_PIO_RETRY  0x10
 
 #define BM_CMD_START     0x01
 #define BM_CMD_READ      0x08
@@ -488,6 +491,8 @@ typedef struct BMDMAState {
     IDEState *ide_if;
     BlockDriverCompletionFunc *dma_cb;
     BlockDriverAIOCB *aiocb;
+    int64_t sector_num;
+    uint32_t nsector;
 } BMDMAState;
 
 typedef struct PCIIDEState {
@@ -498,6 +503,7 @@ typedef struct PCIIDEState {
 } PCIIDEState;
 
 static void ide_dma_start(IDEState *s, BlockDriverCompletionFunc *dma_cb);
+static void ide_dma_restart(IDEState *s);
 static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret);
 
 static void padstr(char *str, const char *src, int len)
@@ -857,12 +863,96 @@ static void ide_sector_read(IDEState *s)
     }
 }
 
+
+/* return 0 if buffer completed */
+static int dma_buf_prepare(BMDMAState *bm, int is_write)
+{
+    IDEState *s = bm->ide_if;
+    struct {
+        uint32_t addr;
+        uint32_t size;
+    } prd;
+    int l, len;
+    void *mem;
+    target_phys_addr_t l1;
+
+    qemu_iovec_init(&s->iovec, s->nsector / (TARGET_PAGE_SIZE/512) + 1);
+    s->io_buffer_size = 0;
+    for(;;) {
+        if (bm->cur_prd_len == 0) {
+            /* end of table (with a fail safe of one page) */
+            if (bm->cur_prd_last ||
+                (bm->cur_addr - bm->addr) >= 4096)
+                return s->io_buffer_size != 0;
+            cpu_physical_memory_read(bm->cur_addr, (uint8_t *)&prd, 8);
+            bm->cur_addr += 8;
+            prd.addr = le32_to_cpu(prd.addr);
+            prd.size = le32_to_cpu(prd.size);
+            len = prd.size & 0xfffe;
+            if (len == 0)
+                len = 0x10000;
+            bm->cur_prd_len = len;
+            bm->cur_prd_addr = prd.addr;
+            bm->cur_prd_last = (prd.size & 0x80000000);
+        }
+        l = bm->cur_prd_len;
+        if (l > 0) {
+            l1 = l;
+            mem = cpu_physical_memory_map(bm->cur_prd_addr, &l1, is_write);
+            if (!mem) {
+                break;
+            }
+            qemu_iovec_add(&s->iovec, mem, l1);
+            bm->cur_prd_addr += l1;
+            bm->cur_prd_len -= l1;
+            s->io_buffer_size += l1;
+        }
+    }
+    return 1;
+}
+
+static void dma_buf_commit(IDEState *s, int is_write)
+{
+    int i;
+
+    for (i = 0; i < s->iovec.niov; ++i) {
+        cpu_physical_memory_unmap(s->iovec.iov[i].iov_base,
+                                  s->iovec.iov[i].iov_len, is_write,
+                                  s->iovec.iov[i].iov_len);
+    }
+    qemu_iovec_destroy(&s->iovec);
+}
+
 static void ide_dma_error(IDEState *s)
 {
     ide_transfer_stop(s);
     s->error = ABRT_ERR;
     s->status = READY_STAT | ERR_STAT;
     ide_set_irq(s);
+}
+
+static int ide_handle_write_error(IDEState *s, int error, int op)
+{
+    BlockInterfaceErrorAction action = drive_get_onerror(s->bs);
+
+    if (action == BLOCK_ERR_IGNORE)
+        return 0;
+
+    if ((error == ENOSPC && action == BLOCK_ERR_STOP_ENOSPC)
+            || action == BLOCK_ERR_STOP_ANY) {
+        s->bmdma->ide_if = s;
+        s->bmdma->status |= op;
+        vm_stop(0);
+    } else {
+        if (op == BM_STATUS_DMA_RETRY) {
+            dma_buf_commit(s, 0);
+            ide_dma_error(s);
+        } else {
+            ide_rw_error(s);
+        }
+    }
+
+    return 1;
 }
 
 /* return 0 if buffer completed */
@@ -913,6 +1003,39 @@ static int dma_buf_rw(BMDMAState *bm, int is_write)
     return 1;
 }
 
+typedef struct {
+    BMDMAState *bm;
+    void (*cb)(void *opaque, int ret);
+    QEMUBH *bh;
+} MapFailureContinuation;
+
+static void reschedule_dma(void *opaque)
+{
+    MapFailureContinuation *cont = opaque;
+
+    cont->cb(cont->bm, 0);
+    qemu_bh_delete(cont->bh);
+    qemu_free(cont);
+}
+
+static void continue_after_map_failure(void *opaque)
+{
+    MapFailureContinuation *cont = opaque;
+
+    cont->bh = qemu_bh_new(reschedule_dma, opaque);
+    qemu_bh_schedule(cont->bh);
+}
+
+static void wait_for_bounce_buffer(BMDMAState *bmdma,
+                                   void (*cb)(void *opaque, int ret))
+{
+    MapFailureContinuation *cont = qemu_malloc(sizeof(*cont));
+
+    cont->bm = bmdma;
+    cont->cb = cb;
+    cpu_register_map_client(cont, continue_after_map_failure);
+}
+
 static void ide_read_dma_cb(void *opaque, int ret)
 {
     BMDMAState *bm = opaque;
@@ -921,6 +1044,7 @@ static void ide_read_dma_cb(void *opaque, int ret)
     int64_t sector_num;
 
     if (ret < 0) {
+        dma_buf_commit(s, 1);
 	ide_dma_error(s);
 	return;
     }
@@ -928,11 +1052,10 @@ static void ide_read_dma_cb(void *opaque, int ret)
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
+        dma_buf_commit(s, 1);
         sector_num += n;
         ide_set_sector(s, sector_num);
         s->nsector -= n;
-        if (dma_buf_rw(bm, 1) == 0)
-            goto eot;
     }
 
     /* end of transfer ? */
@@ -950,15 +1073,19 @@ static void ide_read_dma_cb(void *opaque, int ret)
 
     /* launch next transfer */
     n = s->nsector;
-    if (n > IDE_DMA_BUF_SECTORS)
-        n = IDE_DMA_BUF_SECTORS;
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
+    if (dma_buf_prepare(bm, 1) == 0)
+        goto eot;
+    if (!s->iovec.niov) {
+        wait_for_bounce_buffer(bm, ide_read_dma_cb);
+        return;
+    }
 #ifdef DEBUG_AIO
     printf("aio_read: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_read(s->bs, sector_num, s->io_buffer, n,
-                              ide_read_dma_cb, bm);
+    bm->aiocb = bdrv_aio_readv(s->bs, sector_num, &s->iovec, n,
+                               ide_read_dma_cb, bm);
     ide_dma_submit_check(s, ide_read_dma_cb, bm);
 }
 
@@ -990,9 +1117,10 @@ static void ide_sector_write(IDEState *s)
     if (n > s->req_nb_sectors)
         n = s->req_nb_sectors;
     ret = bdrv_write(s->bs, sector_num, s->io_buffer, n);
+
     if (ret != 0) {
-	ide_rw_error(s);
-	return;
+        if (ide_handle_write_error(s, -ret, BM_STATUS_PIO_RETRY))
+            return;
     }
 
     s->nsector -= n;
@@ -1024,6 +1152,20 @@ static void ide_sector_write(IDEState *s)
     }
 }
 
+static void ide_dma_restart_cb(void *opaque, int running, int reason)
+{
+    BMDMAState *bm = opaque;
+    if (!running)
+        return;
+    if (bm->status & BM_STATUS_DMA_RETRY) {
+        bm->status &= ~BM_STATUS_DMA_RETRY;
+        ide_dma_restart(bm->ide_if);
+    } else if (bm->status & BM_STATUS_PIO_RETRY) {
+        bm->status &= ~BM_STATUS_PIO_RETRY;
+        ide_sector_write(bm->ide_if);
+    }
+}
+
 static void ide_write_dma_cb(void *opaque, int ret)
 {
     BMDMAState *bm = opaque;
@@ -1032,13 +1174,14 @@ static void ide_write_dma_cb(void *opaque, int ret)
     int64_t sector_num;
 
     if (ret < 0) {
-	ide_dma_error(s);
-	return;
+        if (ide_handle_write_error(s, -ret,  BM_STATUS_DMA_RETRY))
+            return;
     }
 
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
+        dma_buf_commit(s, 0);
         sector_num += n;
         ide_set_sector(s, sector_num);
         s->nsector -= n;
@@ -1057,20 +1200,20 @@ static void ide_write_dma_cb(void *opaque, int ret)
         return;
     }
 
-    /* launch next transfer */
     n = s->nsector;
-    if (n > IDE_DMA_BUF_SECTORS)
-        n = IDE_DMA_BUF_SECTORS;
-    s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
-
-    if (dma_buf_rw(bm, 0) == 0)
+    /* launch next transfer */
+    if (dma_buf_prepare(bm, 0) == 0)
         goto eot;
+    if (!s->iovec.niov) {
+        wait_for_bounce_buffer(bm, ide_write_dma_cb);
+        return;
+    }
 #ifdef DEBUG_AIO
     printf("aio_write: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_write(s->bs, sector_num, s->io_buffer, n,
-                               ide_write_dma_cb, bm);
+    bm->aiocb = bdrv_aio_writev(s->bs, sector_num, &s->iovec, n,
+                                ide_write_dma_cb, bm);
     ide_dma_submit_check(s, ide_write_dma_cb, bm);
 }
 
@@ -2849,9 +2992,23 @@ static void ide_dma_start(IDEState *s, BlockDriverCompletionFunc *dma_cb)
     bm->cur_prd_last = 0;
     bm->cur_prd_addr = 0;
     bm->cur_prd_len = 0;
+    bm->sector_num = ide_get_sector(s);
+    bm->nsector = s->nsector;
     if (bm->status & BM_STATUS_DMAING) {
         bm->dma_cb(bm, 0);
     }
+}
+
+static void ide_dma_restart(IDEState *s)
+{
+    BMDMAState *bm = s->bmdma;
+    ide_set_sector(s, bm->sector_num);
+    s->io_buffer_index = 0;
+    s->io_buffer_size = 0;
+    s->nsector = bm->nsector;
+    bm->cur_addr = bm->addr;
+    bm->dma_cb = ide_write_dma_cb;
+    ide_dma_start(s, bm->dma_cb);
 }
 
 static void ide_dma_cancel(BMDMAState *bm)
@@ -3043,6 +3200,7 @@ static void bmdma_map(PCIDevice *pci_dev, int region_num,
         d->ide_if[2 * i].bmdma = bm;
         d->ide_if[2 * i + 1].bmdma = bm;
         bm->pci_dev = (PCIIDEState *)pci_dev;
+        qemu_add_vm_change_state_handler(ide_dma_restart_cb, bm);
 
         register_ioport_write(addr, 1, 1, bmdma_cmd_writeb, bm);
 
@@ -3068,9 +3226,14 @@ static void pci_ide_save(QEMUFile* f, void *opaque)
 
     for(i = 0; i < 2; i++) {
         BMDMAState *bm = &d->bmdma[i];
+        uint8_t ifidx;
         qemu_put_8s(f, &bm->cmd);
         qemu_put_8s(f, &bm->status);
         qemu_put_be32s(f, &bm->addr);
+        qemu_put_sbe64s(f, &bm->sector_num);
+        qemu_put_be32s(f, &bm->nsector);
+        ifidx = bm->ide_if ? bm->ide_if - d->ide_if : 0;
+        qemu_put_8s(f, &ifidx);
         /* XXX: if a transfer is pending, we do not save it yet */
     }
 
@@ -3094,7 +3257,7 @@ static int pci_ide_load(QEMUFile* f, void *opaque, int version_id)
     PCIIDEState *d = opaque;
     int ret, i;
 
-    if (version_id != 1)
+    if (version_id != 2)
         return -EINVAL;
     ret = pci_device_load(&d->dev, f);
     if (ret < 0)
@@ -3102,9 +3265,14 @@ static int pci_ide_load(QEMUFile* f, void *opaque, int version_id)
 
     for(i = 0; i < 2; i++) {
         BMDMAState *bm = &d->bmdma[i];
+        uint8_t ifidx;
         qemu_get_8s(f, &bm->cmd);
         qemu_get_8s(f, &bm->status);
         qemu_get_be32s(f, &bm->addr);
+        qemu_get_sbe64s(f, &bm->sector_num);
+        qemu_get_be32s(f, &bm->nsector);
+        qemu_get_8s(f, &ifidx);
+        bm->ide_if = &d->ide_if[ifidx];
         /* XXX: if a transfer is pending, we do not save it yet */
     }
 
@@ -3174,10 +3342,8 @@ void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
                                            NULL, NULL);
     d->type = IDE_TYPE_CMD646;
     pci_conf = d->dev.config;
-    pci_conf[0x00] = 0x95; // CMD646
-    pci_conf[0x01] = 0x10;
-    pci_conf[0x02] = 0x46;
-    pci_conf[0x03] = 0x06;
+    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_CMD);
+    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_CMD_646);
 
     pci_conf[0x08] = 0x07; // IDE controller revision
     pci_conf[0x09] = 0x8f;
@@ -3212,7 +3378,7 @@ void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
     ide_init2(&d->ide_if[0], hd_table[0], hd_table[1], irq[0]);
     ide_init2(&d->ide_if[2], hd_table[2], hd_table[3], irq[1]);
 
-    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
     qemu_register_reset(cmd646_reset, d);
     cmd646_reset(d);
 }
@@ -3249,10 +3415,8 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     d->type = IDE_TYPE_PIIX3;
 
     pci_conf = d->dev.config;
-    pci_conf[0x00] = 0x86; // Intel
-    pci_conf[0x01] = 0x80;
-    pci_conf[0x02] = 0x10;
-    pci_conf[0x03] = 0x70;
+    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_INTEL);
+    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371SB_1);
     pci_conf[0x09] = 0x80; // legacy ATA mode
     pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
     pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
@@ -3269,7 +3433,7 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
-    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
 /* hd_table must contain 4 block drivers */
@@ -3288,10 +3452,8 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     d->type = IDE_TYPE_PIIX4;
 
     pci_conf = d->dev.config;
-    pci_conf[0x00] = 0x86; // Intel
-    pci_conf[0x01] = 0x80;
-    pci_conf[0x02] = 0x11;
-    pci_conf[0x03] = 0x71;
+    pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_INTEL);
+    pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_82371AB);
     pci_conf[0x09] = 0x80; // legacy ATA mode
     pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
     pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
@@ -3308,7 +3470,7 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
-    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
 /***********************************************************/

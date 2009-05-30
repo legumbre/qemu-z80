@@ -201,7 +201,8 @@ void mips_jazz_init (ram_addr_t ram_size, int vga_ram_size,
     /* Video card */
     switch (jazz_model) {
     case JAZZ_MAGNUM:
-        g364fb_mm_init(vga_ram_size, 0, 0x40000000, 0x60000000);
+        g364fb_mm_init(phys_ram_base + ram_size, ram_size, vga_ram_size,
+                        0x40000000, 0x60000000, 0, rc4030[3]);
         break;
     case JAZZ_PICA61:
         isa_vga_mm_init(phys_ram_base + ram_size, ram_size, vga_ram_size,
@@ -240,7 +241,7 @@ void mips_jazz_init (ram_addr_t ram_size, int vga_ram_size,
     fdctrl_init(rc4030[1], 0, 1, 0x80003000, fds);
 
     /* Real time clock */
-    rtc_init(0x70, i8259[8]);
+    rtc_init(0x70, i8259[8], 1980);
     s_rtc = cpu_register_io_memory(0, rtc_read, rtc_write, env);
     cpu_register_physical_memory(0x80004000, 0x00001000, s_rtc);
 
