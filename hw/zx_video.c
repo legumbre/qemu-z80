@@ -29,6 +29,12 @@
 #include "isa.h"
 #include "console.h"
 #include "zx_video.h"
+#include "pixel_ops.h"
+#include "pixel_ops_dup.h"
+
+typedef unsigned int rgb_to_pixel_dup_func(unsigned int r,
+                                           unsigned int g,
+                                           unsigned int b);
 
 typedef struct {
     DisplayState *ds;
@@ -50,9 +56,11 @@ typedef struct {
     int flashcount;
 
     int invalidate;
+    uint32_t palette[16];
+    rgb_to_pixel_dup_func *rgb_to_pixel;
 } ZXVState;
 
-static const uint32_t cols[16] = {
+static const uint32_t zx_cols[16] = {
     0x00000000, /*  0: Black          */
     0x000000c0, /*  1: Blue           */
     0x00c00000, /*  2: Red            */
@@ -72,7 +80,7 @@ static const uint32_t cols[16] = {
     0x00ffffff, /* 15: White          */
 };
 
-/* copied from vga_template.h */
+/* copied from vga.c / vga_template.h */
 
 #define cbswap_32(__x) \
 ((uint32_t)( \
@@ -113,29 +121,8 @@ static const uint32_t dmask4[4] = {
     PAT(0xffffffff),
 };
 
-//#define DEPTH 8
-//#include "vga_template.h"
-
-//#define DEPTH 15
-//#include "vga_template.h"
-
-//#define BGR_FORMAT
-//#define DEPTH 15
-//#include "vga_template.h"
-
-//#define DEPTH 16
-//#include "vga_template.h"
-
-//#define BGR_FORMAT
-//#define DEPTH 16
-//#include "vga_template.h"
-
-//#define DEPTH 32
-//#include "vga_template.h"
-
-//#define BGR_FORMAT
-//#define DEPTH 32
-//#include "vga_template.h"
+typedef void zx_draw_line_func(uint8_t *d, uint32_t font_data,
+                               uint32_t xorcol, uint32_t bgcol);
 
 static inline void zx_draw_line_8(uint8_t *d,
                                   uint32_t font_data,
@@ -172,6 +159,54 @@ static inline void zx_draw_line_32(uint8_t *d,
     ((uint32_t *)d)[7] = (-((font_data >> 0) & 1) & xorcol) ^ bgcol;
 }
 
+#define NB_DEPTHS 7
+
+static zx_draw_line_func *zx_draw_line_table[NB_DEPTHS] = {
+    zx_draw_line_8,
+    zx_draw_line_16,
+    zx_draw_line_16,
+    zx_draw_line_32,
+    zx_draw_line_32,
+    zx_draw_line_16,
+    zx_draw_line_16,
+};
+
+static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
+    rgb_to_pixel8_dup,
+    rgb_to_pixel15_dup,
+    rgb_to_pixel16_dup,
+    rgb_to_pixel32_dup,
+    rgb_to_pixel32bgr_dup,
+    rgb_to_pixel15bgr_dup,
+    rgb_to_pixel16bgr_dup,
+};
+
+static inline int get_depth_index(DisplayState *s)
+{
+    switch(s->depth) {
+    default:
+    case 8:
+        return 0;
+    case 15:
+        if (s->bgr)
+            return 5;
+        else
+            return 1;
+    case 16:
+        if (s->bgr)
+            return 6;
+        else
+            return 2;
+    case 32:
+        if (s->bgr)
+            return 4;
+        else
+            return 3;
+    }
+}
+
+/* end of code copied from vga.c / vga_template.h */
+
 static ZXVState *zxvstate;
 
 void zx_video_do_retrace(void)
@@ -185,10 +220,15 @@ void zx_video_do_retrace(void)
     }
 }
 
-static void zx_draw_line(ZXVState *s1, uint8_t *d,
-                         const uint8_t *s, const uint8_t *as)
+static void zx_draw_scanline(ZXVState *s1, uint8_t *d,
+                             const uint8_t *s, const uint8_t *as)
 {
-    int x;
+    int x, x_incr;
+    zx_draw_line_func *zx_draw_line;
+
+    zx_draw_line = zx_draw_line_table[get_depth_index(s1->ds)];
+    x_incr = (s1->ds->depth + 7) >> 3;
+
     for (x = 0; x < 32; x++) {
         int attrib, fg, bg, bright, flash;
 
@@ -205,32 +245,53 @@ static void zx_draw_line(ZXVState *s1, uint8_t *d,
         fg |= bright;
         bg |= bright;
 
-        zx_draw_line_32(d, *s, cols[fg] ^ cols[bg], cols[bg]);
-        d += 8 * 4;
+        zx_draw_line(d, *s, s1->palette[fg] ^ s1->palette[bg], s1->palette[bg]);
+
+        d += 8 * x_incr;
         s++; as++;
     }
 }
 
 static void zx_border_row(ZXVState *s, uint8_t *d)
 {
-    int x;
-    for (x = 0; x < s->twidth; x++) {
-        *((uint32_t *)d) = cols[s->border];
-        d += 4;
+    int x, x_incr;
+    zx_draw_line_func *zx_draw_line;
+
+    zx_draw_line = zx_draw_line_table[get_depth_index(s->ds)];
+    x_incr = (s->ds->depth + 7) >> 3;
+
+    for (x = 0; x < s->twidth / 8; x++) {
+        zx_draw_line(d, 0xff, s->palette[s->border], 0);
+        d += 8 * x_incr;
     }
 }
 
 static void zx_border_sides(ZXVState *s, uint8_t *d)
 {
-    int x;
-    for (x = 0; x < s->bwidth; x++) {
-        *((uint32_t *)d) = cols[s->border];
-        d += 4;
+    int x, x_incr;
+    zx_draw_line_func *zx_draw_line;
+
+    zx_draw_line = zx_draw_line_table[get_depth_index(s->ds)];
+    x_incr = (s->ds->depth + 7) >> 3;
+
+    for (x = 0; x < s->bwidth / 8; x++) {
+        zx_draw_line(d, 0xff, s->palette[s->border], 0);
+        d += 8 * x_incr;
     }
-    d += s->swidth * 4;
-    for (x = 0; x < s->bwidth; x++) {
-        *((uint32_t *)d) = cols[s->border];
-        d += 4;
+    d += s->swidth * x_incr;
+    for (x = 0; x < s->bwidth / 8; x++) {
+        zx_draw_line(d, 0xff, s->palette[s->border], 0);
+        d += 8 * x_incr;
+    }
+}
+
+static void update_palette(ZXVState *s) {
+    int i, r, g, b;
+    for(i = 0; i < 16; i++) {
+        r = (zx_cols[i] >> 16) & 0xff;
+        g = (zx_cols[i] >> 8) & 0xff;
+        b = zx_cols[i] & 0xff;
+        s->palette[i] = s->rgb_to_pixel(r, g, b);
     }
 }
 
@@ -240,7 +301,17 @@ static void zx_update_display(void *opaque)
     uint8_t *d;
     ZXVState *s = (ZXVState *)opaque;
     uint32_t addr, attrib;
+    int x_incr;
     int dirty = s->invalidate;
+    static int inited = 0;
+
+    x_incr = (s->ds->depth + 7) >> 3;
+
+    if (unlikely(inited == 0)) {
+        s->rgb_to_pixel = rgb_to_pixel_dup_table[get_depth_index(s->ds)];
+        update_palette(s);
+        inited = 1;
+    }
 
     if (!dirty) {
         for (addr = 0; addr < 0x1b00; addr += TARGET_PAGE_SIZE) {
@@ -260,12 +331,12 @@ static void zx_update_display(void *opaque)
     if (dirty) {
         d = s->ds->data;
         d += s->bheight * s->ds->linesize;
-        d += s->bwidth * 4;
+        d += s->bwidth * x_incr;
 
         for (y = 0; y < 192; y++) {
             addr = ((y & 0x07) << 8) | ((y & 0x38) << 2) | ((y & 0xc0) << 5);
             attrib = 0x1800 | ((y & 0xf8) << 2);
-            zx_draw_line(s, d, s->vram_ptr + addr, s->vram_ptr + attrib);
+            zx_draw_scanline(s, d, s->vram_ptr + addr, s->vram_ptr + attrib);
             d += s->ds->linesize;
         }
 
