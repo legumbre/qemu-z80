@@ -17,6 +17,13 @@ STEXI
 Display help and exit
 ETEXI
 
+DEF("version", 0, QEMU_OPTION_version,
+    "-version        display version information and exit\n")
+STEXI
+@item -version
+Display version information and exit
+ETEXI
+
 DEF("M", HAS_ARG, QEMU_OPTION_M,
     "-M machine      select emulated machine (-M ? for list)\n")
 STEXI
@@ -228,10 +235,8 @@ a suffix of ``M'' or ``G'' can be used to signify a value in megabytes or
 gigabytes respectively.
 ETEXI
 
-#ifndef _WIN32
 DEF("k", HAS_ARG, QEMU_OPTION_k,
     "-k language     use keyboard layout (for example 'fr' for French)\n")
-#endif
 STEXI
 @item -k @var{language}
 
