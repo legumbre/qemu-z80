@@ -169,7 +169,7 @@ static inline int get_pixfmt_index(DisplayState *s)
     switch(s->depth) {
     default:
     case 8:
-        return 0;
+        return zx_pixfmt_8;
     case 15:
         if (s->bgr) {
             return zx_pixfmt_15bgr;
