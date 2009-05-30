@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <stdlib.h>
 #include "exec.h"
@@ -1518,7 +1518,7 @@ target_ulong do_yield(target_ulong t0)
             }
         }
     } else if (t0 == 0) {
-	if (0 /* TODO: TC underflow */) {
+        if (0 /* TODO: TC underflow */) {
             env->CP0_VPEControl &= ~(0x7 << CP0VPECo_EXCPT);
             do_raise_exception(EXCP_THREAD);
         } else {
@@ -1622,17 +1622,17 @@ void r4k_do_tlbp (void)
     if (i == env->tlb->nb_tlb) {
         /* No match.  Discard any shadow entries, if any of them match.  */
         for (i = env->tlb->nb_tlb; i < env->tlb->tlb_in_use; i++) {
-	    tlb = &env->tlb->mmu.r4k.tlb[i];
-	    /* 1k pages are not supported. */
-	    mask = tlb->PageMask | ~(TARGET_PAGE_MASK << 1);
-	    tag = env->CP0_EntryHi & ~mask;
-	    VPN = tlb->VPN & ~mask;
-	    /* Check ASID, virtual page number & size */
-	    if ((tlb->G == 1 || tlb->ASID == ASID) && VPN == tag) {
+            tlb = &env->tlb->mmu.r4k.tlb[i];
+            /* 1k pages are not supported. */
+            mask = tlb->PageMask | ~(TARGET_PAGE_MASK << 1);
+            tag = env->CP0_EntryHi & ~mask;
+            VPN = tlb->VPN & ~mask;
+            /* Check ASID, virtual page number & size */
+            if ((tlb->G == 1 || tlb->ASID == ASID) && VPN == tag) {
                 r4k_mips_tlb_flush_extra (env, i);
-	        break;
-	    }
-	}
+                break;
+            }
+        }
 
         env->CP0_Index |= 0x80000000;
     }

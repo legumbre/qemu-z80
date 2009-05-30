@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef CPU_DEFS_H
 #define CPU_DEFS_H
@@ -200,8 +200,6 @@ typedef struct CPUWatchpoint {
     /* Core interrupt code */                                           \
     jmp_buf jmp_env;                                                    \
     int exception_index;                                                \
-                                                                        \
-    int user_mode_only;                                                 \
                                                                         \
     void *next_cpu; /* next CPU sharing TB cache */                     \
     int cpu_index; /* CPU index (informative) */                        \

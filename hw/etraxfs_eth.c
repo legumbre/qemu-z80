@@ -45,6 +45,8 @@ struct qemu_phy
 {
 	uint32_t regs[32];
 
+	int link;
+
 	unsigned int (*read)(struct qemu_phy *phy, unsigned int req);
 	void (*write)(struct qemu_phy *phy, unsigned int req, 
 		      unsigned int data);
@@ -59,13 +61,15 @@ static unsigned int tdk_read(struct qemu_phy *phy, unsigned int req)
 
 	switch (regnum) {
 		case 1:
+			if (!phy->link)
+				break;
 			/* MR1.	 */
 			/* Speeds and modes.  */
 			r |= (1 << 13) | (1 << 14);
 			r |= (1 << 11) | (1 << 12);
 			r |= (1 << 5); /* Autoneg complete.  */
 			r |= (1 << 3); /* Autoneg able.	 */
-			r |= (1 << 2); /* Link.	 */
+			r |= (1 << 2); /* link.	 */
 			break;
 		case 5:
 			/* Link partner ability.
@@ -82,6 +86,9 @@ static unsigned int tdk_read(struct qemu_phy *phy, unsigned int req)
 			/* Diagnostics reg.  */
 			int duplex = 0;
 			int speed_100 = 0;
+
+			if (!phy->link)
+				break;
 
 			/* Are we advertising 100 half or 100 duplex ? */
 			speed_100 = !!(phy->regs[4] & ADVERTISE_100HALF);
@@ -125,6 +132,7 @@ tdk_init(struct qemu_phy *phy)
 	phy->regs[3] = 0xe400;
 	/* Autonegotiation advertisement reg.  */
 	phy->regs[4] = 0x01E1;
+	phy->link = 1;
 
 	phy->read = tdk_read;
 	phy->write = tdk_write;
@@ -297,18 +305,18 @@ static void mdio_cycle(struct qemu_mdio *bus)
 /* ETRAX-FS Ethernet MAC block starts here.  */
 
 #define RW_MA0_LO	  0x00
-#define RW_MA0_HI	  0x04
-#define RW_MA1_LO	  0x08
-#define RW_MA1_HI	  0x0c
-#define RW_GA_LO	  0x10
-#define RW_GA_HI	  0x14
-#define RW_GEN_CTRL	  0x18
-#define RW_REC_CTRL	  0x1c
-#define RW_TR_CTRL	  0x20
-#define RW_CLR_ERR	  0x24
-#define RW_MGM_CTRL	  0x28
-#define R_STAT		  0x2c
-#define FS_ETH_MAX_REGS	  0x5c
+#define RW_MA0_HI	  0x01
+#define RW_MA1_LO	  0x02
+#define RW_MA1_HI	  0x03
+#define RW_GA_LO	  0x04
+#define RW_GA_HI	  0x05
+#define RW_GEN_CTRL	  0x06
+#define RW_REC_CTRL	  0x07
+#define RW_TR_CTRL	  0x08
+#define RW_CLR_ERR	  0x09
+#define RW_MGM_CTRL	  0x0a
+#define R_STAT		  0x0b
+#define FS_ETH_MAX_REGS	  0x17
 
 struct fs_eth
 {
@@ -360,40 +368,23 @@ static void eth_validate_duplex(struct fs_eth *eth)
 	}
 }
 
-static uint32_t eth_rinvalid (void *opaque, target_phys_addr_t addr)
-{
-	struct fs_eth *eth = opaque;
-	CPUState *env = eth->env;
-	cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-		  addr);
-	return 0;
-}
-
 static uint32_t eth_readl (void *opaque, target_phys_addr_t addr)
 {
 	struct fs_eth *eth = opaque;
 	uint32_t r = 0;
 
+	addr >>= 2;
+
 	switch (addr) {
 		case R_STAT:
-			/* Attach an MDIO/PHY abstraction.  */
 			r = eth->mdio_bus.mdio & 1;
 			break;
 	default:
 		r = eth->regs[addr];
-		D(printf ("%s %x\n", __func__, addr));
+		D(printf ("%s %x\n", __func__, addr * 4));
 		break;
 	}
 	return r;
-}
-
-static void
-eth_winvalid (void *opaque, target_phys_addr_t addr, uint32_t value)
-{
-	struct fs_eth *eth = opaque;
-	CPUState *env = eth->env;
-	cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-		  addr);
 }
 
 static void eth_update_ma(struct fs_eth *eth, int ma)
@@ -425,20 +416,15 @@ eth_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 {
 	struct fs_eth *eth = opaque;
 
+	addr >>= 2;
 	switch (addr)
 	{
 		case RW_MA0_LO:
-			eth->regs[addr] = value;
-			eth_update_ma(eth, 0);
-			break;
 		case RW_MA0_HI:
 			eth->regs[addr] = value;
 			eth_update_ma(eth, 0);
 			break;
 		case RW_MA1_LO:
-			eth->regs[addr] = value;
-			eth_update_ma(eth, 1);
-			break;
 		case RW_MA1_HI:
 			eth->regs[addr] = value;
 			eth_update_ma(eth, 1);
@@ -552,23 +538,30 @@ static int eth_tx_push(void *opaque, unsigned char *buf, int len)
 	return len;
 }
 
+static void eth_set_link(VLANClientState *vc)
+{
+	struct fs_eth *eth = vc->opaque;
+	D(printf("%s %d\n", __func__, vc->link_down));
+	eth->phy.link = !vc->link_down;
+}
+
 static CPUReadMemoryFunc *eth_read[] = {
-	&eth_rinvalid,
-	&eth_rinvalid,
+	NULL, NULL,
 	&eth_readl,
 };
 
 static CPUWriteMemoryFunc *eth_write[] = {
-	&eth_winvalid,
-	&eth_winvalid,
+	NULL, NULL,
 	&eth_writel,
 };
 
 void *etraxfs_eth_init(NICInfo *nd, CPUState *env, 
-		       qemu_irq *irq, target_phys_addr_t base)
+		       qemu_irq *irq, target_phys_addr_t base, int phyaddr)
 {
 	struct etraxfs_dma_client *dma = NULL;	
 	struct fs_eth *eth = NULL;
+
+	qemu_check_nic_model(nd, "fseth");
 
 	dma = qemu_mallocz(sizeof *dma * 2);
 	if (!dma)
@@ -589,15 +582,17 @@ void *etraxfs_eth_init(NICInfo *nd, CPUState *env,
 	eth->dma_in = dma + 1;
 
 	/* Connect the phy.  */
-	eth->phyaddr = 1;
+	eth->phyaddr = phyaddr & 0x1f;
 	tdk_init(&eth->phy);
 	mdio_attach(&eth->mdio_bus, &eth->phy, eth->phyaddr);
 
 	eth->ethregs = cpu_register_io_memory(0, eth_read, eth_write, eth);
 	cpu_register_physical_memory (base, 0x5c, eth->ethregs);
 
-	eth->vc = qemu_new_vlan_client(nd->vlan, 
+	eth->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
 				       eth_receive, eth_can_receive, eth);
+	eth->vc->opaque = eth;
+	eth->vc->link_status_changed = eth_set_link;
 
 	return dma;
   err:

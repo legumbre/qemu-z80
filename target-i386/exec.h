@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "config.h"
 #include "dyngen-exec.h"
@@ -31,6 +31,7 @@
 
 register struct CPUX86State *env asm(AREG0);
 
+#include "qemu-common.h"
 #include "qemu-log.h"
 
 #define EAX (env->regs[R_EAX])
@@ -62,8 +63,8 @@ void do_interrupt(int intno, int is_int, int error_code,
                   target_ulong next_eip, int is_hw);
 void do_interrupt_user(int intno, int is_int, int error_code,
                        target_ulong next_eip);
-void raise_exception_err(int exception_index, int error_code);
-void raise_exception(int exception_index);
+void noreturn raise_exception_err(int exception_index, int error_code);
+void noreturn raise_exception(int exception_index);
 void do_smm_enter(void);
 
 /* n must be a constant to be efficient */

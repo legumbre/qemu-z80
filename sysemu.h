@@ -75,13 +75,15 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque);
 #endif
 
 /* TAP win32 */
-int tap_win32_init(VLANState *vlan, const char *ifname);
+int tap_win32_init(VLANState *vlan, const char *model,
+                   const char *name, const char *ifname);
 
 /* SLIRP */
 void do_info_slirp(void);
 
 extern int bios_size;
 extern int cirrus_vga_enabled;
+extern int std_vga_enabled;
 extern int vmsvga_enabled;
 extern int graphic_width;
 extern int graphic_height;
@@ -89,6 +91,7 @@ extern int graphic_depth;
 extern int nographic;
 extern const char *keyboard_layout;
 extern int win2k_install_hack;
+extern int rtc_td_hack;
 extern int alt_grab;
 extern int usb_enabled;
 extern int smp_cpus;
@@ -131,6 +134,7 @@ typedef struct DriveInfo {
     BlockInterfaceType type;
     int bus;
     int unit;
+    char serial[21];
 } DriveInfo;
 
 #define MAX_IDE_DEVS	2
@@ -142,6 +146,7 @@ extern DriveInfo drives_table[MAX_DRIVES+1];
 
 extern int drive_get_index(BlockInterfaceType type, int bus, int unit);
 extern int drive_get_max_bus(BlockInterfaceType type);
+extern const char *drive_get_serial(BlockDriverState *bdrv);
 
 /* serial ports */
 
@@ -154,6 +159,12 @@ extern CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 #define MAX_PARALLEL_PORTS 3
 
 extern CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
+
+/* virtio consoles */
+
+#define MAX_VIRTIO_CONSOLES 1
+
+extern CharDriverState *virtcon_hds[MAX_VIRTIO_CONSOLES];
 
 #define TFR(expr) do { if ((expr) != -1) break; } while (errno == EINTR)
 

@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 
@@ -570,6 +570,21 @@ receive_filter(E1000State *s, const uint8_t *buf, int size)
     return 0;
 }
 
+static void
+e1000_set_link_status(VLANClientState *vc)
+{
+    E1000State *s = vc->opaque;
+    uint32_t old_status = s->mac_reg[STATUS];
+
+    if (vc->link_down)
+        s->mac_reg[STATUS] &= ~E1000_STATUS_LU;
+    else
+        s->mac_reg[STATUS] |= E1000_STATUS_LU;
+
+    if (s->mac_reg[STATUS] != old_status)
+        set_ics(s, 0, E1000_ICR_LSC);
+}
+
 static int
 e1000_can_receive(void *opaque)
 {
@@ -1071,13 +1086,11 @@ pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
     d->rxbuf_min_shift = 1;
     memset(&d->tx, 0, sizeof d->tx);
 
-    d->vc = qemu_new_vlan_client(nd->vlan, e1000_receive,
-                                 e1000_can_receive, d);
+    d->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
+                                 e1000_receive, e1000_can_receive, d);
+    d->vc->link_status_changed = e1000_set_link_status;
 
-    snprintf(d->vc->info_str, sizeof(d->vc->info_str),
-             "%s macaddr=%02x:%02x:%02x:%02x:%02x:%02x", info_str,
-             d->nd->macaddr[0], d->nd->macaddr[1], d->nd->macaddr[2],
-             d->nd->macaddr[3], d->nd->macaddr[4], d->nd->macaddr[5]);
+    qemu_format_nic_info_str(d->vc, d->nd->macaddr);
 
     register_savevm(info_str, -1, 2, nic_save, nic_load, d);
 }

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "config.h"
 #include "qemu-common.h"
@@ -87,7 +87,11 @@ static int gdb_signal_table[] = {
     -1, /* SIGLOST */
     TARGET_SIGUSR1,
     TARGET_SIGUSR2,
+#ifdef TARGET_SIGPWR
     TARGET_SIGPWR,
+#else
+    -1,
+#endif
     -1, /* SIGPOLL */
     -1,
     -1,
@@ -100,6 +104,7 @@ static int gdb_signal_table[] = {
     -1,
     -1,
     -1,
+#ifdef __SIGRTMIN
     __SIGRTMIN + 1,
     __SIGRTMIN + 2,
     __SIGRTMIN + 3,
@@ -206,6 +211,7 @@ static int gdb_signal_table[] = {
     -1,
     -1,
     -1
+#endif
 };
 #else
 /* In system mode we only need SIGINT and SIGTRAP; other signals
@@ -694,7 +700,7 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 #if defined(TARGET_SPARC64) && !defined(TARGET_ABI32)
 #define NUM_CORE_REGS 86
 #else
-#define NUM_CORE_REGS 73
+#define NUM_CORE_REGS 72
 #endif
 
 #ifdef TARGET_ABI32
@@ -728,7 +734,7 @@ static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
     case 69: GET_REGA(env->npc);
     case 70: GET_REGA(env->fsr);
     case 71: GET_REGA(0); /* csr */
-    case 72: GET_REGA(0);
+    default: GET_REGA(0);
     }
 #else
     if (n < 64) {
@@ -2255,7 +2261,7 @@ int gdbserver_start(int port)
 void gdbserver_fork(CPUState *env)
 {
     GDBState *s = gdbserver_state;
-    if (s->fd < 0)
+    if (gdbserver_fd < 0 || s->fd < 0)
       return;
     close(s->fd);
     s->fd = -1;

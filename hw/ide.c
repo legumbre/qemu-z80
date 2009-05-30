@@ -386,6 +386,7 @@ typedef struct IDEState {
     PCIDevice *pci_dev;
     struct BMDMAState *bmdma;
     int drive_serial;
+    char drive_serial_str[21];
     /* ide regs */
     uint8_t feature;
     uint8_t error;
@@ -531,7 +532,6 @@ static void ide_identify(IDEState *s)
 {
     uint16_t *p;
     unsigned int oldsize;
-    char buf[20];
 
     if (s->identify_set) {
 	memcpy(s->io_buffer, s->identify_data, sizeof(s->identify_data));
@@ -546,8 +546,7 @@ static void ide_identify(IDEState *s)
     put_le16(p + 4, 512 * s->sectors); /* XXX: retired, remove ? */
     put_le16(p + 5, 512); /* XXX: retired, remove ? */
     put_le16(p + 6, s->sectors);
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20); /* serial number */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 20, 3); /* XXX: retired, remove ? */
     put_le16(p + 21, 512); /* cache size in sectors */
     put_le16(p + 22, 4); /* ecc bytes */
@@ -601,7 +600,6 @@ static void ide_identify(IDEState *s)
 static void ide_atapi_identify(IDEState *s)
 {
     uint16_t *p;
-    char buf[20];
 
     if (s->identify_set) {
 	memcpy(s->io_buffer, s->identify_data, sizeof(s->identify_data));
@@ -612,8 +610,7 @@ static void ide_atapi_identify(IDEState *s)
     p = (uint16_t *)s->io_buffer;
     /* Removable CDROM, 50us response, 12 byte packets */
     put_le16(p + 0, (2 << 14) | (5 << 8) | (1 << 7) | (2 << 5) | (0 << 0));
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20); /* serial number */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 20, 3); /* buffer type */
     put_le16(p + 21, 512); /* cache size in sectors */
     put_le16(p + 22, 4); /* ecc bytes */
@@ -652,7 +649,6 @@ static void ide_cfata_identify(IDEState *s)
 {
     uint16_t *p;
     uint32_t cur_sec;
-    char buf[20];
 
     p = (uint16_t *) s->identify_data;
     if (s->identify_set)
@@ -668,8 +664,7 @@ static void ide_cfata_identify(IDEState *s)
     put_le16(p + 6, s->sectors);		/* Default sectors per track */
     put_le16(p + 7, s->nb_sectors >> 16);	/* Sectors per card */
     put_le16(p + 8, s->nb_sectors);		/* Sectors per card */
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20);	/* Serial number in ASCII */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 22, 0x0004);			/* ECC bytes */
     padstr((char *) (p + 23), QEMU_VERSION, 8);	/* Firmware Revision */
     padstr((char *) (p + 27), "QEMU MICRODRIVE", 40);/* Model number */
@@ -960,7 +955,7 @@ static void ide_read_dma_cb(void *opaque, int ret)
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
 #ifdef DEBUG_AIO
-    printf("aio_read: sector_num=%lld n=%d\n", sector_num, n);
+    printf("aio_read: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
     bm->aiocb = bdrv_aio_read(s->bs, sector_num, s->io_buffer, n,
                               ide_read_dma_cb, bm);
@@ -1072,7 +1067,7 @@ static void ide_write_dma_cb(void *opaque, int ret)
     if (dma_buf_rw(bm, 0) == 0)
         goto eot;
 #ifdef DEBUG_AIO
-    printf("aio_write: sector_num=%lld n=%d\n", sector_num, n);
+    printf("aio_write: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
     bm->aiocb = bdrv_aio_write(s->bs, sector_num, s->io_buffer, n,
                                ide_write_dma_cb, bm);
@@ -2472,7 +2467,8 @@ static uint32_t ide_ioport_read(void *opaque, uint32_t addr1)
         ret = 0xff;
         break;
     case 1:
-        if (!ide_if[0].bs && !ide_if[1].bs)
+        if ((!ide_if[0].bs && !ide_if[1].bs) ||
+            (s != ide_if && !s->bs))
             ret = 0;
         else if (!hob)
             ret = s->error;
@@ -2714,6 +2710,11 @@ static void ide_init2(IDEState *ide_state,
             }
         }
         s->drive_serial = drive_serial++;
+        strncpy(s->drive_serial_str, drive_get_serial(s->bs),
+                sizeof(s->drive_serial_str));
+        if (strlen(s->drive_serial_str) == 0)
+            snprintf(s->drive_serial_str, sizeof(s->drive_serial_str),
+                    "QM%05d", s->drive_serial);
         s->irq = irq;
         s->sector_write_timer = qemu_new_timer(vm_clock,
                                                ide_sector_write_timer_cb, s);
@@ -3185,9 +3186,10 @@ void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
     pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
     pci_conf[0x0e] = 0x00; // header_type
 
+    pci_conf[0x51] = 0x04; // enable IDE0
     if (secondary_ide_enabled) {
         /* XXX: if not enabled, really disable the seconday IDE controller */
-        pci_conf[0x51] = 0x80; /* enable IDE1 */
+        pci_conf[0x51] |= 0x08; /* enable IDE1 */
     }
 
     pci_register_io_region((PCIDevice *)d, 0, 0x8,

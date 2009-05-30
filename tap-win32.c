@@ -24,7 +24,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program (see the file COPYING included with this
  *  distribution); if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "qemu-common.h"
 #include "net.h"
@@ -660,7 +660,8 @@ static void tap_win32_send(void *opaque)
     }
 }
 
-int tap_win32_init(VLANState *vlan, const char *ifname)
+int tap_win32_init(VLANState *vlan, const char *model,
+                   const char *name, const char *ifname)
 {
     TAPState *s;
 
@@ -672,7 +673,7 @@ int tap_win32_init(VLANState *vlan, const char *ifname)
         return -1;
     }
 
-    s->vc = qemu_new_vlan_client(vlan, tap_receive, NULL, s);
+    s->vc = qemu_new_vlan_client(vlan, model, name, tap_receive, NULL, s);
 
     snprintf(s->vc->info_str, sizeof(s->vc->info_str),
              "tap: ifname=%s", ifname);

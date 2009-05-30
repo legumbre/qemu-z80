@@ -319,8 +319,6 @@ int tcg_gen_code_search_pc(TCGContext *s, uint8_t *gen_code_buf, long offset);
 
 void tcg_set_frame(TCGContext *s, int reg,
                    tcg_target_long start, tcg_target_long size);
-TCGv_i64 tcg_global_reg2_new_hack(TCGType type, int reg1, int reg2,
-                                  const char *name);
 
 TCGv_i32 tcg_global_reg_new_i32(int reg, const char *name);
 TCGv_i32 tcg_global_mem_new_i32(int reg, tcg_target_long offset,
@@ -459,7 +457,7 @@ uint64_t tcg_helper_divu_i64(uint64_t arg1, uint64_t arg2);
 uint64_t tcg_helper_remu_i64(uint64_t arg1, uint64_t arg2);
 
 extern uint8_t code_gen_prologue[];
-#if defined(__powerpc__) && !defined(__powerpc64__)
+#if defined(_ARCH_PPC) && !defined(_ARCH_PPC64)
 #define tcg_qemu_tb_exec(tb_ptr) \
     ((long REGPARM __attribute__ ((longcall)) (*)(void *))code_gen_prologue)(tb_ptr)
 #else

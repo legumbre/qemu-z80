@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 #include <stdint.h>
@@ -998,12 +998,12 @@ int cpu_ppc_handle_mmu_fault (CPUState *env, uint32_t address, int rw,
     uint64_t physical, page_size, end;
     int prot, zbits, ret;
 
-    if (env->user_mode_only) {
+#if defined(CONFIG_USER_ONLY)
         ret = 2;
-    } else {
+#else
         ret = virtual_to_physical(env, &physical, &zbits, &prot,
                                   address, mmu_idx, rw);
-    }
+#endif
     switch (ret) {
     case 0:
         /* No fault */

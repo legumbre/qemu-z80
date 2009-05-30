@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #if !defined(__DYNGEN_EXEC_H__)
 #define __DYNGEN_EXEC_H__
@@ -41,7 +41,7 @@ typedef unsigned int uint32_t;
 // Linux/Sparc64 defines uint64_t
 #if !(defined (__sparc_v9__) && defined(__linux__)) && !(defined(__APPLE__) && defined(__x86_64__))
 /* XXX may be done for all 64 bits targets ? */
-#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(__powerpc64__)
+#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(_ARCH_PPC64)
 typedef unsigned long uint64_t;
 #else
 typedef unsigned long long uint64_t;
@@ -58,7 +58,7 @@ typedef signed short int16_t;
 typedef signed int int32_t;
 // Linux/Sparc64 defines int64_t
 #if !(defined (__sparc_v9__) && defined(__linux__)) && !(defined(__APPLE__) && defined(__x86_64__))
-#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(__powerpc64__)
+#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(_ARCH_PPC64)
 typedef signed long int64_t;
 #else
 typedef signed long long int64_t;
@@ -105,7 +105,7 @@ extern int printf(const char *, ...);
 #define AREG3 "r13"
 //#define AREG4 "rbp"
 //#define AREG5 "rbx"
-#elif defined(__powerpc__)
+#elif defined(_ARCH_PPC)
 #define AREG0 "r27"
 #define AREG1 "r24"
 #define AREG2 "r25"

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 #ifndef CONFIG_USER_ONLY
@@ -32,8 +32,10 @@
 
 #ifdef DEBUG
 #define D(x) x
+#define D_LOG(...) fprintf(logfile, ## __VA_ARGS__)
 #else
 #define D(x)
+#define D_LOG(...) do { } while (0)
 #endif
 
 void cris_mmu_init(CPUState *env)
@@ -180,9 +182,8 @@ static int cris_mmu_translate_page(struct cris_mmu_result_t *res,
 		tlb_pid = EXTRACT_FIELD(hi, 0, 7);
 		tlb_g  = EXTRACT_FIELD(lo, 4, 4);
 
-		D(fprintf(logfile, 
-			 "TLB[%d][%d][%d] v=%x vpage=%x lo=%x hi=%x\n", 
-			 mmu, set, idx, tlb_vpn, vpage, lo, hi));
+		D_LOG("TLB[%d][%d][%d] v=%x vpage=%x lo=%x hi=%x\n", 
+			 mmu, set, idx, tlb_vpn, vpage, lo, hi);
 		if ((tlb_g || (tlb_pid == pid))
 		    && tlb_vpn == vpage) {
 			match = 1;
@@ -285,7 +286,7 @@ static int cris_mmu_translate_page(struct cris_mmu_result_t *res,
 		  env->sregs[SFR_RW_MM_TLB_SEL],
 		  env->regs[R_SP], env->pregs[PR_USP], env->ksp));
 
-	res->pfn = tlb_pfn;
+	res->phy = tlb_pfn << TARGET_PAGE_BITS;
 	return !match;
 }
 
@@ -295,7 +296,7 @@ void cris_mmu_flush_pid(CPUState *env, uint32_t pid)
 	unsigned int idx;
 	uint32_t lo, hi;
 	uint32_t tlb_vpn;
-	int tlb_pid, tlb_g, tlb_v, tlb_k;
+	int tlb_pid, tlb_g, tlb_v;
 	unsigned int set;
 	unsigned int mmu;
 
@@ -311,15 +312,11 @@ void cris_mmu_flush_pid(CPUState *env, uint32_t pid)
 				tlb_pid = EXTRACT_FIELD(hi, 0, 7);
 				tlb_g  = EXTRACT_FIELD(lo, 4, 4);
 				tlb_v = EXTRACT_FIELD(lo, 3, 3);
-				tlb_k = EXTRACT_FIELD(lo, 2, 2);
 
-				/* Kernel protected areas need to be flushed
-				   as well.  */
-				if (tlb_v && !tlb_g && (tlb_pid == pid || tlb_k)) {
+				if (tlb_v && !tlb_g && (tlb_pid == pid)) {
 					vaddr = tlb_vpn << TARGET_PAGE_BITS;
-					D(fprintf(logfile,
-						  "flush pid=%x vaddr=%x\n", 
-						  pid, vaddr));
+					D_LOG("flush pid=%x vaddr=%x\n", 
+						  pid, vaddr);
 					tlb_flush_page(env, vaddr);
 				}
 			}
@@ -360,11 +357,7 @@ int cris_mmu_translate(struct cris_mmu_result_t *res,
 		res->prot = PAGE_BITS;
 	}
 	else
-	{
 		miss = cris_mmu_translate_page(res, env, vaddr, rw, is_user);
-		phy = (res->pfn << 13);
-		res->phy = phy;
-	}
   done:
 	env->pregs[PR_SRS] = old_srs;
 	return miss;

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "config.h"
 #define CPU_NO_GLOBAL_REGS
@@ -264,7 +264,8 @@ int cpu_exec(CPUState *env1)
                     if (ret == EXCP_DEBUG)
                         cpu_handle_debug_exception(env);
                     break;
-                } else if (env->user_mode_only) {
+                } else {
+#if defined(CONFIG_USER_ONLY)
                     /* if user mode only, we simulate a fake exception
                        which will be handled outside the cpu execution
                        loop */
@@ -278,7 +279,7 @@ int cpu_exec(CPUState *env1)
 #endif
                     ret = env->exception_index;
                     break;
-                } else {
+#else
 #if defined(TARGET_I386)
                     /* simulate a real cpu exception. On i386, it can
                        trigger new exceptions, but we do not handle
@@ -305,6 +306,7 @@ int cpu_exec(CPUState *env1)
                     do_interrupt(env);
 #elif defined(TARGET_M68K)
                     do_interrupt(0);
+#endif
 #endif
                 }
                 env->exception_index = -1;
@@ -1229,7 +1231,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
                              &uc->uc_sigmask, puc);
 }
 
-#elif defined(__powerpc__)
+#elif defined(_ARCH_PPC)
 
 /***********************************************************************
  * signal context platform-specific definitions

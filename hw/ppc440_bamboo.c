@@ -17,6 +17,7 @@
 #include "hw.h"
 #include "pci.h"
 #include "virtio-blk.h"
+#include "virtio-console.h"
 #include "boards.h"
 #include "sysemu.h"
 #include "ppc440.h"
@@ -90,7 +91,6 @@ static void bamboo_init(ram_addr_t ram_size, int vga_ram_size,
                         const char *cpu_model)
 {
     unsigned int pci_irq_nrs[4] = { 28, 27, 26, 25 };
-    NICInfo *nd;
     PCIBus *pcibus;
     CPUState *env;
     uint64_t elf_entry;
@@ -116,15 +116,17 @@ static void bamboo_init(ram_addr_t ram_size, int vga_ram_size,
             unit_id++;
         }
 
+        /* Add virtio console devices */
+        for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
+            if (virtcon_hds[i])
+                virtio_console_init(pcibus, virtcon_hds[i]);
+        }
+
         /* Register network interfaces. */
         for (i = 0; i < nb_nics; i++) {
-            nd = &nd_table[i];
-            if (!nd->model) {
-                /* There are no PCI NICs on the Bamboo board, but there are
-                 * PCI slots, so we can pick model whatever we want. */
-                nd->model = "e1000";
-            }
-            pci_nic_init(pcibus, nd, -1);
+            /* There are no PCI NICs on the Bamboo board, but there are
+             * PCI slots, so we can pick whatever default model we want. */
+            pci_nic_init(pcibus, &nd_table[i], -1, "e1000");
         }
     }
 

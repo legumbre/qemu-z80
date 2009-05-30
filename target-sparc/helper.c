@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <stdarg.h>
 #include <stdlib.h>
@@ -402,12 +402,12 @@ static int get_physical_address_data(CPUState *env,
             mask = 0xffffffffffc00000ULL;
             break;
         }
-        // ctx match, vaddr match?
+        // ctx match, vaddr match, valid?
         if (env->dmmuregs[1] == (env->dtlb_tag[i] & 0x1fff) &&
-            (address & mask) == (env->dtlb_tag[i] & ~0x1fffULL)) {
-            // valid, access ok?
-            if ((env->dtlb_tte[i] & 0x8000000000000000ULL) == 0 ||
-                ((env->dtlb_tte[i] & 0x4) && is_user) ||
+            (address & mask) == (env->dtlb_tag[i] & ~0x1fffULL) &&
+            (env->dtlb_tte[i] & 0x8000000000000000ULL)) {
+            // access ok?
+            if (((env->dtlb_tte[i] & 0x4) && is_user) ||
                 (!(env->dtlb_tte[i] & 0x2) && (rw == 1))) {
                 if (env->dmmuregs[3]) /* Fault status register */
                     env->dmmuregs[3] = 2; /* overflow (not read before
@@ -465,12 +465,12 @@ static int get_physical_address_code(CPUState *env,
             mask = 0xffffffffffc00000ULL;
                 break;
         }
-        // ctx match, vaddr match?
+        // ctx match, vaddr match, valid?
         if (env->dmmuregs[1] == (env->itlb_tag[i] & 0x1fff) &&
-            (address & mask) == (env->itlb_tag[i] & ~0x1fffULL)) {
-            // valid, access ok?
-            if ((env->itlb_tte[i] & 0x8000000000000000ULL) == 0 ||
-                ((env->itlb_tte[i] & 0x4) && is_user)) {
+            (address & mask) == (env->itlb_tag[i] & ~0x1fffULL) &&
+            (env->itlb_tte[i] & 0x8000000000000000ULL)) {
+            // access ok?
+            if ((env->itlb_tte[i] & 0x4) && is_user) {
                 if (env->immuregs[3]) /* Fault status register */
                     env->immuregs[3] = 2; /* overflow (not read before
                                              another fault) */
@@ -644,7 +644,6 @@ void cpu_reset(CPUSPARCState *env)
     env->wim = 1;
     env->regwptr = env->regbase + (env->cwp * 16);
 #if defined(CONFIG_USER_ONLY)
-    env->user_mode_only = 1;
 #ifdef TARGET_SPARC64
     env->cleanwin = env->nwindows - 2;
     env->cansave = env->nwindows - 2;

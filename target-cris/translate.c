@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 /*
@@ -44,9 +44,12 @@
 
 #define DISAS_CRIS 0
 #if DISAS_CRIS
-#define DIS(x) if (loglevel & CPU_LOG_TB_IN_ASM) x
+#  define LOG_DIS(...) do {               \
+     if (loglevel & CPU_LOG_TB_IN_ASM)    \
+       fprintf(logfile, ## __VA_ARGS__);  \
+   } while (0)
 #else
-#define DIS(x)
+#  define LOG_DIS(...) do { } while (0)
 #endif
 
 #define D(x)
@@ -320,132 +323,6 @@ static void t_gen_mulu(TCGv d, TCGv d2, TCGv a, TCGv b)
 	tcg_temp_free_i64(t1);
 }
 
-/* 32bit branch-free binary search for counting leading zeros.  */
-static void t_gen_lz_i32(TCGv d, TCGv x)
-{
-	TCGv_i32 y, m, n;
-
-	y = tcg_temp_new_i32();
-	m = tcg_temp_new_i32();
-	n = tcg_temp_new_i32();
-
-	/* y = -(x >> 16)  */
-	tcg_gen_shri_i32(y, x, 16);
-	tcg_gen_neg_i32(y, y);
-
-	/* m = (y >> 16) & 16  */
-	tcg_gen_sari_i32(m, y, 16);
-	tcg_gen_andi_i32(m, m, 16);
-
-	/* n = 16 - m  */
-	tcg_gen_sub_i32(n, tcg_const_i32(16), m);
-	/* x = x >> m  */
-	tcg_gen_shr_i32(x, x, m);
-
-	/* y = x - 0x100  */
-	tcg_gen_subi_i32(y, x, 0x100);
-	/* m = (y >> 16) & 8  */
-	tcg_gen_sari_i32(m, y, 16);
-	tcg_gen_andi_i32(m, m, 8);
-	/* n = n + m  */
-	tcg_gen_add_i32(n, n, m);
-	/* x = x << m  */
-	tcg_gen_shl_i32(x, x, m);
-
-	/* y = x - 0x1000  */
-	tcg_gen_subi_i32(y, x, 0x1000);
-	/* m = (y >> 16) & 4  */
-	tcg_gen_sari_i32(m, y, 16);
-	tcg_gen_andi_i32(m, m, 4);
-	/* n = n + m  */
-	tcg_gen_add_i32(n, n, m);
-	/* x = x << m  */
-	tcg_gen_shl_i32(x, x, m);
-
-	/* y = x - 0x4000  */
-	tcg_gen_subi_i32(y, x, 0x4000);
-	/* m = (y >> 16) & 2  */
-	tcg_gen_sari_i32(m, y, 16);
-	tcg_gen_andi_i32(m, m, 2);
-	/* n = n + m  */
-	tcg_gen_add_i32(n, n, m);
-	/* x = x << m  */
-	tcg_gen_shl_i32(x, x, m);
-
-	/* y = x >> 14  */
-	tcg_gen_shri_i32(y, x, 14);
-	/* m = y & ~(y >> 1)  */
-	tcg_gen_sari_i32(m, y, 1);
-	tcg_gen_not_i32(m, m);
-	tcg_gen_and_i32(m, m, y);
-
-	/* d = n + 2 - m  */
-	tcg_gen_addi_i32(d, n, 2);
-	tcg_gen_sub_i32(d, d, m);
-
-	tcg_temp_free(y);
-	tcg_temp_free(m);
-	tcg_temp_free(n);
-}
-
-static void t_gen_btst(TCGv d, TCGv a, TCGv b)
-{
-        TCGv sbit;
-        TCGv bset;
-        TCGv t0;
-	int l1;
-
-        /* des ref:
-           The N flag is set according to the selected bit in the dest reg.
-           The Z flag is set if the selected bit and all bits to the right are
-           zero.
-           The X flag is cleared.
-           Other flags are left untouched.
-           The destination reg is not affected.
-
-        unsigned int fz, sbit, bset, mask, masked_t0;
-
-        sbit = T1 & 31;
-        bset = !!(T0 & (1 << sbit));
-        mask = sbit == 31 ? -1 : (1 << (sbit + 1)) - 1;
-        masked_t0 = T0 & mask;
-        fz = !(masked_t0 | bset);
-
-        // Clear the X, N and Z flags.
-        T0 = env->pregs[PR_CCS] & ~(X_FLAG | N_FLAG | Z_FLAG);
-        // Set the N and Z flags accordingly.
-        T0 |= (bset << 3) | (fz << 2);
-        */
-
-	l1 = gen_new_label();
-        sbit = tcg_temp_new();
-        bset = tcg_temp_new();
-        t0 = tcg_temp_new();
-
-        /* Compute bset and sbit.  */
-        tcg_gen_andi_tl(sbit, b, 31);
-        tcg_gen_shl_tl(t0, tcg_const_tl(1), sbit);
-        tcg_gen_and_tl(bset, a, t0);
-        tcg_gen_shr_tl(bset, bset, sbit);
-	/* Displace to N_FLAG.  */
-        tcg_gen_shli_tl(bset, bset, 3);
-
-        tcg_gen_shl_tl(sbit, tcg_const_tl(2), sbit);
-        tcg_gen_subi_tl(sbit, sbit, 1);
-        tcg_gen_and_tl(sbit, a, sbit);
-
-        tcg_gen_andi_tl(d, cpu_PR[PR_CCS], ~(X_FLAG | N_FLAG | Z_FLAG));
-	/* or in the N_FLAG.  */
-        tcg_gen_or_tl(d, d, bset);
-	tcg_gen_brcondi_tl(TCG_COND_NE, sbit, 0, l1);
-	/* or in the Z_FLAG.  */
-	tcg_gen_ori_tl(d, d, Z_FLAG);
-	gen_set_label(l1);
-
-        tcg_temp_free(sbit);
-        tcg_temp_free(bset);
-}
-
 static void t_gen_cris_dstep(TCGv d, TCGv a, TCGv b)
 {
 	int l1;
@@ -691,68 +568,85 @@ static void cris_flush_cc_state(DisasContext *dc)
 
 static void cris_evaluate_flags(DisasContext *dc)
 {
-	if (!dc->flags_uptodate) {
-		cris_flush_cc_state(dc);
+	if (dc->flags_uptodate)
+		return;
 
-		switch (dc->cc_op)
+	cris_flush_cc_state(dc);
+
+	switch (dc->cc_op)
+	{
+	case CC_OP_MCP:
+		gen_helper_evaluate_flags_mcp(cpu_PR[PR_CCS],
+					cpu_PR[PR_CCS], cc_src,
+					cc_dest, cc_result);
+		break;
+	case CC_OP_MULS:
+		gen_helper_evaluate_flags_muls(cpu_PR[PR_CCS],
+					cpu_PR[PR_CCS], cc_result,
+					cpu_PR[PR_MOF]);
+		break;
+	case CC_OP_MULU:
+		gen_helper_evaluate_flags_mulu(cpu_PR[PR_CCS],
+					cpu_PR[PR_CCS], cc_result,
+					cpu_PR[PR_MOF]);
+		break;
+	case CC_OP_MOVE:
+	case CC_OP_AND:
+	case CC_OP_OR:
+	case CC_OP_XOR:
+	case CC_OP_ASR:
+	case CC_OP_LSR:
+	case CC_OP_LSL:
+		switch (dc->cc_size)
 		{
-			case CC_OP_MCP:
-				gen_helper_evaluate_flags_mcp();
-				break;
-			case CC_OP_MULS:
-				gen_helper_evaluate_flags_muls();
-				break;
-			case CC_OP_MULU:
-				gen_helper_evaluate_flags_mulu();
-				break;
-			case CC_OP_MOVE:
-			case CC_OP_AND:
-			case CC_OP_OR:
-			case CC_OP_XOR:
-			case CC_OP_ASR:
-			case CC_OP_LSR:
-			case CC_OP_LSL:
-				switch (dc->cc_size)
-				{
-					case 4:
-						gen_helper_evaluate_flags_move_4();
-						break;
-					case 2:
-						gen_helper_evaluate_flags_move_2();
-						break;
-					default:
-						gen_helper_evaluate_flags();
-						break;
-				}
-				break;
-			case CC_OP_FLAGS:
-				/* live.  */
-				break;
-			default:
-			{
-				switch (dc->cc_size)
-				{
-					case 4:
-						gen_helper_evaluate_flags_alu_4();
-						break;
-					default:
-						gen_helper_evaluate_flags();
-						break;
-				}
-			}
+		case 4:
+			gen_helper_evaluate_flags_move_4(cpu_PR[PR_CCS],
+						cpu_PR[PR_CCS], cc_result);
+			break;
+		case 2:
+			gen_helper_evaluate_flags_move_2(cpu_PR[PR_CCS],
+						cpu_PR[PR_CCS], cc_result);
+			break;
+		default:
+			gen_helper_evaluate_flags();
 			break;
 		}
-		if (dc->flagx_known) {
-			if (dc->flags_x)
-				tcg_gen_ori_tl(cpu_PR[PR_CCS], 
-					       cpu_PR[PR_CCS], X_FLAG);
-			else
-				tcg_gen_andi_tl(cpu_PR[PR_CCS], 
-						cpu_PR[PR_CCS], ~X_FLAG);
-	        }
+		break;
+	case CC_OP_FLAGS:
+		/* live.  */
+		break;
+	case CC_OP_SUB:
+	case CC_OP_CMP:
+		if (dc->cc_size == 4)
+			gen_helper_evaluate_flags_sub_4(cpu_PR[PR_CCS],
+				cpu_PR[PR_CCS], cc_src, cc_dest, cc_result);
+		else
+			gen_helper_evaluate_flags();
 
-		dc->flags_uptodate = 1;
+		break;
+	default:
+		switch (dc->cc_size)
+		{
+			case 4:
+			gen_helper_evaluate_flags_alu_4(cpu_PR[PR_CCS],
+				cpu_PR[PR_CCS], cc_src, cc_dest, cc_result);
+				break;
+			default:
+				gen_helper_evaluate_flags();
+				break;
+		}
+		break;
 	}
+
+	if (dc->flagx_known) {
+		if (dc->flags_x)
+			tcg_gen_ori_tl(cpu_PR[PR_CCS], 
+				       cpu_PR[PR_CCS], X_FLAG);
+		else
+			tcg_gen_andi_tl(cpu_PR[PR_CCS], 
+					cpu_PR[PR_CCS], ~X_FLAG);
+        }
+	dc->flags_uptodate = 1;
 }
 
 static void cris_cc_mask(DisasContext *dc, unsigned int mask)
@@ -821,13 +715,8 @@ static void cris_pre_alu_update_cc(DisasContext *dc, int op,
 /* Update cc after executing ALU op. needs the result.  */
 static inline void cris_update_result(DisasContext *dc, TCGv res)
 {
-	if (dc->update_cc) {
-		if (dc->cc_size == 4 && 
-		    (dc->cc_op == CC_OP_SUB
-		     || dc->cc_op == CC_OP_ADD))
-			return;
+	if (dc->update_cc)
 		tcg_gen_mov_tl(cc_result, res);
-	}
 }
 
 /* Returns one if the write back stage should execute.  */
@@ -882,10 +771,7 @@ static void cris_alu_op_exec(DisasContext *dc, int op,
 			t_gen_subx_carry(dc, dst);
 			break;
 		case CC_OP_LZ:
-			t_gen_lz_i32(dst, b);
-			break;
-		case CC_OP_BTST:
-			t_gen_btst(dst, a, b);
+			gen_helper_lz(dst, b);
 			break;
 		case CC_OP_MULS:
 			t_gen_muls(dst, cpu_PR[PR_MOF], a, b);
@@ -931,9 +817,6 @@ static void cris_alu(DisasContext *dc, int op,
 
 	writeback = 1;
 
-	if (op == CC_OP_BOUND || op == CC_OP_BTST)
-		tmp = tcg_temp_local_new();
-
 	if (op == CC_OP_CMP) {
 		tmp = tcg_temp_new();
 		writeback = 0;
@@ -974,6 +857,7 @@ static int arith_cc(DisasContext *dc)
 			case CC_OP_CMP: return 1;
 			case CC_OP_NEG: return 1;
 			case CC_OP_OR: return 1;
+			case CC_OP_AND: return 1;
 			case CC_OP_XOR: return 1;
 			case CC_OP_MULU: return 1;
 			case CC_OP_MULS: return 1;
@@ -999,7 +883,7 @@ static void gen_tst_cc (DisasContext *dc, TCGv cc, int cond)
 	 * code is true.
 	 */
 	arith_opt = arith_cc(dc) && !dc->flags_uptodate;
-	move_opt = (dc->cc_op == CC_OP_MOVE) && dc->flags_uptodate;
+	move_opt = (dc->cc_op == CC_OP_MOVE);
 	switch (cond) {
 		case CC_EQ:
 			if (arith_opt || move_opt) {
@@ -1463,7 +1347,7 @@ static unsigned int dec_bccq(DisasContext *dc)
 	tmp = offset;
 	offset = sign_extend(offset, 8);
 
-	DIS(fprintf (logfile, "b%s %x\n", cc_name(cond), dc->pc + offset));
+	LOG_DIS("b%s %x\n", cc_name(cond), dc->pc + offset);
 
 	/* op2 holds the condition-code.  */
 	cris_cc_mask(dc, 0);
@@ -1477,7 +1361,7 @@ static unsigned int dec_addoq(DisasContext *dc)
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 7);
 	imm = sign_extend(dc->op1, 7);
 
-	DIS(fprintf (logfile, "addoq %d, $r%u\n", imm, dc->op2));
+	LOG_DIS("addoq %d, $r%u\n", imm, dc->op2);
 	cris_cc_mask(dc, 0);
 	/* Fetch register operand,  */
 	tcg_gen_addi_tl(cpu_R[R_ACR], cpu_R[dc->op2], imm);
@@ -1486,7 +1370,7 @@ static unsigned int dec_addoq(DisasContext *dc)
 }
 static unsigned int dec_addq(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "addq %u, $r%u\n", dc->op1, dc->op2));
+	LOG_DIS("addq %u, $r%u\n", dc->op1, dc->op2);
 
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 
@@ -1502,7 +1386,7 @@ static unsigned int dec_moveq(DisasContext *dc)
 
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 	imm = sign_extend(dc->op1, 5);
-	DIS(fprintf (logfile, "moveq %d, $r%u\n", imm, dc->op2));
+	LOG_DIS("moveq %d, $r%u\n", imm, dc->op2);
 
 	tcg_gen_mov_tl(cpu_R[dc->op2], tcg_const_tl(imm));
 	return 2;
@@ -1511,7 +1395,7 @@ static unsigned int dec_subq(DisasContext *dc)
 {
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 
-	DIS(fprintf (logfile, "subq %u, $r%u\n", dc->op1, dc->op2));
+	LOG_DIS("subq %u, $r%u\n", dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu(dc, CC_OP_SUB,
@@ -1524,7 +1408,7 @@ static unsigned int dec_cmpq(DisasContext *dc)
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 	imm = sign_extend(dc->op1, 5);
 
-	DIS(fprintf (logfile, "cmpq %d, $r%d\n", imm, dc->op2));
+	LOG_DIS("cmpq %d, $r%d\n", imm, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZVC);
 
 	cris_alu(dc, CC_OP_CMP,
@@ -1537,7 +1421,7 @@ static unsigned int dec_andq(DisasContext *dc)
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 	imm = sign_extend(dc->op1, 5);
 
-	DIS(fprintf (logfile, "andq %d, $r%d\n", imm, dc->op2));
+	LOG_DIS("andq %d, $r%d\n", imm, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 
 	cris_alu(dc, CC_OP_AND,
@@ -1549,7 +1433,7 @@ static unsigned int dec_orq(DisasContext *dc)
 	uint32_t imm;
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 5);
 	imm = sign_extend(dc->op1, 5);
-	DIS(fprintf (logfile, "orq %d, $r%d\n", imm, dc->op2));
+	LOG_DIS("orq %d, $r%d\n", imm, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 
 	cris_alu(dc, CC_OP_OR,
@@ -1558,24 +1442,23 @@ static unsigned int dec_orq(DisasContext *dc)
 }
 static unsigned int dec_btstq(DisasContext *dc)
 {
-	TCGv l0;
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 4);
-	DIS(fprintf (logfile, "btstq %u, $r%d\n", dc->op1, dc->op2));
+	LOG_DIS("btstq %u, $r%d\n", dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
-	l0 = tcg_temp_local_new();
-	cris_alu(dc, CC_OP_BTST,
-		 l0, cpu_R[dc->op2], tcg_const_tl(dc->op1), 4);
+	cris_evaluate_flags(dc);
+	gen_helper_btst(cpu_PR[PR_CCS], cpu_R[dc->op2],
+			tcg_const_tl(dc->op1), cpu_PR[PR_CCS]);
+	cris_alu(dc, CC_OP_MOVE,
+		 cpu_R[dc->op2], cpu_R[dc->op2], cpu_R[dc->op2], 4);
 	cris_update_cc_op(dc, CC_OP_FLAGS, 4);
-	t_gen_mov_preg_TN(dc, PR_CCS, l0);
 	dc->flags_uptodate = 1;
-	tcg_temp_free(l0);
 	return 2;
 }
 static unsigned int dec_asrq(DisasContext *dc)
 {
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 4);
-	DIS(fprintf (logfile, "asrq %u, $r%d\n", dc->op1, dc->op2));
+	LOG_DIS("asrq %u, $r%d\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 
 	tcg_gen_sari_tl(cpu_R[dc->op2], cpu_R[dc->op2], dc->op1);
@@ -1587,7 +1470,7 @@ static unsigned int dec_asrq(DisasContext *dc)
 static unsigned int dec_lslq(DisasContext *dc)
 {
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 4);
-	DIS(fprintf (logfile, "lslq %u, $r%d\n", dc->op1, dc->op2));
+	LOG_DIS("lslq %u, $r%d\n", dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 
@@ -1601,7 +1484,7 @@ static unsigned int dec_lslq(DisasContext *dc)
 static unsigned int dec_lsrq(DisasContext *dc)
 {
 	dc->op1 = EXTRACT_FIELD(dc->ir, 0, 4);
-	DIS(fprintf (logfile, "lsrq %u, $r%d\n", dc->op1, dc->op2));
+	LOG_DIS("lsrq %u, $r%d\n", dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 
@@ -1616,8 +1499,8 @@ static unsigned int dec_move_r(DisasContext *dc)
 {
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "move.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("move.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	if (size == 4) {
@@ -1644,8 +1527,8 @@ static unsigned int dec_scc_r(DisasContext *dc)
 {
 	int cond = dc->op2;
 
-	DIS(fprintf (logfile, "s%s $r%u\n",
-		    cc_name(cond), dc->op1));
+	LOG_DIS("s%s $r%u\n",
+		    cc_name(cond), dc->op1);
 
 	if (cond != CC_A)
 	{
@@ -1688,8 +1571,8 @@ static unsigned int dec_and_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "and.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("and.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 
@@ -1703,8 +1586,8 @@ static unsigned int dec_and_r(DisasContext *dc)
 static unsigned int dec_lz_r(DisasContext *dc)
 {
 	TCGv t0;
-	DIS(fprintf (logfile, "lz $r%u, $r%u\n",
-		    dc->op1, dc->op2));
+	LOG_DIS("lz $r%u, $r%u\n",
+		    dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 	t0 = tcg_temp_new();
 	dec_prep_alu_r(dc, dc->op1, dc->op2, 4, 0, cpu_R[dc->op2], t0);
@@ -1718,8 +1601,8 @@ static unsigned int dec_lsl_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "lsl.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("lsl.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu_alloc_temps(dc, size, t);
@@ -1735,8 +1618,8 @@ static unsigned int dec_lsr_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "lsr.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("lsr.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu_alloc_temps(dc, size, t);
@@ -1752,8 +1635,8 @@ static unsigned int dec_asr_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "asr.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("asr.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu_alloc_temps(dc, size, t);
@@ -1769,8 +1652,8 @@ static unsigned int dec_muls_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "muls.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("muls.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZV);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 1, t[0], t[1]);
@@ -1785,8 +1668,8 @@ static unsigned int dec_mulu_r(DisasContext *dc)
 	TCGv t[2];
 	int size = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "mulu.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("mulu.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZV);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -1799,7 +1682,7 @@ static unsigned int dec_mulu_r(DisasContext *dc)
 
 static unsigned int dec_dstep_r(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "dstep $r%u, $r%u\n", dc->op1, dc->op2));
+	LOG_DIS("dstep $r%u, $r%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu(dc, CC_OP_DSTEP,
 		    cpu_R[dc->op2], cpu_R[dc->op2], cpu_R[dc->op1], 4);
@@ -1810,8 +1693,8 @@ static unsigned int dec_xor_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "xor.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("xor.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	BUG_ON(size != 4); /* xor is dword.  */
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu_alloc_temps(dc, size, t);
@@ -1826,8 +1709,8 @@ static unsigned int dec_bound_r(DisasContext *dc)
 {
 	TCGv l0;
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "bound.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("bound.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 	l0 = tcg_temp_local_new();
 	dec_prep_move_r(dc, dc->op1, dc->op2, size, 0, l0);
@@ -1840,8 +1723,8 @@ static unsigned int dec_cmp_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "cmp.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("cmp.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -1855,8 +1738,8 @@ static unsigned int dec_abs_r(DisasContext *dc)
 {
 	TCGv t0;
 
-	DIS(fprintf (logfile, "abs $r%u, $r%u\n",
-		    dc->op1, dc->op2));
+	LOG_DIS("abs $r%u, $r%u\n",
+		    dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 
 	t0 = tcg_temp_new();
@@ -1874,8 +1757,8 @@ static unsigned int dec_add_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "add.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("add.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -1887,9 +1770,13 @@ static unsigned int dec_add_r(DisasContext *dc)
 
 static unsigned int dec_addc_r(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "addc $r%u, $r%u\n",
-		    dc->op1, dc->op2));
+	LOG_DIS("addc $r%u, $r%u\n",
+		    dc->op1, dc->op2);
 	cris_evaluate_flags(dc);
+	/* Set for this insn.  */
+	dc->flagx_known = 1;
+	dc->flags_x = X_FLAG;
+
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu(dc, CC_OP_ADDC,
 		 cpu_R[dc->op2], cpu_R[dc->op2], cpu_R[dc->op1], 4);
@@ -1898,8 +1785,8 @@ static unsigned int dec_addc_r(DisasContext *dc)
 
 static unsigned int dec_mcp_r(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "mcp $p%u, $r%u\n",
-		     dc->op2, dc->op1));
+	LOG_DIS("mcp $p%u, $r%u\n",
+		     dc->op2, dc->op1);
 	cris_evaluate_flags(dc);
 	cris_cc_mask(dc, CC_MASK_RNZV);
 	cris_alu(dc, CC_OP_MCP,
@@ -1929,8 +1816,8 @@ static unsigned int dec_swap_r(DisasContext *dc)
 #if DISAS_CRIS
 	char modename[4];
 #endif
-	DIS(fprintf (logfile, "swap%s $r%u\n",
-		     swapmode_name(dc->op2, modename), dc->op1));
+	LOG_DIS("swap%s $r%u\n",
+		     swapmode_name(dc->op2, modename), dc->op1);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	t0 = tcg_temp_new();
@@ -1953,8 +1840,8 @@ static unsigned int dec_or_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "or.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("or.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -1966,8 +1853,8 @@ static unsigned int dec_or_r(DisasContext *dc)
 static unsigned int dec_addi_r(DisasContext *dc)
 {
 	TCGv t0;
-	DIS(fprintf (logfile, "addi.%c $r%u, $r%u\n",
-		    memsize_char(memsize_zz(dc)), dc->op2, dc->op1));
+	LOG_DIS("addi.%c $r%u, $r%u\n",
+		    memsize_char(memsize_zz(dc)), dc->op2, dc->op1);
 	cris_cc_mask(dc, 0);
 	t0 = tcg_temp_new();
 	tcg_gen_shl_tl(t0, cpu_R[dc->op2], tcg_const_tl(dc->zzsize));
@@ -1979,8 +1866,8 @@ static unsigned int dec_addi_r(DisasContext *dc)
 static unsigned int dec_addi_acr(DisasContext *dc)
 {
 	TCGv t0;
-	DIS(fprintf (logfile, "addi.%c $r%u, $r%u, $acr\n",
-		  memsize_char(memsize_zz(dc)), dc->op2, dc->op1));
+	LOG_DIS("addi.%c $r%u, $r%u, $acr\n",
+		  memsize_char(memsize_zz(dc)), dc->op2, dc->op1);
 	cris_cc_mask(dc, 0);
 	t0 = tcg_temp_new();
 	tcg_gen_shl_tl(t0, cpu_R[dc->op2], tcg_const_tl(dc->zzsize));
@@ -1993,8 +1880,8 @@ static unsigned int dec_neg_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "neg.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("neg.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -2006,17 +1893,16 @@ static unsigned int dec_neg_r(DisasContext *dc)
 
 static unsigned int dec_btst_r(DisasContext *dc)
 {
-	TCGv l0;
-	DIS(fprintf (logfile, "btst $r%u, $r%u\n",
-		    dc->op1, dc->op2));
+	LOG_DIS("btst $r%u, $r%u\n",
+		    dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZ);
-
-	l0 = tcg_temp_local_new();
-	cris_alu(dc, CC_OP_BTST, l0, cpu_R[dc->op2], cpu_R[dc->op1], 4);
+	cris_evaluate_flags(dc);
+	gen_helper_btst(cpu_PR[PR_CCS], cpu_R[dc->op2],
+			cpu_R[dc->op1], cpu_PR[PR_CCS]);
+	cris_alu(dc, CC_OP_MOVE, cpu_R[dc->op2],
+		 cpu_R[dc->op2], cpu_R[dc->op2], 4);
 	cris_update_cc_op(dc, CC_OP_FLAGS, 4);
-	t_gen_mov_preg_TN(dc, PR_CCS, l0);
 	dc->flags_uptodate = 1;
-	tcg_temp_free(l0);
 	return 2;
 }
 
@@ -2024,8 +1910,8 @@ static unsigned int dec_sub_r(DisasContext *dc)
 {
 	TCGv t[2];
 	int size = memsize_zz(dc);
-	DIS(fprintf (logfile, "sub.%c $r%u, $r%u\n",
-		    memsize_char(size), dc->op1, dc->op2));
+	LOG_DIS("sub.%c $r%u, $r%u\n",
+		    memsize_char(size), dc->op1, dc->op2);
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	cris_alu_alloc_temps(dc, size, t);
 	dec_prep_alu_r(dc, dc->op1, dc->op2, size, 0, t[0], t[1]);
@@ -2039,9 +1925,9 @@ static unsigned int dec_movu_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "movu.%c $r%u, $r%u\n",
+	LOG_DIS("movu.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	t0 = tcg_temp_new();
@@ -2056,9 +1942,9 @@ static unsigned int dec_movs_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "movs.%c $r%u, $r%u\n",
+	LOG_DIS("movs.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZ);
 	t0 = tcg_temp_new();
@@ -2075,9 +1961,9 @@ static unsigned int dec_addu_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "addu.%c $r%u, $r%u\n",
+	LOG_DIS("addu.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	t0 = tcg_temp_new();
@@ -2094,9 +1980,9 @@ static unsigned int dec_adds_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "adds.%c $r%u, $r%u\n",
+	LOG_DIS("adds.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	t0 = tcg_temp_new();
@@ -2113,9 +1999,9 @@ static unsigned int dec_subu_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "subu.%c $r%u, $r%u\n",
+	LOG_DIS("subu.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	t0 = tcg_temp_new();
@@ -2132,9 +2018,9 @@ static unsigned int dec_subs_r(DisasContext *dc)
 {
 	TCGv t0;
 	int size = memsize_z(dc);
-	DIS(fprintf (logfile, "subs.%c $r%u, $r%u\n",
+	LOG_DIS("subs.%c $r%u, $r%u\n",
 		    memsize_char(size),
-		    dc->op1, dc->op2));
+		    dc->op1, dc->op2);
 
 	cris_cc_mask(dc, CC_MASK_NZVC);
 	t0 = tcg_temp_new();
@@ -2155,15 +2041,15 @@ static unsigned int dec_setclrf(DisasContext *dc)
 	flags = (EXTRACT_FIELD(dc->ir, 12, 15) << 4)
 		| EXTRACT_FIELD(dc->ir, 0, 3);
 	if (set && flags == 0) {
-		DIS(fprintf (logfile, "nop\n"));
+		LOG_DIS("nop\n");
 		return 2;
 	} else if (!set && (flags & 0x20)) {
-		DIS(fprintf (logfile, "di\n"));
+		LOG_DIS("di\n");
 	}
 	else {
-		DIS(fprintf (logfile, "%sf %x\n",
+		LOG_DIS("%sf %x\n",
 			     set ? "set" : "clr",
-			    flags));
+			    flags);
 	}
 
 	/* User space is not allowed to touch these. Silently ignore.  */
@@ -2218,14 +2104,14 @@ static unsigned int dec_setclrf(DisasContext *dc)
 
 static unsigned int dec_move_rs(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "move $r%u, $s%u\n", dc->op1, dc->op2));
+	LOG_DIS("move $r%u, $s%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, 0);
 	gen_helper_movl_sreg_reg(tcg_const_tl(dc->op2), tcg_const_tl(dc->op1));
 	return 2;
 }
 static unsigned int dec_move_sr(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "move $s%u, $r%u\n", dc->op2, dc->op1));
+	LOG_DIS("move $s%u, $r%u\n", dc->op2, dc->op1);
 	cris_cc_mask(dc, 0);
 	gen_helper_movl_reg_sreg(tcg_const_tl(dc->op1), tcg_const_tl(dc->op2));
 	return 2;
@@ -2234,7 +2120,7 @@ static unsigned int dec_move_sr(DisasContext *dc)
 static unsigned int dec_move_rp(DisasContext *dc)
 {
 	TCGv t[2];
-	DIS(fprintf (logfile, "move $r%u, $p%u\n", dc->op1, dc->op2));
+	LOG_DIS("move $r%u, $p%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, 0);
 
 	t[0] = tcg_temp_new();
@@ -2264,7 +2150,7 @@ static unsigned int dec_move_rp(DisasContext *dc)
 static unsigned int dec_move_pr(DisasContext *dc)
 {
 	TCGv t0;
-	DIS(fprintf (logfile, "move $p%u, $r%u\n", dc->op1, dc->op2));
+	LOG_DIS("move $p%u, $r%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, 0);
 
 	if (dc->op2 == PR_CCS)
@@ -2282,10 +2168,10 @@ static unsigned int dec_move_mr(DisasContext *dc)
 {
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "move.%c [$r%u%s, $r%u\n",
+	LOG_DIS("move.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	if (memsize == 4) {
 		insn_len = dec_prep_move_m(dc, 0, 4, cpu_R[dc->op2]);
@@ -2325,10 +2211,10 @@ static unsigned int dec_movs_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "movs.%c [$r%u%s, $r%u\n",
+	LOG_DIS("movs.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	/* sign extend.  */
@@ -2346,10 +2232,10 @@ static unsigned int dec_addu_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "addu.%c [$r%u%s, $r%u\n",
+	LOG_DIS("addu.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	/* sign extend.  */
@@ -2367,10 +2253,10 @@ static unsigned int dec_adds_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "adds.%c [$r%u%s, $r%u\n",
+	LOG_DIS("adds.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	/* sign extend.  */
@@ -2387,10 +2273,10 @@ static unsigned int dec_subu_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "subu.%c [$r%u%s, $r%u\n",
+	LOG_DIS("subu.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	/* sign extend.  */
@@ -2407,10 +2293,10 @@ static unsigned int dec_subs_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "subs.%c [$r%u%s, $r%u\n",
+	LOG_DIS("subs.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	/* sign extend.  */
@@ -2428,10 +2314,10 @@ static unsigned int dec_movu_m(DisasContext *dc)
 	int memsize = memsize_z(dc);
 	int insn_len;
 
-	DIS(fprintf (logfile, "movu.%c [$r%u%s, $r%u\n",
+	LOG_DIS("movu.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2447,10 +2333,10 @@ static unsigned int dec_cmpu_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "cmpu.%c [$r%u%s, $r%u\n",
+	LOG_DIS("cmpu.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2466,10 +2352,10 @@ static unsigned int dec_cmps_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_z(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "cmps.%c [$r%u%s, $r%u\n",
+	LOG_DIS("cmps.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 1, memsize, t[0], t[1]);
@@ -2487,10 +2373,10 @@ static unsigned int dec_cmp_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "cmp.%c [$r%u%s, $r%u\n",
+	LOG_DIS("cmp.%c [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2508,10 +2394,10 @@ static unsigned int dec_test_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "test.%d [$r%u%s] op2=%x\n",
+	LOG_DIS("test.%d [$r%u%s] op2=%x\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_evaluate_flags(dc);
 
@@ -2532,10 +2418,10 @@ static unsigned int dec_and_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "and.%d [$r%u%s, $r%u\n",
+	LOG_DIS("and.%d [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2551,10 +2437,10 @@ static unsigned int dec_add_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "add.%d [$r%u%s, $r%u\n",
+	LOG_DIS("add.%d [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2571,10 +2457,10 @@ static unsigned int dec_addo_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "add.%d [$r%u%s, $r%u\n",
+	LOG_DIS("add.%d [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 1, memsize, t[0], t[1]);
@@ -2590,10 +2476,10 @@ static unsigned int dec_bound_m(DisasContext *dc)
 	TCGv l[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "bound.%d [$r%u%s, $r%u\n",
+	LOG_DIS("bound.%d [$r%u%s, $r%u\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	l[0] = tcg_temp_local_new();
 	l[1] = tcg_temp_local_new();
@@ -2610,11 +2496,16 @@ static unsigned int dec_addc_mr(DisasContext *dc)
 {
 	TCGv t[2];
 	int insn_len = 2;
-	DIS(fprintf (logfile, "addc [$r%u%s, $r%u\n",
+	LOG_DIS("addc [$r%u%s, $r%u\n",
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_evaluate_flags(dc);
+
+	/* Set for this insn.  */
+	dc->flagx_known = 1;
+	dc->flags_x = X_FLAG;
+
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, 4, t[0], t[1]);
 	cris_cc_mask(dc, CC_MASK_NZVC);
@@ -2629,10 +2520,10 @@ static unsigned int dec_sub_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "sub.%c [$r%u%s, $r%u ir=%x zz=%x\n",
+	LOG_DIS("sub.%c [$r%u%s, $r%u ir=%x zz=%x\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2, dc->ir, dc->zzsize));
+		    dc->op2, dc->ir, dc->zzsize);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2648,10 +2539,10 @@ static unsigned int dec_or_m(DisasContext *dc)
 	TCGv t[2];
 	int memsize = memsize_zz(dc);
 	int insn_len;
-	DIS(fprintf (logfile, "or.%d [$r%u%s, $r%u pc=%x\n",
+	LOG_DIS("or.%d [$r%u%s, $r%u pc=%x\n",
 		    memsize_char(memsize),
 		    dc->op1, dc->postinc ? "+]" : "]",
-		    dc->op2, dc->pc));
+		    dc->op2, dc->pc);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2669,11 +2560,11 @@ static unsigned int dec_move_mp(DisasContext *dc)
 	int memsize = memsize_zz(dc);
 	int insn_len = 2;
 
-	DIS(fprintf (logfile, "move.%c [$r%u%s, $p%u\n",
+	LOG_DIS("move.%c [$r%u%s, $p%u\n",
 		    memsize_char(memsize),
 		    dc->op1,
 		    dc->postinc ? "+]" : "]",
-		    dc->op2));
+		    dc->op2);
 
 	cris_alu_m_alloc_temps(t);
 	insn_len = dec_prep_alu_m(dc, 0, memsize, t[0], t[1]);
@@ -2702,9 +2593,9 @@ static unsigned int dec_move_pm(DisasContext *dc)
 
 	memsize = preg_sizes[dc->op2];
 
-	DIS(fprintf (logfile, "move.%c $p%u, [$r%u%s\n",
+	LOG_DIS("move.%c $p%u, [$r%u%s\n",
 		     memsize_char(memsize), 
-		     dc->op2, dc->op1, dc->postinc ? "+]" : "]"));
+		     dc->op2, dc->op1, dc->postinc ? "+]" : "]");
 
 	/* prepare store. Address in T0, value in T1.  */
 	if (dc->op2 == PR_CCS)
@@ -2729,8 +2620,8 @@ static unsigned int dec_movem_mr(DisasContext *dc)
 	int i;
 	int nr = dc->op2 + 1;
 
-	DIS(fprintf (logfile, "movem [$r%u%s, $r%u\n", dc->op1,
-		    dc->postinc ? "+]" : "]", dc->op2));
+	LOG_DIS("movem [$r%u%s, $r%u\n", dc->op1,
+		    dc->postinc ? "+]" : "]", dc->op2);
 
 	addr = tcg_temp_new();
 	/* There are probably better ways of doing this.  */
@@ -2773,8 +2664,8 @@ static unsigned int dec_movem_rm(DisasContext *dc)
 	TCGv addr;
 	int i;
 
-	DIS(fprintf (logfile, "movem $r%u, [$r%u%s\n", dc->op2, dc->op1,
-		     dc->postinc ? "+]" : "]"));
+	LOG_DIS("movem $r%u, [$r%u%s\n", dc->op2, dc->op1,
+		     dc->postinc ? "+]" : "]");
 
 	cris_flush_cc_state(dc);
 
@@ -2802,8 +2693,8 @@ static unsigned int dec_move_rm(DisasContext *dc)
 
 	memsize = memsize_zz(dc);
 
-	DIS(fprintf (logfile, "move.%d $r%u, [$r%u]\n",
-		     memsize, dc->op2, dc->op1));
+	LOG_DIS("move.%d $r%u, [$r%u]\n",
+		     memsize, dc->op2, dc->op1);
 
 	/* prepare store.  */
 	cris_flush_cc_state(dc);
@@ -2817,8 +2708,8 @@ static unsigned int dec_move_rm(DisasContext *dc)
 
 static unsigned int dec_lapcq(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "lapcq %x, $r%u\n",
-		    dc->pc + dc->op1*2, dc->op2));
+	LOG_DIS("lapcq %x, $r%u\n",
+		    dc->pc + dc->op1*2, dc->op2);
 	cris_cc_mask(dc, 0);
 	tcg_gen_movi_tl(cpu_R[dc->op2], dc->pc + dc->op1 * 2);
 	return 2;
@@ -2834,7 +2725,7 @@ static unsigned int dec_lapc_im(DisasContext *dc)
 
 	cris_cc_mask(dc, 0);
 	imm = ldl_code(dc->pc + 2);
-	DIS(fprintf (logfile, "lapc 0x%x, $r%u\n", imm + dc->pc, dc->op2));
+	LOG_DIS("lapc 0x%x, $r%u\n", imm + dc->pc, dc->op2);
 
 	pc = dc->pc;
 	pc += imm;
@@ -2845,7 +2736,7 @@ static unsigned int dec_lapc_im(DisasContext *dc)
 /* Jump to special reg.  */
 static unsigned int dec_jump_p(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "jump $p%u\n", dc->op2));
+	LOG_DIS("jump $p%u\n", dc->op2);
 
 	if (dc->op2 == PR_CCS)
 		cris_evaluate_flags(dc);
@@ -2860,7 +2751,7 @@ static unsigned int dec_jump_p(DisasContext *dc)
 /* Jump and save.  */
 static unsigned int dec_jas_r(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "jas $r%u, $p%u\n", dc->op1, dc->op2));
+	LOG_DIS("jas $r%u, $p%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	tcg_gen_mov_tl(env_btarget, cpu_R[dc->op1]);
@@ -2878,7 +2769,7 @@ static unsigned int dec_jas_im(DisasContext *dc)
 
 	imm = ldl_code(dc->pc + 2);
 
-	DIS(fprintf (logfile, "jas 0x%x\n", imm));
+	LOG_DIS("jas 0x%x\n", imm);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	t_gen_mov_preg_TN(dc, dc->op2, tcg_const_tl(dc->pc + 8));
@@ -2894,7 +2785,7 @@ static unsigned int dec_jasc_im(DisasContext *dc)
 
 	imm = ldl_code(dc->pc + 2);
 
-	DIS(fprintf (logfile, "jasc 0x%x\n", imm));
+	LOG_DIS("jasc 0x%x\n", imm);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	t_gen_mov_preg_TN(dc, dc->op2, tcg_const_tl(dc->pc + 8 + 4));
@@ -2906,7 +2797,7 @@ static unsigned int dec_jasc_im(DisasContext *dc)
 
 static unsigned int dec_jasc_r(DisasContext *dc)
 {
-	DIS(fprintf (logfile, "jasc_r $r%u, $p%u\n", dc->op1, dc->op2));
+	LOG_DIS("jasc_r $r%u, $p%u\n", dc->op1, dc->op2);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	tcg_gen_mov_tl(env_btarget, cpu_R[dc->op1]);
@@ -2922,9 +2813,9 @@ static unsigned int dec_bcc_im(DisasContext *dc)
 
 	offset = ldsw_code(dc->pc + 2);
 
-	DIS(fprintf (logfile, "b%s %d pc=%x dst=%x\n",
+	LOG_DIS("b%s %d pc=%x dst=%x\n",
 		    cc_name(cond), offset,
-		    dc->pc, dc->pc + offset));
+		    dc->pc, dc->pc + offset);
 
 	cris_cc_mask(dc, 0);
 	/* op2 holds the condition-code.  */
@@ -2939,7 +2830,7 @@ static unsigned int dec_bas_im(DisasContext *dc)
 
 	simm = ldl_code(dc->pc + 2);
 
-	DIS(fprintf (logfile, "bas 0x%x, $p%u\n", dc->pc + simm, dc->op2));
+	LOG_DIS("bas 0x%x, $p%u\n", dc->pc + simm, dc->op2);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	t_gen_mov_preg_TN(dc, dc->op2, tcg_const_tl(dc->pc + 8));
@@ -2954,7 +2845,7 @@ static unsigned int dec_basc_im(DisasContext *dc)
 	int32_t simm;
 	simm = ldl_code(dc->pc + 2);
 
-	DIS(fprintf (logfile, "basc 0x%x, $p%u\n", dc->pc + simm, dc->op2));
+	LOG_DIS("basc 0x%x, $p%u\n", dc->pc + simm, dc->op2);
 	cris_cc_mask(dc, 0);
 	/* Store the return address in Pd.  */
 	t_gen_mov_preg_TN(dc, dc->op2, tcg_const_tl(dc->pc + 12));
@@ -2968,26 +2859,30 @@ static unsigned int dec_rfe_etc(DisasContext *dc)
 {
 	cris_cc_mask(dc, 0);
 
-	if (dc->op2 == 15) /* ignore halt.  */
+	if (dc->op2 == 15) {
+		t_gen_mov_env_TN(halted, tcg_const_tl(1));
+		tcg_gen_movi_tl(env_pc, dc->pc + 2);
+		t_gen_raise_exception(EXCP_HLT);
 		return 2;
+	}
 
 	switch (dc->op2 & 7) {
 		case 2:
 			/* rfe.  */
-			DIS(fprintf(logfile, "rfe\n"));
+			LOG_DIS("rfe\n");
 			cris_evaluate_flags(dc);
 			gen_helper_rfe();
 			dc->is_jmp = DISAS_UPDATE;
 			break;
 		case 5:
 			/* rfn.  */
-			DIS(fprintf(logfile, "rfn\n"));
+			LOG_DIS("rfn\n");
 			cris_evaluate_flags(dc);
 			gen_helper_rfn();
 			dc->is_jmp = DISAS_UPDATE;
 			break;
 		case 6:
-			DIS(fprintf(logfile, "break %d\n", dc->op1));
+			LOG_DIS("break %d\n", dc->op1);
 			cris_evaluate_flags (dc);
 			/* break.  */
 			tcg_gen_movi_tl(env_pc, dc->pc + 2);
@@ -3339,7 +3234,7 @@ gen_intermediate_code_internal(CPUState *env, TranslationBlock *tb,
 		}
 
 		/* Pretty disas.  */
-		DIS(fprintf(logfile, "%8.8x:\t", dc->pc));
+		LOG_DIS("%8.8x:\t", dc->pc);
 
                 if (num_insns + 1 == max_insns && (tb->cflags & CF_LAST_IO))
                     gen_io_start();

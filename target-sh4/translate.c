@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <stdarg.h>
 #include <stdlib.h>
@@ -785,8 +785,8 @@ static void _decode_opc(DisasContext * ctx)
 	{
 	    int label1 = gen_new_label();
 	    int label2 = gen_new_label();
-	    TCGv cmp1 = tcg_temp_local_new(TCG_TYPE_I32);
-	    TCGv cmp2 = tcg_temp_local_new(TCG_TYPE_I32);
+	    TCGv cmp1 = tcg_temp_local_new();
+	    TCGv cmp2 = tcg_temp_local_new();
 	    tcg_gen_xor_i32(cmp1, REG(B7_4), REG(B11_8));
 	    tcg_gen_andi_i32(cmp2, cmp1, 0xff000000);
 	    tcg_gen_brcondi_i32(TCG_COND_EQ, cmp2, 0, label1);
@@ -935,7 +935,7 @@ static void _decode_opc(DisasContext * ctx)
 	    int label2 = gen_new_label();
 	    int label3 = gen_new_label();
 	    int label4 = gen_new_label();
-	    TCGv shift = tcg_temp_local_new(TCG_TYPE_I32);
+	    TCGv shift = tcg_temp_local_new();
 	    tcg_gen_brcondi_i32(TCG_COND_LT, REG(B7_4), 0, label1);
 	    /* Rm positive, shift to the left */
 	    tcg_gen_andi_i32(shift, REG(B7_4), 0x1f);
@@ -966,7 +966,7 @@ static void _decode_opc(DisasContext * ctx)
 	    int label1 = gen_new_label();
 	    int label2 = gen_new_label();
 	    int label3 = gen_new_label();
-	    TCGv shift = tcg_temp_local_new(TCG_TYPE_I32);
+	    TCGv shift = tcg_temp_local_new();
 	    tcg_gen_brcondi_i32(TCG_COND_LT, REG(B7_4), 0, label1);
 	    /* Rm positive, shift to the left */
 	    tcg_gen_andi_i32(shift, REG(B7_4), 0x1f);
@@ -1176,6 +1176,17 @@ static void _decode_opc(DisasContext * ctx)
 	    }
 	}
 	return;
+    case 0xf00e: /* fmac FR0,RM,Rn */
+        {
+            CHECK_FPU_ENABLED
+            if (ctx->fpscr & FPSCR_PR) {
+                break; /* illegal instruction */
+            } else {
+                gen_helper_fmac_FT(cpu_fregs[FREG(B11_8)],
+                                   cpu_fregs[FREG(0)], cpu_fregs[FREG(B7_4)], cpu_fregs[FREG(B11_8)]);
+                return;
+            }
+        }
     }
 
     switch (ctx->opcode & 0xff00) {
@@ -1645,9 +1656,9 @@ static void _decode_opc(DisasContext * ctx)
     case 0x401b:		/* tas.b @Rn */
 	{
 	    TCGv addr, val;
-	    addr = tcg_temp_local_new(TCG_TYPE_I32);
+	    addr = tcg_temp_local_new();
 	    tcg_gen_mov_i32(addr, REG(B11_8));
-	    val = tcg_temp_local_new(TCG_TYPE_I32);
+	    val = tcg_temp_local_new();
 	    tcg_gen_qemu_ld8u(val, addr, ctx->memidx);
 	    gen_cmp_imm(TCG_COND_EQ, val, 0);
 	    tcg_gen_ori_i32(val, val, 0x80);

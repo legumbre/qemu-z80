@@ -15,7 +15,8 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *  Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+ *  MA 02110-1301, USA.
  */
 #include <stdlib.h>
 #include <stdio.h>
@@ -36,6 +37,7 @@
 #include <signal.h>
 
 #include "qemu.h"
+#include "qemu-common.h"
 
 #define DEBUG_SIGNAL
 
@@ -131,7 +133,7 @@ static inline void free_sigqueue(struct sigqueue *q)
 }
 
 /* abort execution with signal */
-void __attribute((noreturn)) force_sig(int sig)
+void noreturn force_sig(int sig)
 {
     int host_sig;
     host_sig = target_to_host_signal(sig);

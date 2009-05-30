@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <assert.h>
 #include "exec.h"
@@ -529,6 +529,17 @@ uint64_t helper_float_DT(uint32_t t0)
     CPU_DoubleU d;
     d.d = int32_to_float64(t0, &env->fp_status);
     return d.ll;
+}
+
+uint32_t helper_fmac_FT(uint32_t t0, uint32_t t1, uint32_t t2)
+{
+    CPU_FloatU f0, f1, f2;
+    f0.l = t0;
+    f1.l = t1;
+    f2.l = t2;
+    f0.f = float32_mul(f0.f, f1.f, &env->fp_status);
+    f0.f = float32_add(f0.f, f2.f, &env->fp_status);
+    return f0.l;
 }
 
 uint32_t helper_fmul_FT(uint32_t t0, uint32_t t1)
