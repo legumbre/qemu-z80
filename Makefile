@@ -328,6 +328,7 @@ tarbin:
 	$(bindir)/qemu-system-sh4 \
 	$(bindir)/qemu-system-sh4eb \
 	$(bindir)/qemu-system-cris \
+	$(bindir)/qemu-system-z80 \
 	$(bindir)/qemu-i386 \
 	$(bindir)/qemu-x86_64 \
         $(bindir)/qemu-arm \
