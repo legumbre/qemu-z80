@@ -32,7 +32,6 @@ register struct CPUZ80State *env asm(AREG0);
 /* no registers can be used */
 #define T0 (env->t0)
 #define T1 (env->t1)
-#define T2 (env->t2)
 
 #else
 
@@ -40,11 +39,10 @@ register struct CPUZ80State *env asm(AREG0);
    be generated for 64 bit CPUs */
 register target_ulong T0 asm(AREG1);
 register target_ulong T1 asm(AREG2);
-register target_ulong T2 asm(AREG3);
 
 #endif /* ! (TARGET_LONG_BITS > HOST_LONG_BITS) */
 
-#define A0 T2
+#define A0 (env->a0)
 
 #define A   (env->regs[R_A])
 #define F   (env->regs[R_F])
@@ -67,8 +65,6 @@ register target_ulong T2 asm(AREG3);
 #include "cpu.h"
 #include "exec-all.h"
 
-void __hidden cpu_lock(void);
-void __hidden cpu_unlock(void);
 void do_interrupt(CPUZ80State *env);
 void raise_interrupt(int intno, int is_int, int error_code,
                      int next_eip_addend);

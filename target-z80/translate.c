@@ -48,8 +48,7 @@
 //#define zprintf printf
 
 /* global register indexes */
-static TCGv cpu_env, cpu_T[3];
-#define cpu_A0 cpu_T[2]
+static TCGv cpu_env, cpu_T[3], cpu_A0;
 
 #include "gen-icount.h"
 
@@ -1671,12 +1670,11 @@ void z80_translate_init(void)
 #if TARGET_LONG_BITS > HOST_LONG_BITS
     cpu_T[0] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t0), "T0");
     cpu_T[1] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t1), "T1");
-    cpu_T[2] = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, t2), "T2");
 #else
     cpu_T[0] = tcg_global_reg_new_i32(TCG_AREG1, "T0");
     cpu_T[1] = tcg_global_reg_new_i32(TCG_AREG2, "T1");
-    cpu_T[2] = tcg_global_reg_new_i32(TCG_AREG3, "T2");
 #endif
+    cpu_A0 = tcg_global_mem_new_i32(TCG_AREG0, offsetof(CPUState, a0), "A0");
 
     /* register helpers */
 #define GEN_HELPER 2

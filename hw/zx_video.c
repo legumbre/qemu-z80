@@ -136,6 +136,7 @@ enum {
     zx_pixfmt_15rgb,
     zx_pixfmt_16rgb,
     zx_pixfmt_32rgb,
+    zx_pixfmt_32bgr,
     NB_DEPTHS
 };
 
@@ -144,6 +145,7 @@ static zx_draw_line_func *zx_draw_line_table[NB_DEPTHS] = {
     zx_draw_glyph_line_16,
     zx_draw_glyph_line_16,
     zx_draw_glyph_line_32,
+    zx_draw_glyph_line_32,
 };
 
 static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
@@ -151,6 +153,7 @@ static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
     rgb_to_pixel15_dup,
     rgb_to_pixel16_dup,
     rgb_to_pixel32_dup,
+    rgb_to_pixel32bgr_dup,
 };
 
 static inline int get_pixfmt_index(DisplayState *s)
@@ -164,7 +167,11 @@ static inline int get_pixfmt_index(DisplayState *s)
     case 16:
         return zx_pixfmt_16rgb;
     case 32:
-        return zx_pixfmt_32rgb;
+        if (is_surface_bgr(s->surface)) {
+            return zx_pixfmt_32bgr;
+        } else {
+            return zx_pixfmt_32rgb;
+        }
     }
 }
 
