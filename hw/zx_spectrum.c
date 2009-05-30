@@ -407,5 +407,4 @@ QEMUMachine zxspec_machine = {
     .name = "zxspec",
     .desc = "ZX Spectrum",
     .init = zx_spectrum_init,
-    .ram_require = 0x10000,
 };
