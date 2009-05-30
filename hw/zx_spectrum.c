@@ -278,7 +278,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
 {
     char buf[1024];
     int ret;
-    ram_addr_t ram_addr, vga_ram_addr, rom_offset;
+    ram_addr_t ram_offset, rom_offset;
     int rom_size;
     CPUState *env;
 
@@ -292,7 +292,8 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
     qemu_register_reset(main_cpu_reset, env);
 
     /* allocate RAM */
-    cpu_register_physical_memory(0x4000, 0x10000 - 0x4000, IO_MEM_RAM);
+    ram_offset = qemu_ram_alloc(0xc000);
+    cpu_register_physical_memory(0x4000, 0xc000, ram_offset | IO_MEM_RAM);
 
     /* ROM load */
     snprintf(buf, sizeof(buf), "%s/%s", bios_dir, ROM_FILENAME);
@@ -301,8 +302,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
         (rom_size % 16384) != 0) {
         goto rom_error;
     }
-//    rom_offset = qemu_ram_alloc(rom_size);
-    rom_offset = 0x10000;
+    rom_offset = qemu_ram_alloc(rom_size);
     ret = load_image(buf, phys_ram_base + rom_offset);
 
     if (ret != rom_size) {
@@ -323,7 +323,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
 
-    zx_video_init(phys_ram_base + ram_size, ram_size);
+    zx_video_init(phys_ram_base + ram_offset);
 
     zx_keyboard_init();
     zx_timer_init();

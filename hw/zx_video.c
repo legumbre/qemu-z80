@@ -39,7 +39,6 @@ typedef unsigned int rgb_to_pixel_dup_func(unsigned int r,
 typedef struct {
     DisplayState *ds;
     uint8_t *vram_ptr;
-    unsigned long vram_offset;
 
     int bwidth;
     int bheight;
@@ -343,7 +342,7 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
     }
 };
 
-void zx_video_init(uint8_t *zx_screen_base, unsigned long ula_ram_offset)
+void zx_video_init(uint8_t *zx_vram_base)
 {
     int zx_io_memory;
 
@@ -355,8 +354,7 @@ void zx_video_init(uint8_t *zx_screen_base, unsigned long ula_ram_offset)
     s->invalidate = 1;
     s->prevborder = -1;
     s->flashcount = 0;
-//    s->vram_ptr = zx_screen_base;
-//    s->vram_offset = ula_ram_offset;
+    s->vram_ptr = zx_vram_base;
 
     s->ds = graphic_console_init(zx_update_display, zx_invalidate_display,
                                  NULL, NULL, s);
@@ -369,9 +367,6 @@ void zx_video_init(uint8_t *zx_screen_base, unsigned long ula_ram_offset)
     s->theight = s->sheight + s->bheight * 2;
     s->border = 0;
     s->flash = 0;
-
-    s->vram_ptr = phys_ram_base;//+ zx_io_memory;
-    s->vram_offset = 0;//zx_io_memory;
 
     /* ZX Spectrum ULA */
     register_ioport_write(0, 0x10000, 1, io_spectrum_write, s);
