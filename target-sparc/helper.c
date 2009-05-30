@@ -688,6 +688,7 @@ static int cpu_sparc_register(CPUSPARCState *env, const char *cpu_model)
 #if !defined(TARGET_SPARC64)
     env->mmuregs[0] |= def->mmu_version;
     cpu_sparc_set_id(env, 0);
+    env->mxccregs[7] |= def->mxcc_version;
 #else
     env->mmu_version = def->mmu_version;
     env->maxtl = def->maxtl;
@@ -972,19 +973,6 @@ static const sparc_def_t sparc_defs[] = {
         CPU_FEATURE_FSMULD,
     },
     {
-        .name = "TI SuperSparc II",
-        .iu_version = 0x40000000,
-        .fpu_version = 0 << 17,
-        .mmu_version = 0x04000000,
-        .mmu_bm = 0x00002000,
-        .mmu_ctpr_mask = 0xffffffc0,
-        .mmu_cxr_mask = 0x0000ffff,
-        .mmu_sfsr_mask = 0xffffffff,
-        .mmu_trcr_mask = 0xffffffff,
-        .nwindows = 8,
-        .features = CPU_DEFAULT_FEATURES,
-    },
-    {
         .name = "TI MicroSparc I",
         .iu_version = 0x41000000,
         .fpu_version = 4 << 17,
@@ -1027,9 +1015,9 @@ static const sparc_def_t sparc_defs[] = {
     },
     {
         .name = "TI SuperSparc 40", // STP1020NPGA
-        .iu_version = 0x41000000,
+        .iu_version = 0x41000000, // SuperSPARC 2.x
         .fpu_version = 0 << 17,
-        .mmu_version = 0x00000000,
+        .mmu_version = 0x00000800, // SuperSPARC 2.x, no MXCC
         .mmu_bm = 0x00002000,
         .mmu_ctpr_mask = 0xffffffc0,
         .mmu_cxr_mask = 0x0000ffff,
@@ -1040,9 +1028,9 @@ static const sparc_def_t sparc_defs[] = {
     },
     {
         .name = "TI SuperSparc 50", // STP1020PGA
-        .iu_version = 0x40000000,
+        .iu_version = 0x40000000, // SuperSPARC 3.x
         .fpu_version = 0 << 17,
-        .mmu_version = 0x04000000,
+        .mmu_version = 0x01000800, // SuperSPARC 3.x, no MXCC
         .mmu_bm = 0x00002000,
         .mmu_ctpr_mask = 0xffffffc0,
         .mmu_cxr_mask = 0x0000ffff,
@@ -1053,22 +1041,23 @@ static const sparc_def_t sparc_defs[] = {
     },
     {
         .name = "TI SuperSparc 51",
-        .iu_version = 0x43000000,
+        .iu_version = 0x40000000, // SuperSPARC 3.x
         .fpu_version = 0 << 17,
-        .mmu_version = 0x04000000,
+        .mmu_version = 0x01000000, // SuperSPARC 3.x, MXCC
         .mmu_bm = 0x00002000,
         .mmu_ctpr_mask = 0xffffffc0,
         .mmu_cxr_mask = 0x0000ffff,
         .mmu_sfsr_mask = 0xffffffff,
         .mmu_trcr_mask = 0xffffffff,
+        .mxcc_version = 0x00000104,
         .nwindows = 8,
         .features = CPU_DEFAULT_FEATURES,
     },
     {
         .name = "TI SuperSparc 60", // STP1020APGA
-        .iu_version = 0x40000000,
+        .iu_version = 0x40000000, // SuperSPARC 3.x
         .fpu_version = 0 << 17,
-        .mmu_version = 0x03000000,
+        .mmu_version = 0x01000800, // SuperSPARC 3.x, no MXCC
         .mmu_bm = 0x00002000,
         .mmu_ctpr_mask = 0xffffffc0,
         .mmu_cxr_mask = 0x0000ffff,
@@ -1079,14 +1068,29 @@ static const sparc_def_t sparc_defs[] = {
     },
     {
         .name = "TI SuperSparc 61",
-        .iu_version = 0x44000000,
+        .iu_version = 0x44000000, // SuperSPARC 3.x
         .fpu_version = 0 << 17,
-        .mmu_version = 0x04000000,
+        .mmu_version = 0x01000000, // SuperSPARC 3.x, MXCC
         .mmu_bm = 0x00002000,
         .mmu_ctpr_mask = 0xffffffc0,
         .mmu_cxr_mask = 0x0000ffff,
         .mmu_sfsr_mask = 0xffffffff,
         .mmu_trcr_mask = 0xffffffff,
+        .mxcc_version = 0x00000104,
+        .nwindows = 8,
+        .features = CPU_DEFAULT_FEATURES,
+    },
+    {
+        .name = "TI SuperSparc II",
+        .iu_version = 0x40000000, // SuperSPARC II 1.x
+        .fpu_version = 0 << 17,
+        .mmu_version = 0x08000000, // SuperSPARC II 1.x, MXCC
+        .mmu_bm = 0x00002000,
+        .mmu_ctpr_mask = 0xffffffc0,
+        .mmu_cxr_mask = 0x0000ffff,
+        .mmu_sfsr_mask = 0xffffffff,
+        .mmu_trcr_mask = 0xffffffff,
+        .mxcc_version = 0x00000104,
         .nwindows = 8,
         .features = CPU_DEFAULT_FEATURES,
     },
@@ -1240,7 +1244,7 @@ static int cpu_sparc_find_by_name(sparc_def_t *cpu_def, const char *cpu_model)
     long long iu_version;
     uint32_t fpu_version, mmu_version, nwindows;
 
-    for (i = 0; i < sizeof(sparc_defs) / sizeof(sparc_def_t); i++) {
+    for (i = 0; i < ARRAY_SIZE(sparc_defs); i++) {
         if (strcasecmp(name, sparc_defs[i].name) == 0) {
             def = &sparc_defs[i];
         }
@@ -1336,7 +1340,7 @@ void sparc_cpu_list(FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(sparc_defs) / sizeof(sparc_def_t); i++) {
+    for (i = 0; i < ARRAY_SIZE(sparc_defs); i++) {
         (*cpu_fprintf)(f, "Sparc %16s IU " TARGET_FMT_lx " FPU %08x MMU %08x NWINS %d ",
                        sparc_defs[i].name,
                        sparc_defs[i].iu_version,

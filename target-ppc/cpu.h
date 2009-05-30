@@ -295,13 +295,13 @@ typedef union ppc_tlb_t ppc_tlb_t;
 
 /* SPR access micro-ops generations callbacks */
 struct ppc_spr_t {
-    void (*uea_read)(void *opaque, int spr_num);
-    void (*uea_write)(void *opaque, int spr_num);
+    void (*uea_read)(void *opaque, int gpr_num, int spr_num);
+    void (*uea_write)(void *opaque, int spr_num, int gpr_num);
 #if !defined(CONFIG_USER_ONLY)
-    void (*oea_read)(void *opaque, int spr_num);
-    void (*oea_write)(void *opaque, int spr_num);
-    void (*hea_read)(void *opaque, int spr_num);
-    void (*hea_write)(void *opaque, int spr_num);
+    void (*oea_read)(void *opaque, int gpr_num, int spr_num);
+    void (*oea_write)(void *opaque, int spr_num, int gpr_num);
+    void (*hea_read)(void *opaque, int gpr_num, int spr_num);
+    void (*hea_write)(void *opaque, int spr_num, int gpr_num);
 #endif
     const char *name;
 };
@@ -311,6 +311,9 @@ union ppc_avr_t {
     uint8_t u8[16];
     uint16_t u16[8];
     uint32_t u32[4];
+    int8_t s8[16];
+    int16_t s16[8];
+    int32_t s32[4];
     uint64_t u64[2];
 };
 
@@ -529,20 +532,6 @@ struct CPUPPCState {
     /* First are the most commonly used resources
      * during translated code execution
      */
-#if TARGET_LONG_BITS > HOST_LONG_BITS
-    target_ulong t0, t1;
-#endif
-     /* XXX: this is a temporary workaround for i386. cf translate.c comment */
-#if (TARGET_LONG_BITS > HOST_LONG_BITS) || defined(HOST_I386)
-    target_ulong t2;
-#endif
-#if !defined(TARGET_PPC64)
-    /* temporary fixed-point registers
-     * used to emulate 64 bits registers on 32 bits targets
-     */
-    uint64_t t0_64, t1_64, t2_64;
-#endif
-
     /* general purpose registers */
     target_ulong gpr[32];
 #if !defined(TARGET_PPC64)
@@ -567,9 +556,6 @@ struct CPUPPCState {
     target_ulong tgpr[4]; /* Used to speed-up TLB assist handlers */
 
     /* Floating point execution context */
-    /* temporary float registers */
-    float64 ft0;
-    float64 ft1;
     float_status fp_status;
     /* floating point registers */
     float64 fpr[32];
@@ -591,7 +577,7 @@ struct CPUPPCState {
 #endif
     /* segment registers */
     target_ulong sdr1;
-    target_ulong sr[16];
+    target_ulong sr[32];
     /* BATs */
     int nb_BATs;
     target_ulong DBAT[2][8];
@@ -616,7 +602,7 @@ struct CPUPPCState {
     ppc_avr_t avr[32];
     uint32_t vscr;
     /* SPE registers */
-    target_ulong spe_acc;
+    uint64_t spe_acc;
     float_status spe_status;
     uint32_t spe_fscr;
 
@@ -695,36 +681,31 @@ void cpu_ppc_close (CPUPPCState *s);
    is returned if the signal was handled by the virtual CPU.  */
 int cpu_ppc_signal_handler (int host_signum, void *pinfo,
                             void *puc);
-
+int cpu_ppc_handle_mmu_fault (CPUPPCState *env, target_ulong address, int rw,
+                              int mmu_idx, int is_softmmu);
+int get_physical_address (CPUPPCState *env, mmu_ctx_t *ctx, target_ulong vaddr,
+                          int rw, int access_type);
 void do_interrupt (CPUPPCState *env);
 void ppc_hw_interrupt (CPUPPCState *env);
-void cpu_loop_exit (void);
 
-void dump_stack (CPUPPCState *env);
+void cpu_dump_rfi (target_ulong RA, target_ulong msr);
 
 #if !defined(CONFIG_USER_ONLY)
-target_ulong do_load_ibatu (CPUPPCState *env, int nr);
-target_ulong do_load_ibatl (CPUPPCState *env, int nr);
-void do_store_ibatu (CPUPPCState *env, int nr, target_ulong value);
-void do_store_ibatl (CPUPPCState *env, int nr, target_ulong value);
-target_ulong do_load_dbatu (CPUPPCState *env, int nr);
-target_ulong do_load_dbatl (CPUPPCState *env, int nr);
-void do_store_dbatu (CPUPPCState *env, int nr, target_ulong value);
-void do_store_dbatl (CPUPPCState *env, int nr, target_ulong value);
-void do_store_ibatu_601 (CPUPPCState *env, int nr, target_ulong value);
-void do_store_ibatl_601 (CPUPPCState *env, int nr, target_ulong value);
-target_ulong do_load_sdr1 (CPUPPCState *env);
-void do_store_sdr1 (CPUPPCState *env, target_ulong value);
+void ppc6xx_tlb_store (CPUPPCState *env, target_ulong EPN, int way, int is_code,
+                       target_ulong pte0, target_ulong pte1);
+void ppc_store_ibatu (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_ibatl (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_dbatu (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_dbatl (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_ibatu_601 (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_ibatl_601 (CPUPPCState *env, int nr, target_ulong value);
+void ppc_store_sdr1 (CPUPPCState *env, target_ulong value);
 #if defined(TARGET_PPC64)
-target_ulong ppc_load_asr (CPUPPCState *env);
 void ppc_store_asr (CPUPPCState *env, target_ulong value);
 target_ulong ppc_load_slb (CPUPPCState *env, int slb_nr);
 void ppc_store_slb (CPUPPCState *env, int slb_nr, target_ulong rs);
 #endif /* defined(TARGET_PPC64) */
-#if 0 // Unused
-target_ulong do_load_sr (CPUPPCState *env, int srnum);
-#endif
-void do_store_sr (CPUPPCState *env, int srnum, target_ulong value);
+void ppc_store_sr (CPUPPCState *env, int srnum, target_ulong value);
 #endif /* !defined(CONFIG_USER_ONLY) */
 void ppc_store_msr (CPUPPCState *env, target_ulong value);
 

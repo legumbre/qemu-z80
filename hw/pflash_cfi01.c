@@ -103,7 +103,6 @@ static uint32_t pflash_read (pflash_t *pfl, target_ulong offset, int width)
     uint8_t *p;
 
     ret = -1;
-    offset -= pfl->base;
     boff = offset & 0xFF; /* why this here ?? */
 
     if (pfl->width == 2)
@@ -195,6 +194,47 @@ static void pflash_update(pflash_t *pfl, int offset,
     }
 }
 
+static void inline pflash_data_write(pflash_t *pfl, target_ulong offset,
+                          uint32_t value, int width)
+{
+    uint8_t *p = pfl->storage;
+
+    DPRINTF("%s: block write offset " TARGET_FMT_lx
+            " value %x counter " TARGET_FMT_lx "\n",
+            __func__, offset, value, pfl->counter);
+    switch (width) {
+    case 1:
+        p[offset] = value;
+        pflash_update(pfl, offset, 1);
+        break;
+    case 2:
+#if defined(TARGET_WORDS_BIGENDIAN)
+        p[offset] = value >> 8;
+        p[offset + 1] = value;
+#else
+        p[offset] = value;
+        p[offset + 1] = value >> 8;
+#endif
+        pflash_update(pfl, offset, 2);
+        break;
+    case 4:
+#if defined(TARGET_WORDS_BIGENDIAN)
+        p[offset] = value >> 24;
+        p[offset + 1] = value >> 16;
+        p[offset + 2] = value >> 8;
+        p[offset + 3] = value;
+#else
+        p[offset] = value;
+        p[offset + 1] = value >> 8;
+        p[offset + 2] = value >> 16;
+        p[offset + 3] = value >> 24;
+#endif
+        pflash_update(pfl, offset, 4);
+        break;
+    }
+
+}
+
 static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
                           int width)
 {
@@ -203,7 +243,6 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
     uint8_t cmd;
 
     cmd = value;
-    offset -= pfl->base;
 
     DPRINTF("%s: writing offset " TARGET_FMT_lx " value %08x width %d wcycle 0x%x\n",
             __func__, offset, value, width, pfl->wcycle);
@@ -223,6 +262,10 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
         switch (cmd) {
         case 0x00: /* ??? */
             goto reset_flash;
+        case 0x10: /* Single Byte Program */
+        case 0x40: /* Single Byte Program */
+            DPRINTF(stderr, "%s: Single Byte Program\n", __func__);
+            break;
         case 0x20: /* Block erase */
             p = pfl->storage;
             offset &= ~(pfl->sector_len - 1);
@@ -264,6 +307,13 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
         return;
     case 1:
         switch (pfl->cmd) {
+        case 0x10: /* Single Byte Program */
+        case 0x40: /* Single Byte Program */
+            DPRINTF("%s: Single Byte Program\n", __func__);
+            pflash_data_write(pfl, offset, value, width);
+            pfl->status |= 0x80; /* Ready! */
+            pfl->wcycle = 0;
+        break;
         case 0x20: /* Block erase */
         case 0x28:
             if (cmd == 0xd0) { /* confirm */
@@ -308,40 +358,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
     case 2:
         switch (pfl->cmd) {
         case 0xe8: /* Block write */
-            p = pfl->storage;
-            DPRINTF("%s: block write offset " TARGET_FMT_lx
-                    " value %x counter " TARGET_FMT_lx "\n",
-                    __func__, offset, value, pfl->counter);
-            switch (width) {
-            case 1:
-                p[offset] = value;
-                pflash_update(pfl, offset, 1);
-                break;
-            case 2:
-#if defined(TARGET_WORDS_BIGENDIAN)
-                p[offset] = value >> 8;
-                p[offset + 1] = value;
-#else
-                p[offset] = value;
-                p[offset + 1] = value >> 8;
-#endif
-                pflash_update(pfl, offset, 2);
-                break;
-            case 4:
-#if defined(TARGET_WORDS_BIGENDIAN)
-                p[offset] = value >> 24;
-                p[offset + 1] = value >> 16;
-                p[offset + 2] = value >> 8;
-                p[offset + 3] = value;
-#else
-                p[offset] = value;
-                p[offset + 1] = value >> 8;
-                p[offset + 2] = value >> 16;
-                p[offset + 3] = value >> 24;
-#endif
-                pflash_update(pfl, offset, 4);
-                break;
-            }
+            pflash_data_write(pfl, offset, value, width);
 
             pfl->status |= 0x80;
 

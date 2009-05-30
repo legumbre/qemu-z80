@@ -120,14 +120,6 @@
 #define memalign(align, size) malloc(size)
 #endif
 
-#define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
-#define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/qemu-ifdown"
-#ifdef __sun__
-#define SMBD_COMMAND "/usr/sfw/sbin/smbd"
-#else
-#define SMBD_COMMAND "/usr/sbin/smbd"
-#endif
-
 static VLANState *first_vlan;
 
 /***********************************************************/
@@ -284,8 +276,8 @@ int parse_host_port(struct sockaddr_in *saddr, const char *str)
     return 0;
 }
 
-#ifndef _WIN32
-int parse_unix_path(struct sockaddr_un *uaddr, const char *str)
+#if !defined(_WIN32) && 0
+static int parse_unix_path(struct sockaddr_un *uaddr, const char *str)
 {
     const char *p;
     int len;
@@ -367,6 +359,50 @@ void qemu_send_packet(VLANClientState *vc1, const uint8_t *buf, int size)
             vc->fd_read(vc->opaque, buf, size);
         }
     }
+}
+
+static ssize_t vc_sendv_compat(VLANClientState *vc, const struct iovec *iov,
+                               int iovcnt)
+{
+    uint8_t buffer[4096];
+    size_t offset = 0;
+    int i;
+
+    for (i = 0; i < iovcnt; i++) {
+        size_t len;
+
+        len = MIN(sizeof(buffer) - offset, iov[i].iov_len);
+        memcpy(buffer + offset, iov[i].iov_base, len);
+        offset += len;
+    }
+
+    vc->fd_read(vc->opaque, buffer, offset);
+
+    return offset;
+}
+
+ssize_t qemu_sendv_packet(VLANClientState *vc1, const struct iovec *iov,
+                          int iovcnt)
+{
+    VLANState *vlan = vc1->vlan;
+    VLANClientState *vc;
+    ssize_t max_len = 0;
+
+    for (vc = vlan->first_client; vc != NULL; vc = vc->next) {
+        ssize_t len = 0;
+
+        if (vc == vc1)
+            continue;
+
+        if (vc->fd_readv)
+            len = vc->fd_readv(vc->opaque, iov, iovcnt);
+        else if (vc->fd_read)
+            len = vc_sendv_compat(vc, iov, iovcnt);
+
+        max_len = MAX(max_len, len);
+    }
+
+    return max_len;
 }
 
 #if defined(CONFIG_SLIRP)
@@ -576,6 +612,21 @@ typedef struct TAPState {
     char down_script[1024];
 } TAPState;
 
+#ifdef HAVE_IOVEC
+static ssize_t tap_receive_iov(void *opaque, const struct iovec *iov,
+                               int iovcnt)
+{
+    TAPState *s = opaque;
+    ssize_t len;
+
+    do {
+        len = writev(s->fd, iov, iovcnt);
+    } while (len == -1 && (errno == EINTR || errno == EAGAIN));
+
+    return len;
+}
+#endif
+
 static void tap_receive(void *opaque, const uint8_t *buf, int size)
 {
     TAPState *s = opaque;
@@ -620,6 +671,9 @@ static TAPState *net_tap_fd_init(VLANState *vlan, int fd)
         return NULL;
     s->fd = fd;
     s->vc = qemu_new_vlan_client(vlan, tap_receive, NULL, s);
+#ifdef HAVE_IOVEC
+    s->vc->fd_readv = tap_receive_iov;
+#endif
     qemu_set_fd_handler(s->fd, tap_send, NULL, s);
     snprintf(s->vc->info_str, sizeof(s->vc->info_str), "tap: fd=%d", fd);
     return s;

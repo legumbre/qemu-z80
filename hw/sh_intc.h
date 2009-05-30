@@ -32,7 +32,7 @@ struct intc_prio_reg {
     unsigned long value;
 };
 
-#define _INTC_ARRAY(a) a, sizeof(a)/sizeof(*a)
+#define _INTC_ARRAY(a) a, ARRAY_SIZE(a)
 
 struct intc_source {
     unsigned short vect;
@@ -74,5 +74,7 @@ int sh_intc_init(struct intc_desc *desc,
 		 int nr_mask_regs,
 		 struct intc_prio_reg *prio_regs,
 		 int nr_prio_regs);
+
+void sh_intc_set_irl(void *opaque, int n, int level);
 
 #endif /* __SH_INTC_H__ */

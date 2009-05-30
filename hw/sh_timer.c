@@ -211,7 +211,6 @@ typedef struct {
     int level[3];
     uint32_t tocr;
     uint32_t tstr;
-    target_phys_addr_t base;
     int feat;
 } tmu012_state;
 
@@ -222,7 +221,6 @@ static uint32_t tmu012_read(void *opaque, target_phys_addr_t offset)
 #ifdef DEBUG_TIMER
     printf("tmu012_read 0x%lx\n", (unsigned long) offset);
 #endif
-    offset -= s->base;
 
     if (offset >= 0x20) {
         if (!(s->feat & TMU012_FEAT_3CHAN))
@@ -256,7 +254,6 @@ static void tmu012_write(void *opaque, target_phys_addr_t offset,
 #ifdef DEBUG_TIMER
     printf("tmu012_write 0x%lx 0x%08x\n", (unsigned long) offset, value);
 #endif
-    offset -= s->base;
 
     if (offset >= 0x20) {
         if (!(s->feat & TMU012_FEAT_3CHAN))
@@ -315,7 +312,6 @@ void tmu012_init(target_phys_addr_t base, int feat, uint32_t freq,
     int timer_feat = (feat & TMU012_FEAT_EXTCLK) ? TIMER_FEAT_EXTCLK : 0;
 
     s = (tmu012_state *)qemu_mallocz(sizeof(tmu012_state));
-    s->base = base;
     s->feat = feat;
     s->timer[0] = sh_timer_init(freq, timer_feat, ch0_irq);
     s->timer[1] = sh_timer_init(freq, timer_feat, ch1_irq);
@@ -324,6 +320,7 @@ void tmu012_init(target_phys_addr_t base, int feat, uint32_t freq,
 				    ch2_irq0); /* ch2_irq1 not supported */
     iomemtype = cpu_register_io_memory(0, tmu012_readfn,
                                        tmu012_writefn, s);
-    cpu_register_physical_memory(base, 0x00001000, iomemtype);
+    cpu_register_physical_memory(P4ADDR(base), 0x00001000, iomemtype);
+    cpu_register_physical_memory(A7ADDR(base), 0x00001000, iomemtype);
     /* ??? Save/restore.  */
 }

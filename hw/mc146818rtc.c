@@ -26,6 +26,7 @@
 #include "sysemu.h"
 #include "pc.h"
 #include "isa.h"
+#include "hpet_emul.h"
 
 //#define DEBUG_CMOS
 
@@ -59,7 +60,6 @@ struct RTCState {
     uint8_t cmos_index;
     struct tm current_tm;
     qemu_irq irq;
-    target_phys_addr_t base;
     int it_shift;
     /* periodic timer */
     QEMUTimer *periodic_timer;
@@ -70,6 +70,18 @@ struct RTCState {
     QEMUTimer *second_timer2;
 };
 
+static void rtc_irq_raise(qemu_irq irq) {
+    /* When HPET is operating in legacy mode, RTC interrupts are disabled
+     * We block qemu_irq_raise, but not qemu_irq_lower, in case legacy
+     * mode is established while interrupt is raised. We want it to
+     * be lowered in any case
+     */
+#if defined TARGET_I386 || defined TARGET_X86_64
+    if (!hpet_in_legacy_mode())
+#endif
+        qemu_irq_raise(irq);
+}
+
 static void rtc_set_time(RTCState *s);
 static void rtc_copy_date(RTCState *s);
 
@@ -79,8 +91,14 @@ static void rtc_timer_update(RTCState *s, int64_t current_time)
     int64_t cur_clock, next_irq_clock;
 
     period_code = s->cmos_data[RTC_REG_A] & 0x0f;
-    if (period_code != 0 &&
-        (s->cmos_data[RTC_REG_B] & REG_B_PIE)) {
+#if defined TARGET_I386 || defined TARGET_X86_64
+    /* disable periodic timer if hpet is in legacy mode, since interrupts are
+     * disabled anyway.
+     */
+    if (period_code != 0 && (s->cmos_data[RTC_REG_B] & REG_B_PIE) && !hpet_in_legacy_mode()) {
+#else
+    if (period_code != 0 && (s->cmos_data[RTC_REG_B] & REG_B_PIE)) {
+#endif
         if (period_code <= 2)
             period_code += 7;
         /* period in 32 Khz cycles */
@@ -101,7 +119,7 @@ static void rtc_periodic_timer(void *opaque)
 
     rtc_timer_update(s, s->next_periodic_time);
     s->cmos_data[RTC_REG_C] |= 0xc0;
-    qemu_irq_raise(s->irq);
+    rtc_irq_raise(s->irq);
 }
 
 static void cmos_ioport_write(void *opaque, uint32_t addr, uint32_t data)
@@ -320,14 +338,14 @@ static void rtc_update_second2(void *opaque)
              s->cmos_data[RTC_HOURS_ALARM] == s->current_tm.tm_hour)) {
 
             s->cmos_data[RTC_REG_C] |= 0xa0;
-            qemu_irq_raise(s->irq);
+            rtc_irq_raise(s->irq);
         }
     }
 
     /* update ended interrupt */
     if (s->cmos_data[RTC_REG_B] & REG_B_UIE) {
         s->cmos_data[RTC_REG_C] |= 0x90;
-        qemu_irq_raise(s->irq);
+        rtc_irq_raise(s->irq);
     }
 
     /* clear update in progress bit */
@@ -492,7 +510,7 @@ static uint32_t cmos_mm_readb (void *opaque, target_phys_addr_t addr)
 {
     RTCState *s = opaque;
 
-    return cmos_ioport_read(s, (addr - s->base) >> s->it_shift) & 0xFF;
+    return cmos_ioport_read(s, addr >> s->it_shift) & 0xFF;
 }
 
 static void cmos_mm_writeb (void *opaque,
@@ -500,7 +518,7 @@ static void cmos_mm_writeb (void *opaque,
 {
     RTCState *s = opaque;
 
-    cmos_ioport_write(s, (addr - s->base) >> s->it_shift, value & 0xFF);
+    cmos_ioport_write(s, addr >> s->it_shift, value & 0xFF);
 }
 
 static uint32_t cmos_mm_readw (void *opaque, target_phys_addr_t addr)
@@ -508,7 +526,7 @@ static uint32_t cmos_mm_readw (void *opaque, target_phys_addr_t addr)
     RTCState *s = opaque;
     uint32_t val;
 
-    val = cmos_ioport_read(s, (addr - s->base) >> s->it_shift) & 0xFFFF;
+    val = cmos_ioport_read(s, addr >> s->it_shift) & 0xFFFF;
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap16(val);
 #endif
@@ -522,7 +540,7 @@ static void cmos_mm_writew (void *opaque,
 #ifdef TARGET_WORDS_BIGENDIAN
     value = bswap16(value);
 #endif
-    cmos_ioport_write(s, (addr - s->base) >> s->it_shift, value & 0xFFFF);
+    cmos_ioport_write(s, addr >> s->it_shift, value & 0xFFFF);
 }
 
 static uint32_t cmos_mm_readl (void *opaque, target_phys_addr_t addr)
@@ -530,7 +548,7 @@ static uint32_t cmos_mm_readl (void *opaque, target_phys_addr_t addr)
     RTCState *s = opaque;
     uint32_t val;
 
-    val = cmos_ioport_read(s, (addr - s->base) >> s->it_shift);
+    val = cmos_ioport_read(s, addr >> s->it_shift);
 #ifdef TARGET_WORDS_BIGENDIAN
     val = bswap32(val);
 #endif
@@ -544,7 +562,7 @@ static void cmos_mm_writel (void *opaque,
 #ifdef TARGET_WORDS_BIGENDIAN
     value = bswap32(value);
 #endif
-    cmos_ioport_write(s, (addr - s->base) >> s->it_shift, value);
+    cmos_ioport_write(s, addr >> s->it_shift, value);
 }
 
 static CPUReadMemoryFunc *rtc_mm_read[] = {
@@ -573,7 +591,6 @@ RTCState *rtc_mm_init(target_phys_addr_t base, int it_shift, qemu_irq irq)
     s->cmos_data[RTC_REG_B] = 0x02;
     s->cmos_data[RTC_REG_C] = 0x00;
     s->cmos_data[RTC_REG_D] = 0x80;
-    s->base = base;
 
     rtc_set_date_from_host(s);
 

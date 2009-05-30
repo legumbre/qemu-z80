@@ -17,7 +17,6 @@
 typedef void (*drawfn)(uint32_t *, uint8_t *, const uint8_t *, int, int);
 
 struct pxa2xx_lcdc_s {
-    target_phys_addr_t base;
     qemu_irq irq;
     int irqlevel;
 
@@ -322,7 +321,6 @@ static uint32_t pxa2xx_lcdc_read(void *opaque, target_phys_addr_t offset)
 {
     struct pxa2xx_lcdc_s *s = (struct pxa2xx_lcdc_s *) opaque;
     int ch;
-    offset -= s->base;
 
     switch (offset) {
     case LCCR0:
@@ -418,7 +416,6 @@ static void pxa2xx_lcdc_write(void *opaque,
 {
     struct pxa2xx_lcdc_s *s = (struct pxa2xx_lcdc_s *) opaque;
     int ch;
-    offset -= s->base;
 
     switch (offset) {
     case LCCR0:
@@ -699,7 +696,7 @@ static void pxa2xx_lcdc_dma0_redraw_horiz(struct pxa2xx_lcdc_s *s,
     addr = (ram_addr_t) (fb - phys_ram_base);
     start = addr + s->yres * src_width;
     end = addr;
-    dirty[0] = dirty[1] = cpu_physical_memory_get_dirty(start, VGA_DIRTY_FLAG);
+    dirty[0] = dirty[1] = cpu_physical_memory_get_dirty(addr, VGA_DIRTY_FLAG);
     for (y = 0; y < s->yres; y ++) {
         new_addr = addr + src_width;
         for (x = addr + TARGET_PAGE_SIZE; x < new_addr;
@@ -755,11 +752,11 @@ static void pxa2xx_lcdc_dma0_redraw_vert(struct pxa2xx_lcdc_s *s,
     addr = (ram_addr_t) (fb - phys_ram_base);
     start = addr + s->yres * src_width;
     end = addr;
+    x = addr + TARGET_PAGE_SIZE;
     dirty[0] = dirty[1] = cpu_physical_memory_get_dirty(start, VGA_DIRTY_FLAG);
     for (y = 0; y < s->yres; y ++) {
         new_addr = addr + src_width;
-        for (x = addr + TARGET_PAGE_SIZE; x < new_addr;
-                        x += TARGET_PAGE_SIZE) {
+        for (; x < new_addr; x += TARGET_PAGE_SIZE) {
             dirty[1] = cpu_physical_memory_get_dirty(x, VGA_DIRTY_FLAG);
             dirty[0] |= dirty[1];
         }
@@ -991,7 +988,6 @@ struct pxa2xx_lcdc_s *pxa2xx_lcdc_init(target_phys_addr_t base, qemu_irq irq,
     struct pxa2xx_lcdc_s *s;
 
     s = (struct pxa2xx_lcdc_s *) qemu_mallocz(sizeof(struct pxa2xx_lcdc_s));
-    s->base = base;
     s->invalidated = 1;
     s->irq = irq;
     s->ds = ds;

@@ -27,6 +27,7 @@
 
 #include "qemu.h"
 #include "qemu-common.h"
+#include "cache-utils.h"
 /* For tb_lock */
 #include "exec-all.h"
 
@@ -161,6 +162,7 @@ void fork_end(int child)
         pthread_cond_init(&exclusive_cond, NULL);
         pthread_cond_init(&exclusive_resume, NULL);
         pthread_mutex_init(&tb_lock, NULL);
+        gdbserver_fork(thread_env);
     } else {
         pthread_mutex_unlock(&exclusive_lock);
         pthread_mutex_unlock(&tb_lock);
@@ -253,6 +255,9 @@ void fork_start(void)
 
 void fork_end(int child)
 {
+    if (child) {
+        gdbserver_fork(thread_env);
+    }
 }
 #endif
 
@@ -2214,7 +2219,7 @@ void init_task_state(TaskState *ts)
     ts->sigqueue_table[i].next = NULL;
 }
  
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
     const char *filename;
     const char *cpu_model;
@@ -2230,6 +2235,8 @@ int main(int argc, char **argv)
 
     if (argc <= 1)
         usage();
+
+    qemu_cache_utils_init(envp);
 
     /* init debug */
     cpu_set_log_filename(DEBUG_LOGFILE);

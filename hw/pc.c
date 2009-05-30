@@ -33,6 +33,9 @@
 #include "boards.h"
 #include "console.h"
 #include "fw_cfg.h"
+#include "virtio-blk.h"
+#include "virtio-balloon.h"
+#include "hpet_emul.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -975,6 +978,9 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     }
     pit = pit_init(0x40, i8259[0]);
     pcspk_init(pit);
+    if (!no_hpet) {
+        hpet_init(i8259);
+    }
     if (pci_enabled) {
         pic_set_alt_irq_func(isa_pic, ioapic_set_irq, ioapic);
     }
@@ -1092,6 +1098,21 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 	    }
         }
     }
+
+    /* Add virtio block devices */
+    if (pci_enabled) {
+        int index;
+        int unit_id = 0;
+
+        while ((index = drive_get_index(IF_VIRTIO, 0, unit_id)) != -1) {
+            virtio_blk_init(pci_bus, drives_table[index].bdrv);
+            unit_id++;
+        }
+    }
+
+    /* Add virtio balloon device */
+    if (pci_enabled)
+        virtio_balloon_init(pci_bus);
 }
 
 static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
@@ -1116,6 +1137,14 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
     pc_init1(ram_size, vga_ram_size, boot_device, ds,
              kernel_filename, kernel_cmdline,
              initrd_filename, 0, cpu_model);
+}
+
+/* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
+   BIOS will read it and start S3 resume at POST Entry */
+void cmos_set_s3_resume(void)
+{
+    if (rtc_state)
+        rtc_set_memory(rtc_state, 0xF, 0xFE);
 }
 
 QEMUMachine pc_machine = {

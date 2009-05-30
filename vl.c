@@ -36,10 +36,12 @@
 #include "gdbstub.h"
 #include "qemu-timer.h"
 #include "qemu-char.h"
+#include "cache-utils.h"
 #include "block.h"
 #include "audio/audio.h"
 #include "migration.h"
 #include "kvm.h"
+#include "balloon.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -147,14 +149,6 @@
 
 #include "exec-all.h"
 
-#define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
-#define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/qemu-ifdown"
-#ifdef __sun__
-#define SMBD_COMMAND "/usr/sfw/sbin/smbd"
-#else
-#define SMBD_COMMAND "/usr/sbin/smbd"
-#endif
-
 //#define DEBUG_UNUSED_IOPORT
 //#define DEBUG_IOPORT
 //#define DEBUG_NET
@@ -222,6 +216,7 @@ int usb_enabled = 0;
 int smp_cpus = 1;
 const char *vnc_display;
 int acpi_enabled = 1;
+int no_hpet = 0;
 int fd_bootchk = 1;
 int no_reboot = 0;
 int no_shutdown = 0;
@@ -236,7 +231,7 @@ int old_param = 0;
 #endif
 const char *qemu_name;
 int alt_grab = 0;
-#ifdef TARGET_SPARC
+#if defined(TARGET_SPARC) || defined(TARGET_PPC)
 unsigned int nb_prom_envs = 0;
 const char *prom_envs[MAX_PROM_ENVS];
 #endif
@@ -513,6 +508,31 @@ void hw_error(const char *fmt, ...)
     }
     va_end(ap);
     abort();
+}
+ 
+/***************/
+/* ballooning */
+
+static QEMUBalloonEvent *qemu_balloon_event;
+void *qemu_balloon_event_opaque;
+
+void qemu_add_balloon_handler(QEMUBalloonEvent *func, void *opaque)
+{
+    qemu_balloon_event = func;
+    qemu_balloon_event_opaque = opaque;
+}
+
+void qemu_balloon(ram_addr_t target)
+{
+    if (qemu_balloon_event)
+        qemu_balloon_event(qemu_balloon_event_opaque, target);
+}
+
+ram_addr_t qemu_balloon_status(void)
+{
+    if (qemu_balloon_event)
+        return qemu_balloon_event(qemu_balloon_event_opaque, 0);
+    return 0;
 }
 
 /***********************************************************/
@@ -1028,7 +1048,7 @@ static void configure_alarms(char const *opt)
 {
     int i;
     int cur = 0;
-    int count = (sizeof(alarm_timers) / sizeof(*alarm_timers)) - 1;
+    int count = ARRAY_SIZE(alarm_timers) - 1;
     char *arg;
     char *name;
     struct qemu_alarm_timer tmp;
@@ -2216,7 +2236,7 @@ static int drive_init(struct drive_opt *arg, int snapshot,
     unit_id = -1;
     translation = BIOS_ATA_TRANSLATION_AUTO;
     index = -1;
-    cache = 1;
+    cache = 3;
 
     if (machine->use_scsi) {
         type = IF_SCSI;
@@ -2267,7 +2287,10 @@ static int drive_init(struct drive_opt *arg, int snapshot,
 	} else if (!strcmp(buf, "sd")) {
 	    type = IF_SD;
             max_devs = 0;
-	} else {
+        } else if (!strcmp(buf, "virtio")) {
+            type = IF_VIRTIO;
+            max_devs = 0;
+        } else {
             fprintf(stderr, "qemu: '%s' unsupported bus type '%s'\n", str, buf);
             return -1;
 	}
@@ -2474,6 +2497,7 @@ static int drive_init(struct drive_opt *arg, int snapshot,
         break;
     case IF_PFLASH:
     case IF_MTD:
+    case IF_VIRTIO:
         break;
     }
     if (!file[0])
@@ -2487,6 +2511,8 @@ static int drive_init(struct drive_opt *arg, int snapshot,
         bdrv_flags |= BDRV_O_NOCACHE;
     else if (cache == 2) /* write-back */
         bdrv_flags |= BDRV_O_CACHE_WB;
+    else if (cache == 3) /* not specified */
+        bdrv_flags |= BDRV_O_CACHE_DEF;
     if (bdrv_open2(bdrv, file, bdrv_flags, drv) < 0 || qemu_key_check(bdrv, file)) {
         fprintf(stderr, "qemu: could not open disk image %s\n",
                         file);
@@ -3494,7 +3520,7 @@ void qemu_system_powerdown_request(void)
 }
 
 #ifdef _WIN32
-void host_main_loop_wait(int *timeout)
+static void host_main_loop_wait(int *timeout)
 {
     int ret, ret2, i;
     PollingEntry *pe;
@@ -3538,7 +3564,7 @@ void host_main_loop_wait(int *timeout)
     *timeout = 0;
 }
 #else
-void host_main_loop_wait(int *timeout)
+static void host_main_loop_wait(int *timeout)
 {
 }
 #endif
@@ -3923,6 +3949,7 @@ static void help(int exitcode)
 #endif
 #ifdef TARGET_I386
            "-no-acpi        disable ACPI\n"
+           "-no-hpet        disable HPET\n"
 #endif
 #ifdef CONFIG_CURSES
            "-curses         use a curses/ncurses interface instead of SDL\n"
@@ -4034,6 +4061,7 @@ enum {
     QEMU_OPTION_smp,
     QEMU_OPTION_vnc,
     QEMU_OPTION_no_acpi,
+    QEMU_OPTION_no_hpet,
     QEMU_OPTION_curses,
     QEMU_OPTION_no_reboot,
     QEMU_OPTION_no_shutdown,
@@ -4147,6 +4175,7 @@ static const QEMUOption qemu_options[] = {
     /* temporary options */
     { "usb", 0, QEMU_OPTION_usb },
     { "no-acpi", 0, QEMU_OPTION_no_acpi },
+    { "no-hpet", 0, QEMU_OPTION_no_hpet },
     { "no-reboot", 0, QEMU_OPTION_no_reboot },
     { "no-shutdown", 0, QEMU_OPTION_no_shutdown },
     { "show-cursor", 0, QEMU_OPTION_show_cursor },
@@ -4156,7 +4185,7 @@ static const QEMUOption qemu_options[] = {
     { "semihosting", 0, QEMU_OPTION_semihosting },
 #endif
     { "name", HAS_ARG, QEMU_OPTION_name },
-#if defined(TARGET_SPARC)
+#if defined(TARGET_SPARC) || defined(TARGET_PPC)
     { "prom-env", HAS_ARG, QEMU_OPTION_prom_env },
 #endif
 #if defined(TARGET_ARM)
@@ -4424,7 +4453,7 @@ static void termsig_setup(void)
 
 #endif
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
 #ifdef CONFIG_GDBSTUB
     int use_gdbstub;
@@ -4461,6 +4490,8 @@ int main(int argc, char **argv)
     const char *pid_file = NULL;
     int autostart;
     const char *incoming = NULL;
+
+    qemu_cache_utils_init(envp);
 
     LIST_INIT (&vm_change_state_head);
 #ifndef _WIN32
@@ -4982,6 +5013,9 @@ int main(int argc, char **argv)
             case QEMU_OPTION_no_acpi:
                 acpi_enabled = 0;
                 break;
+            case QEMU_OPTION_no_hpet:
+                no_hpet = 1;
+                break;
             case QEMU_OPTION_no_reboot:
                 no_reboot = 1;
                 break;
@@ -5015,7 +5049,7 @@ int main(int argc, char **argv)
             case QEMU_OPTION_name:
                 qemu_name = optarg;
                 break;
-#ifdef TARGET_SPARC
+#if defined(TARGET_SPARC) || defined(TARGET_PPC)
             case QEMU_OPTION_prom_env:
                 if (nb_prom_envs >= MAX_PROM_ENVS) {
                     fprintf(stderr, "Too many prom variables\n");
@@ -5420,6 +5454,17 @@ int main(int argc, char **argv)
 
     machine->init(ram_size, vga_ram_size, boot_devices, ds,
                   kernel_filename, kernel_cmdline, initrd_filename, cpu_model);
+
+    /* Set KVM's vcpu state to qemu's initial CPUState. */
+    if (kvm_enabled()) {
+        int ret;
+
+        ret = kvm_sync_vcpus();
+        if (ret < 0) {
+            fprintf(stderr, "failed to initialize vcpus\n");
+            exit(1);
+        }
+    }
 
     /* init USB devices */
     if (usb_enabled) {

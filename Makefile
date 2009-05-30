@@ -36,7 +36,7 @@ all: $(TOOLS) $(DOCS) recurse-all
 
 SUBDIR_RULES=$(patsubst %,subdir-%, $(TARGET_DIRS))
 
-subdir-%: dyngen$(EXESUF)
+subdir-%:
 	$(MAKE) -C $(subst subdir-,,$@) all
 
 $(filter %-softmmu,$(SUBDIR_RULES)): libqemu_common.a
@@ -56,6 +56,9 @@ BLOCK_OBJS+=nbd.o block.o aio.o
 ifdef CONFIG_WIN32
 BLOCK_OBJS += block-raw-win32.o
 else
+ifdef CONFIG_AIO
+BLOCK_OBJS += posix-aio-compat.o
+endif
 BLOCK_OBJS += block-raw-posix.o
 endif
 
@@ -79,7 +82,7 @@ OBJS+=usb-serial.o usb-net.o
 OBJS+=sd.o ssi-sd.o
 OBJS+=bt.o bt-host.o bt-vhci.o bt-l2cap.o bt-sdp.o bt-hci.o bt-hid.o usb-bt.o
 OBJS+=buffered_file.o migration.o migration-tcp.o net.o qemu-sockets.o
-OBJS+=qemu-char.o aio.o net-checksum.o savevm.o
+OBJS+=qemu-char.o aio.o net-checksum.o savevm.o cache-utils.o
 
 ifdef CONFIG_BRLAPI
 OBJS+= baum.o
@@ -178,7 +181,7 @@ libqemu_common.a: $(OBJS)
 
 #######################################################################
 # USER_OBJS is code used by qemu userspace emulation
-USER_OBJS=cutils.o
+USER_OBJS=cutils.o  cache-utils.o
 
 libqemu_user.a: $(USER_OBJS)
 	rm -f $@ 
@@ -195,15 +198,10 @@ qemu-img$(EXESUF): qemu-img.o qemu-tool.o osdep.o $(BLOCK_OBJS)
 qemu-nbd$(EXESUF):  qemu-nbd.o qemu-tool.o osdep.o $(BLOCK_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^ -lz $(LIBS)
 
-# dyngen host tool
-dyngen$(EXESUF): dyngen.c
-	$(HOST_CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
-
 clean:
 # avoid old build problems by removing potentially incorrect old files
 	rm -f config.mak config.h op-i386.h opc-i386.h gen-op-i386.h op-arm.h opc-arm.h gen-op-arm.h
-	rm -f *.o *.d *.a $(TOOLS) dyngen$(EXESUF) TAGS cscope.* *.pod *~ */*~
-	rm -rf dyngen.dSYM
+	rm -f *.o *.d *.a $(TOOLS) TAGS cscope.* *.pod *~ */*~
 	rm -f slirp/*.o slirp/*.d audio/*.o audio/*.d
 	$(MAKE) -C tests clean
 	for d in $(TARGET_DIRS); do \
@@ -221,6 +219,14 @@ KEYMAPS=da     en-gb  et  fr     fr-ch  is  lt  modifiers  no  pt-br  sv \
 ar      de     en-us  fi  fr-be  hr     it  lv  nl         pl  ru     th \
 common  de-ch  es     fo  fr-ca  hu     ja  mk  nl-be      pt  sl     tr
 
+ifdef INSTALL_BLOBS
+BLOBS=bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
+video.x openbios-sparc32 openbios-sparc64 pxe-ne2k_pci.bin \
+pxe-rtl8139.bin pxe-pcnet.bin pxe-e1000.bin bamboo.dtb zx-rom.bin
+else
+BLOBS=
+endif
+
 install-doc: $(DOCS)
 	mkdir -p "$(DESTDIR)$(docdir)"
 	$(INSTALL) -m 644 qemu-doc.html  qemu-tech.html "$(DESTDIR)$(docdir)"
@@ -236,12 +242,12 @@ install: all $(if $(BUILD_DOCS),install-doc)
 ifneq ($(TOOLS),)
 	$(INSTALL) -m 755 -s $(TOOLS) "$(DESTDIR)$(bindir)"
 endif
+ifneq ($(BLOBS),)
 	mkdir -p "$(DESTDIR)$(datadir)"
-	set -e; for x in bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
-		video.x openbios-sparc32 openbios-sparc64 pxe-ne2k_pci.bin \
-		pxe-rtl8139.bin pxe-pcnet.bin pxe-e1000.bin zx-rom; do \
+	set -e; for x in $(BLOBS); do \
 		$(INSTALL) -m 644 $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
 	done
+endif
 ifndef CONFIG_WIN32
 	mkdir -p "$(DESTDIR)$(datadir)/keymaps"
 	set -e; for x in $(KEYMAPS); do \

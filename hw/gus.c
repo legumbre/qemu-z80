@@ -42,9 +42,9 @@
 #endif
 
 #define IO_READ_PROTO(name) \
-    uint32_t name (void *opaque, uint32_t nport)
+    static uint32_t name (void *opaque, uint32_t nport)
 #define IO_WRITE_PROTO(name) \
-    void name (void *opaque, uint32_t nport, uint32_t val)
+    static void name (void *opaque, uint32_t nport, uint32_t val)
 
 static struct {
     int port;
@@ -195,7 +195,7 @@ void GUS_dmarequest (GUSEmuState *der)
     DMA_hold_DREQ (der->gusdma);
 }
 
-int GUS_read_DMA (void *opaque, int nchan, int dma_pos, int dma_len)
+static int GUS_read_DMA (void *opaque, int nchan, int dma_pos, int dma_len)
 {
     GUSState *s = opaque;
     char tmpbuf[4096];
@@ -253,7 +253,7 @@ static int GUS_load (QEMUFile *f, void *opaque, int version_id)
 int GUS_init (AudioState *audio, qemu_irq *pic)
 {
     GUSState *s;
-    audsettings_t as;
+    struct audsettings as;
 
     if (!audio) {
         dolog ("No audio state\n");

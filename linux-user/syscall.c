@@ -1614,12 +1614,14 @@ static abi_long do_socketcall(int num, abi_ulong vptr)
 }
 #endif
 
+#ifdef TARGET_NR_ipc
 #define N_SHM_REGIONS	32
 
 static struct shm_region {
     abi_ulong	start;
     abi_ulong	size;
 } shm_regions[N_SHM_REGIONS];
+#endif
 
 struct target_ipc_perm
 {
@@ -2958,17 +2960,17 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             return -EINVAL;
         fork_start();
         ret = fork();
-#if defined(USE_NPTL)
-        /* There is a race condition here.  The parent process could
-           theoretically read the TID in the child process before the child
-           tid is set.  This would require using either ptrace
-           (not implemented) or having *_tidptr to point at a shared memory
-           mapping.  We can't repeat the spinlock hack used above because
-           the child process gets its own copy of the lock.  */
         if (ret == 0) {
+            /* Child Process.  */
             cpu_clone_regs(env, newsp);
             fork_end(1);
-            /* Child Process.  */
+#if defined(USE_NPTL)
+            /* There is a race condition here.  The parent process could
+               theoretically read the TID in the child process before the child
+               tid is set.  This would require using either ptrace
+               (not implemented) or having *_tidptr to point at a shared memory
+               mapping.  We can't repeat the spinlock hack used above because
+               the child process gets its own copy of the lock.  */
             if (flags & CLONE_CHILD_SETTID)
                 put_user_u32(gettid(), child_tidptr);
             if (flags & CLONE_PARENT_SETTID)
@@ -2977,14 +2979,10 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_SETTLS)
                 cpu_set_tls (env, newtls);
             /* TODO: Implement CLONE_CHILD_CLEARTID.  */
+#endif
         } else {
             fork_end(0);
         }
-#else
-        if (ret == 0) {
-            cpu_clone_regs(env, newsp);
-        }
-#endif
     }
     return ret;
 }

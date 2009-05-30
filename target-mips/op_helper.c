@@ -54,7 +54,8 @@ void do_interrupt_restart (void)
     }
 }
 
-void do_restore_state (void *pc_ptr)
+#if !defined(CONFIG_USER_ONLY)
+static void do_restore_state (void *pc_ptr)
 {
     TranslationBlock *tb;
     unsigned long pc = (unsigned long) pc_ptr;
@@ -64,6 +65,7 @@ void do_restore_state (void *pc_ptr)
         cpu_restore_state (tb, env, pc, NULL);
     }
 }
+#endif
 
 target_ulong do_clo (target_ulong t0)
 {
@@ -1356,7 +1358,6 @@ void do_mtc0_status_irqraise_debug(void)
 {
     fprintf(logfile, "Raise pending IRQs\n");
 }
-#endif /* !CONFIG_USER_ONLY */
 
 /* MIPS MT functions */
 target_ulong do_mftgpr(uint32_t sel)
@@ -1495,6 +1496,7 @@ target_ulong do_evpe(target_ulong t0)
 
     return t0;
 }
+#endif /* !CONFIG_USER_ONLY */
 
 void do_fork(target_ulong t0, target_ulong t1)
 {
@@ -1701,7 +1703,7 @@ target_ulong do_ei (void)
     return t0;
 }
 
-void debug_pre_eret (void)
+static void debug_pre_eret (void)
 {
     fprintf(logfile, "ERET: PC " TARGET_FMT_lx " EPC " TARGET_FMT_lx,
             env->active_tc.PC, env->CP0_EPC);
@@ -1712,7 +1714,7 @@ void debug_pre_eret (void)
     fputs("\n", logfile);
 }
 
-void debug_post_eret (void)
+static void debug_post_eret (void)
 {
     fprintf(logfile, "  =>  PC " TARGET_FMT_lx " EPC " TARGET_FMT_lx,
             env->active_tc.PC, env->CP0_EPC);
@@ -2776,7 +2778,7 @@ void do_cmpabs_d_ ## op (uint64_t fdt0, uint64_t fdt1, int cc) \
         CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
-int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
+static int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
 {
     if (float64_is_signaling_nan(a) ||
         float64_is_signaling_nan(b) ||
@@ -2834,7 +2836,7 @@ void do_cmpabs_s_ ## op (uint32_t fst0, uint32_t fst1, int cc) \
         CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
-flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
+static flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
 {
     if (float32_is_signaling_nan(a) ||
         float32_is_signaling_nan(b) ||

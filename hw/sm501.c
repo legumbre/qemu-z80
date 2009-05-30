@@ -27,6 +27,7 @@
 #include "hw.h"
 #include "pc.h"
 #include "console.h"
+#include "devices.h"
 
 /*
  * Status: 2008/11/02
@@ -513,7 +514,7 @@ static uint32_t get_local_mem_size_index(uint32_t size)
     uint32_t norm_size = 0;
     int i, index = 0;
 
-    for (i = 0; i < sizeof(sm501_mem_local_size)/sizeof(uint32_t); i++) {
+    for (i = 0; i < ARRAY_SIZE(sm501_mem_local_size); i++) {
 	uint32_t new_size = sm501_mem_local_size[i];
 	if (new_size >= size) {
 	    if (norm_size == 0 || norm_size > new_size) {
@@ -529,12 +530,10 @@ static uint32_t get_local_mem_size_index(uint32_t size)
 static uint32_t sm501_system_config_read(void *opaque, target_phys_addr_t addr)
 {
     SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET);
     uint32_t ret = 0;
-    SM501_DPRINTF("sm501 system config regs : read addr=%x, offset=%x\n",
-		  addr, offset);
+    SM501_DPRINTF("sm501 system config regs : read addr=%x\n", (int)addr);
 
-    switch(offset) {
+    switch(addr) {
     case SM501_SYSTEM_CONTROL:
 	ret = s->system_control;
 	break;
@@ -573,7 +572,7 @@ static uint32_t sm501_system_config_read(void *opaque, target_phys_addr_t addr)
 
     default:
 	printf("sm501 system config : not implemented register read."
-	       " addr=%x, offset=%x\n", addr, offset);
+	       " addr=%x\n", (int)addr);
 	assert(0);
     }
 
@@ -584,11 +583,10 @@ static void sm501_system_config_write(void *opaque,
 				      target_phys_addr_t addr, uint32_t value)
 {
     SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET);
-    SM501_DPRINTF("sm501 system config regs : write addr=%x, ofs=%x, val=%x\n",
-		  addr, offset, value);
+    SM501_DPRINTF("sm501 system config regs : write addr=%x, val=%x\n",
+		  addr, value);
 
-    switch(offset) {
+    switch(addr) {
     case SM501_SYSTEM_CONTROL:
 	s->system_control = value & 0xE300B8F7;
 	break;
@@ -624,7 +622,7 @@ static void sm501_system_config_write(void *opaque,
 
     default:
 	printf("sm501 system config : not implemented register write."
-	       " addr=%x, val=%x\n", addr, value);
+	       " addr=%x, val=%x\n", (int)addr, value);
 	assert(0);
     }
 }
@@ -641,16 +639,39 @@ static CPUWriteMemoryFunc *sm501_system_config_writefn[] = {
     &sm501_system_config_write,
 };
 
-static uint32_t sm501_disp_ctrl_read(void *opaque,
-					      target_phys_addr_t addr)
+static uint32_t sm501_palette_read(void *opaque, target_phys_addr_t addr)
 {
     SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET + SM501_DC);
-    uint32_t ret = 0;
-    SM501_DPRINTF("sm501 disp ctrl regs : read addr=%x, offset=%x\n",
-		  addr, offset);
+    SM501_DPRINTF("sm501 palette read addr=%x\n", (int)addr);
 
-    switch(offset) {
+    /* TODO : consider BYTE/WORD access */
+    /* TODO : consider endian */
+
+    assert(0 <= addr && addr < 0x400 * 3);
+    return *(uint32_t*)&s->dc_palette[addr];
+}
+
+static void sm501_palette_write(void *opaque,
+				target_phys_addr_t addr, uint32_t value)
+{
+    SM501State * s = (SM501State *)opaque;
+    SM501_DPRINTF("sm501 palette write addr=%x, val=%x\n",
+		  (int)addr, value);
+
+    /* TODO : consider BYTE/WORD access */
+    /* TODO : consider endian */
+
+    assert(0 <= addr && addr < 0x400 * 3);
+    *(uint32_t*)&s->dc_palette[addr] = value;
+}
+
+static uint32_t sm501_disp_ctrl_read(void *opaque, target_phys_addr_t addr)
+{
+    SM501State * s = (SM501State *)opaque;
+    uint32_t ret = 0;
+    SM501_DPRINTF("sm501 disp ctrl regs : read addr=%x\n", (int)addr);
+
+    switch(addr) {
 
     case SM501_DC_PANEL_CONTROL:
 	ret = s->dc_panel_control;
@@ -725,9 +746,13 @@ static uint32_t sm501_disp_ctrl_read(void *opaque,
 	ret = s->dc_crt_hwc_addr;
 	break;
 
+    case SM501_DC_PANEL_PALETTE ... SM501_DC_PANEL_PALETTE + 0x400*3 - 4:
+        ret = sm501_palette_read(opaque, addr - SM501_DC_PANEL_PALETTE);
+        break;
+
     default:
 	printf("sm501 disp ctrl : not implemented register read."
-	       " addr=%x, offset=%x\n", addr, offset);
+	       " addr=%x\n", (int)addr);
 	assert(0);
     }
 
@@ -739,11 +764,10 @@ static void sm501_disp_ctrl_write(void *opaque,
 					   uint32_t value)
 {
     SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET + SM501_DC);
-    SM501_DPRINTF("sm501 disp ctrl regs : write addr=%x, ofs=%x, val=%x\n",
-		  addr, offset, value);
+    SM501_DPRINTF("sm501 disp ctrl regs : write addr=%x, val=%x\n",
+		  addr, value);
 
-    switch(offset) {
+    switch(addr) {
     case SM501_DC_PANEL_CONTROL:
 	s->dc_panel_control = value & 0x0FFF73FF;
 	break;
@@ -830,9 +854,13 @@ static void sm501_disp_ctrl_write(void *opaque,
 	s->dc_crt_hwc_addr = value & 0x0000FFFF;
 	break;
 
+    case SM501_DC_PANEL_PALETTE ... SM501_DC_PANEL_PALETTE + 0x400*3 - 4:
+        sm501_palette_write(opaque, addr - SM501_DC_PANEL_PALETTE, value);
+        break;
+
     default:
 	printf("sm501 disp ctrl : not implemented register write."
-	       " addr=%x, val=%x\n", addr, value);
+	       " addr=%x, val=%x\n", (int)addr, value);
 	assert(0);
     }
 }
@@ -848,49 +876,6 @@ static CPUWriteMemoryFunc *sm501_disp_ctrl_writefn[] = {
     NULL,
     &sm501_disp_ctrl_write,
 };
-
-static uint32_t sm501_palette_read(void *opaque, target_phys_addr_t addr)
-{
-    SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET
-			      + SM501_DC + SM501_DC_PANEL_PALETTE);
-    SM501_DPRINTF("sm501 palette read addr=%x, offset=%x\n", addr, offset);
-
-    /* TODO : consider BYTE/WORD access */
-    /* TODO : consider endian */
-
-    assert(0 <= offset && offset < 0x400 * 3);
-    return *(uint32_t*)&s->dc_palette[offset];
-}
-
-static void sm501_palette_write(void *opaque,
-				target_phys_addr_t addr, uint32_t value)
-{
-    SM501State * s = (SM501State *)opaque;
-    uint32_t offset = addr - (s->base + MMIO_BASE_OFFSET
-			      + SM501_DC + SM501_DC_PANEL_PALETTE);
-    SM501_DPRINTF("sm501 palette write addr=%x, ofs=%x, val=%x\n",
-		  addr, offset, value);
-
-    /* TODO : consider BYTE/WORD access */
-    /* TODO : consider endian */
-
-    assert(0 <= offset && offset < 0x400 * 3);
-    *(uint32_t*)&s->dc_palette[offset] = value;
-}
-
-static CPUReadMemoryFunc *sm501_palette_readfn[] = {
-    &sm501_palette_read,
-    &sm501_palette_read,
-    &sm501_palette_read,
-};
-
-static CPUWriteMemoryFunc *sm501_palette_writefn[] = {
-    &sm501_palette_write,
-    &sm501_palette_write,
-    &sm501_palette_write,
-};
-
 
 /* draw line functions for all console modes */
 
@@ -1081,7 +1066,6 @@ void sm501_init(DisplayState *ds, uint32_t base, unsigned long local_mem_base,
     SM501State * s;
     int sm501_system_config_index;
     int sm501_disp_ctrl_index;
-    int sm501_palette_index;
 
     /* allocate management data region */
     s = (SM501State *)qemu_mallocz(sizeof(SM501State));
@@ -1109,13 +1093,7 @@ void sm501_init(DisplayState *ds, uint32_t base, unsigned long local_mem_base,
     sm501_disp_ctrl_index = cpu_register_io_memory(0, sm501_disp_ctrl_readfn,
 						   sm501_disp_ctrl_writefn, s);
     cpu_register_physical_memory(base + MMIO_BASE_OFFSET + SM501_DC,
-				 0x400, sm501_disp_ctrl_index);
-
-    sm501_palette_index = cpu_register_io_memory(0, sm501_palette_readfn,
-						   sm501_palette_writefn, s);
-    cpu_register_physical_memory(base + MMIO_BASE_OFFSET
-				 + SM501_DC + SM501_DC_PANEL_PALETTE,
-				 0x400 * 3, sm501_palette_index);
+                                 0x1000, sm501_disp_ctrl_index);
 
     /* bridge to serial emulation module */
     if (chr)

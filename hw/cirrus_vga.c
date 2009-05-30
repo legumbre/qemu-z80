@@ -221,15 +221,17 @@
 #define CIRRUS_HOOK_NOT_HANDLED 0
 #define CIRRUS_HOOK_HANDLED 1
 
+#define ABS(a) ((signed)(a) > 0 ? a : -a)
+
 #define BLTUNSAFE(s) \
     ( \
         ( /* check dst is within bounds */ \
-            (s)->cirrus_blt_height * (s)->cirrus_blt_dstpitch \
+            (s)->cirrus_blt_height * ABS((s)->cirrus_blt_dstpitch) \
                 + ((s)->cirrus_blt_dstaddr & (s)->cirrus_addr_mask) > \
                     (s)->vram_size \
         ) || \
         ( /* check src is within bounds */ \
-            (s)->cirrus_blt_height * (s)->cirrus_blt_srcpitch \
+            (s)->cirrus_blt_height * ABS((s)->cirrus_blt_srcpitch) \
                 + ((s)->cirrus_blt_srcaddr & (s)->cirrus_addr_mask) > \
                     (s)->vram_size \
         ) \
@@ -3218,6 +3220,7 @@ static void cirrus_init_common(CirrusVGAState * s, int device_id, int is_pci)
                                            cirrus_vga_mem_write, s);
     cpu_register_physical_memory(isa_mem_base + 0x000a0000, 0x20000,
                                  s->vga_io_memory);
+    qemu_register_coalesced_mmio(isa_mem_base + 0x000a0000, 0x20000);
 
     s->sr[0x06] = 0x0f;
     if (device_id == CIRRUS_ID_CLGD5446) {

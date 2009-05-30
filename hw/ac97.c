@@ -354,7 +354,7 @@ static uint16_t mixer_load (AC97LinkState *s, uint32_t i)
 
 static void open_voice (AC97LinkState *s, int index, int freq)
 {
-    audsettings_t as;
+    struct audsettings as;
 
     as.freq = freq;
     as.nchannels = 2;
@@ -1196,7 +1196,7 @@ static void ac97_save (QEMUFile *f, void *opaque)
     qemu_put_be32s (f, &s->glob_sta);
     qemu_put_be32s (f, &s->cas);
 
-    for (i = 0; i < sizeof (s->bm_regs) / sizeof (s->bm_regs[0]); ++i) {
+    for (i = 0; i < ARRAY_SIZE (s->bm_regs); ++i) {
         AC97BusMasterRegs *r = &s->bm_regs[i];
         qemu_put_be32s (f, &r->bdbar);
         qemu_put_8s (f, &r->civ);
@@ -1235,7 +1235,7 @@ static int ac97_load (QEMUFile *f, void *opaque, int version_id)
     qemu_get_be32s (f, &s->glob_sta);
     qemu_get_be32s (f, &s->cas);
 
-    for (i = 0; i < sizeof (s->bm_regs) / sizeof (s->bm_regs[0]); ++i) {
+    for (i = 0; i < ARRAY_SIZE (s->bm_regs); ++i) {
         AC97BusMasterRegs *r = &s->bm_regs[i];
         qemu_get_be32s (f, &r->bdbar);
         qemu_get_8s (f, &r->civ);

@@ -25,6 +25,7 @@
 #include "pci.h"
 #include "console.h"
 #include "net.h"
+#include "virtio-net.h"
 
 //#define DEBUG_PCI
 
@@ -50,6 +51,8 @@ static void pci_update_mappings(PCIDevice *d);
 static void pci_set_irq(void *opaque, int irq_num, int level);
 
 target_phys_addr_t pci_mem_base;
+static uint16_t pci_default_sub_vendor_id = PCI_SUBVENDOR_ID_REDHAT_QUMRANET;
+static uint16_t pci_default_sub_device_id = PCI_SUBDEVICE_ID_QEMU;
 static int pci_irq_index;
 static PCIBus *first_bus;
 
@@ -145,6 +148,16 @@ int pci_device_load(PCIDevice *s, QEMUFile *f)
     return 0;
 }
 
+static int pci_set_default_subsystem_id(PCIDevice *pci_dev)
+{
+    uint16_t *id;
+
+    id = (void*)(&pci_dev->config[PCI_SUBVENDOR_ID]);
+    id[0] = cpu_to_le16(pci_default_sub_vendor_id);
+    id[1] = cpu_to_le16(pci_default_sub_device_id);
+    return 0;
+}
+
 /* -1 for devfn means auto assign */
 PCIDevice *pci_register_device(PCIBus *bus, const char *name,
                                int instance_size, int devfn,
@@ -171,6 +184,7 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
     pci_dev->devfn = devfn;
     pstrcpy(pci_dev->name, sizeof(pci_dev->name), name);
     memset(pci_dev->irq_state, 0, sizeof(pci_dev->irq_state));
+    pci_set_default_subsystem_id(pci_dev);
 
     if (!config_read)
         config_read = pci_default_read_config;
@@ -279,6 +293,7 @@ static void pci_update_mappings(PCIDevice *d)
                         cpu_register_physical_memory(pci_to_cpu_addr(r->addr),
                                                      r->size,
                                                      IO_MEM_UNASSIGNED);
+                        qemu_unregister_coalesced_mmio(r->addr, r->size);
                     }
                 }
                 r->addr = new_addr;
@@ -366,6 +381,7 @@ void pci_default_write_config(PCIDevice *d,
             case 0x0b:
             case 0x0e:
             case 0x10 ... 0x27: /* base */
+            case 0x2c ... 0x2f: /* read-only subsystem ID & vendor ID */
             case 0x30 ... 0x33: /* rom */
             case 0x3d:
                 can_write = 0;
@@ -387,6 +403,7 @@ void pci_default_write_config(PCIDevice *d,
             case 0x0a:
             case 0x0b:
             case 0x0e:
+            case 0x2c ... 0x2f: /* read-only subsystem ID & vendor ID */
             case 0x38 ... 0x3b: /* rom */
             case 0x3d:
                 can_write = 0;
@@ -398,6 +415,18 @@ void pci_default_write_config(PCIDevice *d,
             break;
         }
         if (can_write) {
+            /* Mask out writes to reserved bits in registers */
+            switch (addr) {
+	    case 0x05:
+                val &= ~PCI_COMMAND_RESERVED_MASK_HI;
+                break;
+            case 0x06:
+                val &= ~PCI_STATUS_RESERVED_MASK_LO;
+                break;
+            case 0x07:
+                val &= ~PCI_STATUS_RESERVED_MASK_HI;
+                break;
+            }
             d->config[addr] = val;
         }
         if (++addr > 0xff)
@@ -640,9 +669,11 @@ void pci_nic_init(PCIBus *bus, NICInfo *nd, int devfn)
         pci_e1000_init(bus, nd, devfn);
     } else if (strcmp(nd->model, "pcnet") == 0) {
         pci_pcnet_init(bus, nd, devfn);
+    } else if (strcmp(nd->model, "virtio") == 0) {
+        virtio_net_init(bus, nd, devfn);
     } else if (strcmp(nd->model, "?") == 0) {
         fprintf(stderr, "qemu: Supported PCI NICs: i82551 i82557b i82559er"
-                        " ne2k_pci pcnet rtl8139 e1000\n");
+                        " ne2k_pci pcnet rtl8139 e1000 virtio\n");
         exit (1);
     } else {
         fprintf(stderr, "qemu: Unsupported NIC: %s\n", nd->model);

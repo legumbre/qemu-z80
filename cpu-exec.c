@@ -86,6 +86,7 @@ void cpu_resume_from_signal(CPUState *env1, void *puc)
 #endif
     }
 #endif
+    env->exception_index = -1;
     longjmp(env->jmp_env, 1);
 }
 
@@ -402,11 +403,11 @@ int cpu_exec(CPUState *env1)
                             int intno;
                             /* FIXME: this should respect TPR */
                             svm_check_intercept(SVM_EXIT_VINTR);
-                            env->interrupt_request &= ~CPU_INTERRUPT_VIRQ;
                             intno = ldl_phys(env->vm_vmcb + offsetof(struct vmcb, control.int_vector));
                             if (loglevel & CPU_LOG_TB_IN_ASM)
                                 fprintf(logfile, "Servicing virtual hardware INT=0x%02x\n", intno);
                             do_interrupt(intno, 0, 0, 0, 1);
+                            env->interrupt_request &= ~CPU_INTERRUPT_VIRQ;
                             next_tb = 0;
 #endif
                         }
@@ -929,7 +930,7 @@ static inline int handle_cpu_signal(unsigned long pc, unsigned long address,
     /* we restore the process signal mask as the sigreturn should
        do it (XXX: use sigsetjmp) */
         sigprocmask(SIG_SETMASK, old_set, NULL);
-        raise_exception_err(env, env->exception_index, env->error_code);
+        cpu_loop_exit();
     } else {
         /* activate soft MMU for this block */
         cpu_resume_from_signal(env, puc);
@@ -1018,7 +1019,7 @@ static inline int handle_cpu_signal(unsigned long pc, unsigned long address,
     /* we restore the process signal mask as the sigreturn should
        do it (XXX: use sigsetjmp) */
         sigprocmask(SIG_SETMASK, old_set, NULL);
-        do_raise_exception_err(env->exception_index, env->error_code);
+        cpu_loop_exit();
     } else {
         /* activate soft MMU for this block */
         cpu_resume_from_signal(env, puc);
@@ -1199,17 +1200,32 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 
 #elif defined(__x86_64__)
 
+#ifdef __NetBSD__
+#define REG_ERR _REG_ERR
+#define REG_TRAPNO _REG_TRAPNO
+
+#define QEMU_UC_MCONTEXT_GREGS(uc, reg)	(uc)->uc_mcontext.__gregs[(reg)]
+#define QEMU_UC_MACHINE_PC(uc)		_UC_MACHINE_PC(uc)
+#else
+#define QEMU_UC_MCONTEXT_GREGS(uc, reg)	(uc)->uc_mcontext.gregs[(reg)]
+#define QEMU_UC_MACHINE_PC(uc)		QEMU_UC_MCONTEXT_GREGS(uc, REG_RIP)
+#endif
+
 int cpu_signal_handler(int host_signum, void *pinfo,
                        void *puc)
 {
     siginfo_t *info = pinfo;
-    struct ucontext *uc = puc;
     unsigned long pc;
+#ifdef __NetBSD__
+    ucontext_t *uc = puc;
+#else
+    struct ucontext *uc = puc;
+#endif
 
-    pc = uc->uc_mcontext.gregs[REG_RIP];
+    pc = QEMU_UC_MACHINE_PC(uc);
     return handle_cpu_signal(pc, (unsigned long)info->si_addr,
-                             uc->uc_mcontext.gregs[REG_TRAPNO] == 0xe ?
-                             (uc->uc_mcontext.gregs[REG_ERR] >> 1) & 1 : 0,
+                             QEMU_UC_MCONTEXT_GREGS(uc, REG_TRAPNO) == 0xe ?
+                             (QEMU_UC_MCONTEXT_GREGS(uc, REG_ERR) >> 1) & 1 : 0,
                              &uc->uc_sigmask, puc);
 }
 

@@ -75,7 +75,6 @@ struct ParallelState {
     int epp_timeout;
     uint32_t last_read_offset; /* For debugging */
     /* Memory-mapped interface */
-    target_phys_addr_t base;
     int it_shift;
 };
 
@@ -419,8 +418,10 @@ static uint32_t parallel_ioport_ecp_read(void *opaque, uint32_t addr)
     return ret;
 }
 
-static void parallel_reset(ParallelState *s, qemu_irq irq, CharDriverState *chr)
+static void parallel_reset(void *opaque)
 {
+    ParallelState *s = opaque;
+
     s->datar = ~0;
     s->dataw = ~0;
     s->status = PARA_STS_BUSY;
@@ -431,9 +432,7 @@ static void parallel_reset(ParallelState *s, qemu_irq irq, CharDriverState *chr)
     s->control = PARA_CTR_SELECT;
     s->control |= PARA_CTR_INIT;
     s->control |= 0xc0;
-    s->irq = irq;
     s->irq_pending = 0;
-    s->chr = chr;
     s->hw_driver = 0;
     s->epp_timeout = 0;
     s->last_read_offset = ~0U;
@@ -448,7 +447,10 @@ ParallelState *parallel_init(int base, qemu_irq irq, CharDriverState *chr)
     s = qemu_mallocz(sizeof(ParallelState));
     if (!s)
         return NULL;
-    parallel_reset(s, irq, chr);
+    s->irq = irq;
+    s->chr = chr;
+    parallel_reset(s);
+    qemu_register_reset(parallel_reset, s);
 
     if (qemu_chr_ioctl(chr, CHR_IOCTL_PP_READ_STATUS, &dummy) == 0) {
         s->hw_driver = 1;
@@ -477,7 +479,7 @@ static uint32_t parallel_mm_readb (void *opaque, target_phys_addr_t addr)
 {
     ParallelState *s = opaque;
 
-    return parallel_ioport_read_sw(s, (addr - s->base) >> s->it_shift) & 0xFF;
+    return parallel_ioport_read_sw(s, addr >> s->it_shift) & 0xFF;
 }
 
 static void parallel_mm_writeb (void *opaque,
@@ -485,14 +487,14 @@ static void parallel_mm_writeb (void *opaque,
 {
     ParallelState *s = opaque;
 
-    parallel_ioport_write_sw(s, (addr - s->base) >> s->it_shift, value & 0xFF);
+    parallel_ioport_write_sw(s, addr >> s->it_shift, value & 0xFF);
 }
 
 static uint32_t parallel_mm_readw (void *opaque, target_phys_addr_t addr)
 {
     ParallelState *s = opaque;
 
-    return parallel_ioport_read_sw(s, (addr - s->base) >> s->it_shift) & 0xFFFF;
+    return parallel_ioport_read_sw(s, addr >> s->it_shift) & 0xFFFF;
 }
 
 static void parallel_mm_writew (void *opaque,
@@ -500,14 +502,14 @@ static void parallel_mm_writew (void *opaque,
 {
     ParallelState *s = opaque;
 
-    parallel_ioport_write_sw(s, (addr - s->base) >> s->it_shift, value & 0xFFFF);
+    parallel_ioport_write_sw(s, addr >> s->it_shift, value & 0xFFFF);
 }
 
 static uint32_t parallel_mm_readl (void *opaque, target_phys_addr_t addr)
 {
     ParallelState *s = opaque;
 
-    return parallel_ioport_read_sw(s, (addr - s->base) >> s->it_shift);
+    return parallel_ioport_read_sw(s, addr >> s->it_shift);
 }
 
 static void parallel_mm_writel (void *opaque,
@@ -515,7 +517,7 @@ static void parallel_mm_writel (void *opaque,
 {
     ParallelState *s = opaque;
 
-    parallel_ioport_write_sw(s, (addr - s->base) >> s->it_shift, value);
+    parallel_ioport_write_sw(s, addr >> s->it_shift, value);
 }
 
 static CPUReadMemoryFunc *parallel_mm_read_sw[] = {
@@ -539,9 +541,11 @@ ParallelState *parallel_mm_init(target_phys_addr_t base, int it_shift, qemu_irq 
     s = qemu_mallocz(sizeof(ParallelState));
     if (!s)
         return NULL;
-    parallel_reset(s, irq, chr);
-    s->base = base;
+    s->irq = irq;
+    s->chr = chr;
     s->it_shift = it_shift;
+    parallel_reset(s);
+    qemu_register_reset(parallel_reset, s);
 
     io_sw = cpu_register_io_memory(0, parallel_mm_read_sw, parallel_mm_write_sw, s);
     cpu_register_physical_memory(base, 8 << it_shift, io_sw);

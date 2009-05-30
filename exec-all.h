@@ -82,6 +82,7 @@ TranslationBlock *tb_gen_code(CPUState *env,
                               target_ulong pc, target_ulong cs_base, int flags,
                               int cflags);
 void cpu_exec_init(CPUState *env);
+void cpu_loop_exit(void);
 int page_unprotect(target_ulong address, unsigned long pc, void *puc);
 void tb_invalidate_phys_page_range(target_phys_addr_t start, target_phys_addr_t end,
                                    int is_cpu_write_access);
@@ -204,18 +205,26 @@ static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr
 #elif defined(__arm__)
 static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr)
 {
+#if QEMU_GNUC_PREREQ(4, 1)
+    void __clear_cache(char *beg, char *end);
+#else
     register unsigned long _beg __asm ("a1");
     register unsigned long _end __asm ("a2");
     register unsigned long _flg __asm ("a3");
+#endif
 
     /* we could use a ldr pc, [pc, #-4] kind of branch and avoid the flush */
     *(uint32_t *)jmp_addr |= ((addr - (jmp_addr + 8)) >> 2) & 0xffffff;
 
+#if QEMU_GNUC_PREREQ(4, 1)
+    __clear_cache((char *) jmp_addr, (char *) jmp_addr + 4);
+#else
     /* flush icache */
     _beg = jmp_addr;
     _end = jmp_addr + 4;
     _flg = 0;
     __asm __volatile__ ("swi 0x9f0002" : : "r" (_beg), "r" (_end), "r" (_flg));
+#endif
 }
 #endif
 
@@ -257,20 +266,6 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
 }
 
 TranslationBlock *tb_find_pc(unsigned long pc_ptr);
-
-#if defined(_WIN32)
-#define ASM_DATA_SECTION ".section \".data\"\n"
-#define ASM_PREVIOUS_SECTION ".section .text\n"
-#elif defined(__APPLE__)
-#define ASM_DATA_SECTION ".data\n"
-#define ASM_PREVIOUS_SECTION ".text\n"
-#else
-#define ASM_DATA_SECTION ".section \".data\"\n"
-#define ASM_PREVIOUS_SECTION ".previous\n"
-#endif
-
-#define ASM_OP_LABEL_NAME(n, opname) \
-    ASM_NAME(__op_label) #n "." ASM_NAME(opname)
 
 extern CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 extern CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];

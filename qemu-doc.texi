@@ -81,7 +81,7 @@ For system emulation, the following hardware targets are supported:
 @item ARM Integrator/CP (ARM)
 @item ARM Versatile baseboard (ARM)
 @item ARM RealView Emulation baseboard (ARM)
-@item Spitz, Akita, Borzoi and Terrier PDAs (PXA270 processor)
+@item Spitz, Akita, Borzoi, Terrier and Tosa PDAs (PXA270 processor)
 @item Luminary Micro LM3S811EVB (ARM Cortex-M3)
 @item Luminary Micro LM3S6965EVB (ARM Cortex-M3)
 @item Freescale MCF5208EVB (ColdFire V2).
@@ -89,6 +89,8 @@ For system emulation, the following hardware targets are supported:
 @item Palm Tungsten|E PDA (OMAP310 processor)
 @item N800 and N810 tablets (OMAP2420 processor)
 @item MusicPal (MV88W8618 ARM processor)
+@item Gumstix "Connex" and "Verdex" motherboards (PXA255/270).
+@item Siemens SX1 smartphone (OMAP310 processor)
 @end itemize
 
 For user emulation, x86, PowerPC, ARM, 32-bit MIPS, Sparc32/64 and ColdFire(m68k) CPUs are supported.
@@ -253,7 +255,7 @@ this drive. If the filename contains comma, you must double it
 (for instance, "file=my,,file" to use file "my,file").
 @item if=@var{interface}
 This option defines on which type on interface the drive is connected.
-Available types are: ide, scsi, sd, mtd, floppy, pflash.
+Available types are: ide, scsi, sd, mtd, floppy, pflash, virtio.
 @item bus=@var{bus},unit=@var{unit}
 These options define where is connected the drive by defining the bus number and
 the unit id.
@@ -288,6 +290,12 @@ used by default.
 The host page can be avoided entirely with @option{cache=none}.  This will
 attempt to do disk IO directly to the guests memory.  QEMU may still perform
 an internal copy of the data.
+
+Some block drivers perform badly with @option{cache=writethrough}, most notably,
+qcow2.  If performance is more important than correctness,
+@option{cache=writeback} should be used with qcow2.  By default, if no explicit
+caching is specified for a qcow2 disk image, @option{cache=writeback} will be
+used.  For all other disk types, @option{cache=writethrough} is the default.
 
 Instead of @option{-cdrom} you can use:
 @example
@@ -371,10 +379,10 @@ Enable audio and selected sound hardware. Use ? to print all
 available sound hardware.
 
 @example
-qemu -soundhw sb16,adlib hda
-qemu -soundhw es1370 hda
-qemu -soundhw ac97 hda
-qemu -soundhw all hda
+qemu -soundhw sb16,adlib disk.img
+qemu -soundhw es1370 disk.img
+qemu -soundhw ac97 disk.img
+qemu -soundhw all disk.img
 qemu -soundhw ?
 @end example
 
@@ -391,7 +399,7 @@ time). This option is needed to have correct date in MS-DOS or
 Windows.
 
 @item -startdate @var{date}
-Set the initial date of the real time clock. Valid format for
+Set the initial date of the real time clock. Valid formats for
 @var{date} are: @code{now} or @code{2006-06-17T16:01:21} or
 @code{2006-06-17}. The default value is @code{now}.
 
@@ -416,7 +424,7 @@ This option is useful to load things like EtherBoot.
 
 @item -name @var{name}
 Sets the @var{name} of the guest.
-This name will be display in the SDL window caption.
+This name will be displayed in the SDL window caption.
 The @var{name} will also be used for the VNC server.
 
 @end table
@@ -616,13 +624,15 @@ Use the user mode network stack which requires no administrator
 privilege to run.  @option{hostname=name} can be used to specify the client
 hostname reported by the builtin DHCP server.
 
-@item -net tap[,vlan=@var{n}][,fd=@var{h}][,ifname=@var{name}][,script=@var{file}]
-Connect the host TAP network interface @var{name} to VLAN @var{n} and
-use the network script @var{file} to configure it. The default
-network script is @file{/etc/qemu-ifup}. Use @option{script=no} to
-disable script execution. If @var{name} is not
-provided, the OS automatically provides one. @option{fd}=@var{h} can be
-used to specify the handle of an already opened host TAP interface. Example:
+@item -net tap[,vlan=@var{n}][,fd=@var{h}][,ifname=@var{name}][,script=@var{file}][,downscript=@var{dfile}]
+Connect the host TAP network interface @var{name} to VLAN @var{n}, use
+the network script @var{file} to configure it and the network script 
+@var{dfile} to deconfigure it. If @var{name} is not provided, the OS 
+automatically provides one. @option{fd}=@var{h} can be used to specify
+the handle of an already opened host TAP interface. The default network 
+configure script is @file{/etc/qemu-ifup} and the default network 
+deconfigure script is @file{/etc/qemu-ifdown}. Use @option{script=no} 
+or @option{downscript=no} to disable script execution. Example:
 
 @example
 qemu linux.img -net nic -net tap
@@ -1233,11 +1243,11 @@ and @var{options} are described at @ref{sec_invocation}. eg
 (qemu) change vnc localhost:1
 @end example
 
-@item change vnc password
+@item change vnc password [@var{password}]
 
-Change the password associated with the VNC server. The monitor will prompt for
-the new password to be entered. VNC passwords are only significant upto 8 letters.
-eg.
+Change the password associated with the VNC server. If the new password is not
+supplied, the monitor will prompt for it to be entered. VNC passwords are only
+significant up to 8 letters. eg
 
 @example
 (qemu) change vnc password
@@ -2318,6 +2328,11 @@ PC compatible keyboard and mouse.
 QEMU uses the Open Hack'Ware Open Firmware Compatible BIOS available at
 @url{http://perso.magic.fr/l_indien/OpenHackWare/index.htm}.
 
+Since version 0.9.1, QEMU uses OpenBIOS @url{http://www.openbios.org/}
+for the g3bw PowerMac machine. OpenBIOS is a free (GPL v2) portable
+firmware implementation. The goal is to implement a 100% IEEE
+1275-1994 (referred to as Open Firmware) compliant firmware.
+
 @c man begin OPTIONS
 
 The following options are specific to the PowerPC emulation:
@@ -2327,6 +2342,18 @@ The following options are specific to the PowerPC emulation:
 @item -g WxH[xDEPTH]
 
 Set the initial VGA graphic mode. The default is 800x600x15.
+
+@item -prom-env string
+
+Set OpenBIOS variables in NVRAM, for example:
+
+@example
+qemu-system-ppc -prom-env 'auto-boot?=false' \
+ -prom-env 'boot-device=hd:2,\yaboot' \
+ -prom-env 'boot-args=conf=hd:2,\yaboot.conf'
+@end example
+
+These variables are not used by Open Hack'Ware.
 
 @end table
 
@@ -2788,6 +2815,28 @@ MV88W8618 audio controller, WM8750 CODEC and mixer
 128×64 display with brightness control
 @item
 2 buttons, 2 navigation wheels with button function
+@end itemize
+
+The Siemens SX1 models v1 and v2 (default) basic emulation.
+The emulaton includes the following elements:
+
+@itemize @minus
+@item
+Texas Instruments OMAP310 System-on-chip (ARM 925T core)
+@item
+ROM and RAM memories (ROM firmware image can be loaded with -pflash)
+V1
+1 Flash of 16MB and 1 Flash of 8MB
+V2
+1 Flash of 32MB
+@item
+On-chip LCD controller
+@item
+On-chip Real Time Clock
+@item
+Secure Digital card connected to OMAP MMC/SD host
+@item
+Three on-chip UARTs
 @end itemize
 
 A Linux 2.6 test image is available on the QEMU web site. More

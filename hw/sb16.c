@@ -27,8 +27,6 @@
 #include "isa.h"
 #include "qemu-timer.h"
 
-#define LENOFA(a) ((int) (sizeof(a)/sizeof(a[0])))
-
 #define dolog(...) AUD_log ("sb16", __VA_ARGS__)
 
 /* #define DEBUG */
@@ -201,7 +199,7 @@ static void aux_timer (void *opaque)
 static void continue_dma8 (SB16State *s)
 {
     if (s->freq > 0) {
-        audsettings_t as;
+        struct audsettings as;
 
         s->audio_free = 0;
 
@@ -346,7 +344,7 @@ static void dma_cmd (SB16State *s, uint8_t cmd, uint8_t d0, int dma_len)
     }
 
     if (s->freq) {
-        audsettings_t as;
+        struct audsettings as;
 
         s->audio_free = 0;
 
@@ -833,7 +831,7 @@ static void complete (SB16State *s)
 
 static void legacy_reset (SB16State *s)
 {
-    audsettings_t as;
+    struct audsettings as;
 
     s->freq = 11025;
     s->fmt_signed = 0;
@@ -1375,7 +1373,7 @@ static int SB_load (QEMUFile *f, void *opaque, int version_id)
 
     if (s->dma_running) {
         if (s->freq) {
-            audsettings_t as;
+            struct audsettings as;
 
             s->audio_free = 0;
 
@@ -1440,11 +1438,11 @@ int SB16_init (AudioState *audio, qemu_irq *pic)
         dolog ("warning: Could not create auxiliary timer\n");
     }
 
-    for (i = 0; i < LENOFA (dsp_write_ports); i++) {
+    for (i = 0; i < ARRAY_SIZE (dsp_write_ports); i++) {
         register_ioport_write (s->port + dsp_write_ports[i], 1, 1, dsp_write, s);
     }
 
-    for (i = 0; i < LENOFA (dsp_read_ports); i++) {
+    for (i = 0; i < ARRAY_SIZE (dsp_read_ports); i++) {
         register_ioport_read (s->port + dsp_read_ports[i], 1, 1, dsp_read, s);
     }
 

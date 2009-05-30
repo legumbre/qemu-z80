@@ -27,77 +27,14 @@
 #include "cpu.h"
 #include "exec-all.h"
 
-/* For normal operations, precise emulation should not be needed */
-//#define USE_PRECISE_EMULATION 1
-#define USE_PRECISE_EMULATION 0
+/* Precise emulation is needed to correctly emulate exception flags */
+#define USE_PRECISE_EMULATION 1
 
 register struct CPUPPCState *env asm(AREG0);
-#if TARGET_LONG_BITS > HOST_LONG_BITS
-/* no registers can be used */
-#define T0 (env->t0)
-#define T1 (env->t1)
-#define T2 (env->t2)
-#define TDX "%016" PRIx64
-#else
-register target_ulong T0 asm(AREG1);
-register target_ulong T1 asm(AREG2);
-register target_ulong T2 asm(AREG3);
-#define TDX "%016lx"
-#endif
-/* We may, sometime, need 64 bits registers on 32 bits targets */
-#if !defined(TARGET_PPC64)
-#define T0_64 (env->t0_64)
-#define T1_64 (env->t1_64)
-#define T2_64 (env->t2_64)
-#else
-#define T0_64 T0
-#define T1_64 T1
-#define T2_64 T2
-#endif
-
-#define FT0 (env->ft0)
-#define FT1 (env->ft1)
-
-#if defined (DEBUG_OP)
-# define RETURN() __asm__ __volatile__("nop" : : : "memory");
-#else
-# define RETURN() __asm__ __volatile__("" : : : "memory");
-#endif
-
-static always_inline target_ulong rotl8 (target_ulong i, int n)
-{
-    return (((uint8_t)i << n) | ((uint8_t)i >> (8 - n)));
-}
-
-static always_inline target_ulong rotl16 (target_ulong i, int n)
-{
-    return (((uint16_t)i << n) | ((uint16_t)i >> (16 - n)));
-}
-
-static always_inline target_ulong rotl32 (target_ulong i, int n)
-{
-    return (((uint32_t)i << n) | ((uint32_t)i >> (32 - n)));
-}
-
-#if defined(TARGET_PPC64)
-static always_inline target_ulong rotl64 (target_ulong i, int n)
-{
-    return (((uint64_t)i << n) | ((uint64_t)i >> (64 - n)));
-}
-#endif
 
 #if !defined(CONFIG_USER_ONLY)
 #include "softmmu_exec.h"
 #endif /* !defined(CONFIG_USER_ONLY) */
-
-void raise_exception_err (CPUState *env, int exception, int error_code);
-void raise_exception (CPUState *env, int exception);
-
-int get_physical_address (CPUState *env, mmu_ctx_t *ctx, target_ulong vaddr,
-                          int rw, int access_type);
-
-void ppc6xx_tlb_store (CPUState *env, target_ulong EPN, int way, int is_code,
-                       target_ulong pte0, target_ulong pte1);
 
 static always_inline void env_to_regs (void)
 {
@@ -106,9 +43,6 @@ static always_inline void env_to_regs (void)
 static always_inline void regs_to_env (void)
 {
 }
-
-int cpu_ppc_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
-                              int mmu_idx, int is_softmmu);
 
 static always_inline int cpu_halted (CPUState *env)
 {

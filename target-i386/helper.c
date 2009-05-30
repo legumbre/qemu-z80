@@ -27,10 +27,8 @@
 
 #include "cpu.h"
 #include "exec-all.h"
-#include "svm.h"
 #include "qemu-common.h"
 #include "kvm.h"
-#include "helper.h"
 
 //#define DEBUG_MMU
 
@@ -276,7 +274,7 @@ static int cpu_x86_find_by_name(x86_def_t *x86_cpu_def, const char *cpu_model)
     int family = -1, model = -1, stepping = -1;
 
     def = NULL;
-    for (i = 0; i < sizeof(x86_defs) / sizeof(x86_def_t); i++) {
+    for (i = 0; i < ARRAY_SIZE(x86_defs); i++) {
         if (strcmp(name, x86_defs[i].name) == 0) {
             def = &x86_defs[i];
             break;
@@ -366,7 +364,7 @@ void x86_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(x86_defs) / sizeof(x86_def_t); i++)
+    for (i = 0; i < ARRAY_SIZE(x86_defs); i++)
         (*cpu_fprintf)(f, "x86 %16s\n", x86_defs[i].name);
 }
 
@@ -647,7 +645,7 @@ void cpu_dump_state(CPUState *env, FILE *f,
         for(i = 0; i < 4; i++)
             cpu_fprintf(f, "DR%d=%016" PRIx64 " ", i, env->dr[i]);
         cpu_fprintf(f, "\nDR6=%016" PRIx64 " DR7=%016" PRIx64 "\n",
-                    env->dr[6], env->cr[7]);
+                    env->dr[6], env->dr[7]);
     } else
 #endif
     {
@@ -681,7 +679,7 @@ void cpu_dump_state(CPUState *env, FILE *f,
                     (uint32_t)env->cr[4]);
         for(i = 0; i < 4; i++)
             cpu_fprintf(f, "DR%d=%08x ", i, env->dr[i]);
-        cpu_fprintf(f, "\nDR6=%08x DR7=%08x\n", env->dr[6], env->cr[7]);
+        cpu_fprintf(f, "\nDR6=%08x DR7=%08x\n", env->dr[6], env->dr[7]);
     }
     if (flags & X86_DUMP_CCOP) {
         if ((unsigned)env->cc_op < CC_OP_NB)
@@ -847,12 +845,6 @@ void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4)
         env->hflags &= ~HF_OSFXSR_MASK;
 
     env->cr[4] = new_cr4;
-}
-
-/* XXX: also flush 4MB pages */
-void cpu_x86_flush_tlb(CPUX86State *env, target_ulong addr)
-{
-    tlb_flush_page(env, addr);
 }
 
 #if defined(CONFIG_USER_ONLY)
