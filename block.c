@@ -362,6 +362,8 @@ int bdrv_open2(BlockDriverState *bs, const char *filename, int flags,
     bs->is_temporary = 0;
     bs->encrypted = 0;
     bs->valid_key = 0;
+    /* buffer_alignment defaulted to 512, drivers can change this value */
+    bs->buffer_alignment = 512;
 
     if (flags & BDRV_O_SNAPSHOT) {
         BlockDriverState *bs1;
@@ -506,6 +508,20 @@ void bdrv_delete(BlockDriverState *bs)
     qemu_free(bs);
 }
 
+/*
+ * Run consistency checks on an image
+ *
+ * Returns the number of errors or -errno when an internal error occurs
+ */
+int bdrv_check(BlockDriverState *bs)
+{
+    if (bs->drv->bdrv_check == NULL) {
+        return -ENOTSUP;
+    }
+
+    return bs->drv->bdrv_check(bs);
+}
+
 /* commit COW file into the raw image */
 int bdrv_commit(BlockDriverState *bs)
 {
@@ -562,7 +578,10 @@ static int bdrv_check_byte_request(BlockDriverState *bs, int64_t offset,
 
     len = bdrv_getlength(bs);
 
-    if ((offset + size) > len)
+    if (offset < 0)
+        return -EIO;
+
+    if ((offset > len) || (len - offset < size))
         return -EIO;
 
     return 0;
@@ -1134,6 +1153,8 @@ int bdrv_write_compressed(BlockDriverState *bs, int64_t sector_num,
         return -ENOMEDIUM;
     if (!drv->bdrv_write_compressed)
         return -ENOTSUP;
+    if (bdrv_check_request(bs, sector_num, nb_sectors))
+        return -EIO;
     return drv->bdrv_write_compressed(bs, sector_num, buf, nb_sectors);
 }
 
@@ -1376,7 +1397,7 @@ static BlockDriverAIOCB *bdrv_aio_rw_vector(BlockDriverState *bs,
     acb = qemu_aio_get(bs, cb, opaque);
     acb->is_write = is_write;
     acb->qiov = qiov;
-    acb->bounce = qemu_memalign(512, qiov->size);
+    acb->bounce = qemu_blockalign(bs, qiov->size);
 
     if (!acb->bh)
         acb->bh = qemu_bh_new(bdrv_aio_bh_cb, acb);
@@ -1434,7 +1455,7 @@ static int bdrv_read_em(BlockDriverState *bs, int64_t sector_num,
     QEMUIOVector qiov;
 
     async_ret = NOT_DONE;
-    iov.iov_base = buf;
+    iov.iov_base = (void *)buf;
     iov.iov_len = nb_sectors * 512;
     qemu_iovec_init_external(&qiov, &iov, 1);
     acb = bdrv_aio_readv(bs, sector_num, &qiov, nb_sectors,
@@ -1625,4 +1646,9 @@ BlockDriverAIOCB *bdrv_aio_ioctl(BlockDriverState *bs,
     if (drv && drv->bdrv_aio_ioctl)
         return drv->bdrv_aio_ioctl(bs, req, buf, cb, opaque);
     return NULL;
+}
+
+void *qemu_blockalign(BlockDriverState *bs, size_t size)
+{
+    return qemu_memalign((bs && bs->buffer_alignment) ? bs->buffer_alignment : 512, size);
 }

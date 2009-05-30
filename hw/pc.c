@@ -37,6 +37,8 @@
 #include "virtio-balloon.h"
 #include "virtio-console.h"
 #include "hpet_emul.h"
+#include "watchdog.h"
+#include "smbios.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -51,6 +53,7 @@
 #define ACPI_DATA_SIZE       0x10000
 #define BIOS_CFG_IOPORT 0x510
 #define FW_CFG_ACPI_TABLES (FW_CFG_ARCH_LOCAL + 0)
+#define FW_CFG_SMBIOS_ENTRIES (FW_CFG_ARCH_LOCAL + 1)
 
 #define MAX_IDE_BUS 2
 
@@ -59,6 +62,30 @@ static RTCState *rtc_state;
 static PITState *pit;
 static IOAPICState *ioapic;
 static PCIDevice *i440fx_state;
+
+typedef struct rom_reset_data {
+    uint8_t *data;
+    target_phys_addr_t addr;
+    unsigned size;
+} RomResetData;
+
+static void option_rom_reset(void *_rrd)
+{
+    RomResetData *rrd = _rrd;
+
+    cpu_physical_memory_write_rom(rrd->addr, rrd->data, rrd->size);
+}
+
+static void option_rom_setup_reset(target_phys_addr_t addr, unsigned size)
+{
+    RomResetData *rrd = qemu_malloc(sizeof *rrd);
+
+    rrd->data = qemu_malloc(size);
+    cpu_physical_memory_read(addr, rrd->data, size);
+    rrd->addr = addr;
+    rrd->size = size;
+    qemu_register_reset(option_rom_reset, rrd);
+}
 
 static void ioport80_write(void *opaque, uint32_t addr, uint32_t data)
 {
@@ -83,7 +110,7 @@ uint64_t cpu_get_tsc(CPUX86State *env)
     /* Note: when using kqemu, it is more logical to return the host TSC
        because kqemu does not trap the RDTSC instruction for
        performance reasons */
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env->kqemu_enabled) {
         return cpu_get_real_ticks();
     } else
@@ -422,9 +449,15 @@ static void bochs_bios_write(void *opaque, uint32_t addr, uint32_t val)
     }
 }
 
+extern uint64_t node_cpumask[MAX_NODES];
+
 static void bochs_bios_init(void)
 {
     void *fw_cfg;
+    uint8_t *smbios_table;
+    size_t smbios_len;
+    uint64_t *numa_fw_cfg;
+    int i, j;
 
     register_ioport_write(0x400, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x401, 1, 2, bochs_bios_write, NULL);
@@ -442,6 +475,31 @@ static void bochs_bios_init(void)
     fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
     fw_cfg_add_bytes(fw_cfg, FW_CFG_ACPI_TABLES, (uint8_t *)acpi_tables,
                      acpi_tables_len);
+
+    smbios_table = smbios_get_table(&smbios_len);
+    if (smbios_table)
+        fw_cfg_add_bytes(fw_cfg, FW_CFG_SMBIOS_ENTRIES,
+                         smbios_table, smbios_len);
+
+    /* allocate memory for the NUMA channel: one (64bit) word for the number
+     * of nodes, one word for each VCPU->node and one word for each node to
+     * hold the amount of memory.
+     */
+    numa_fw_cfg = qemu_mallocz((1 + smp_cpus + nb_numa_nodes) * 8);
+    numa_fw_cfg[0] = cpu_to_le64(nb_numa_nodes);
+    for (i = 0; i < smp_cpus; i++) {
+        for (j = 0; j < nb_numa_nodes; j++) {
+            if (node_cpumask[j] & (1 << i)) {
+                numa_fw_cfg[i + 1] = cpu_to_le64(j);
+                break;
+            }
+        }
+    }
+    for (i = 0; i < nb_numa_nodes; i++) {
+        numa_fw_cfg[smp_cpus + 1 + i] = cpu_to_le64(node_mem[i]);
+    }
+    fw_cfg_add_bytes(fw_cfg, FW_CFG_NUMA, (uint8_t *)numa_fw_cfg,
+                     (1 + smp_cpus + nb_numa_nodes) * 8);
 }
 
 /* Generate an initial boot sector which sets state and jump to
@@ -521,6 +579,7 @@ static void generate_bootsect(target_phys_addr_t option_rom,
     rom[sizeof(rom) - 1] = -sum;
 
     cpu_physical_memory_write_rom(option_rom, rom, sizeof(rom));
+    option_rom_setup_reset(option_rom, sizeof (rom));
 }
 
 static long get_file_size(FILE *f)
@@ -688,6 +747,12 @@ static void load_linux(target_phys_addr_t option_rom,
     memset(gpr, 0, sizeof gpr);
     gpr[4] = cmdline_addr-real_addr-16;	/* SP (-16 is paranoia) */
 
+    option_rom_setup_reset(real_addr, setup_size);
+    option_rom_setup_reset(prot_addr, kernel_size);
+    option_rom_setup_reset(cmdline_addr, cmdline_size);
+    if (initrd_filename)
+        option_rom_setup_reset(initrd_addr, initrd_size);
+
     generate_bootsect(option_rom, gpr, seg, 0);
 }
 
@@ -723,19 +788,13 @@ static void audio_init (PCIBus *pci_bus, qemu_irq *pic)
     }
 
     if (audio_enabled) {
-        AudioState *s;
-
-        s = AUD_init ();
-        if (s) {
-            for (c = soundhw; c->name; ++c) {
-                if (c->enabled) {
-                    if (c->isa) {
-                        c->init.init_isa (s, pic);
-                    }
-                    else {
-                        if (pci_bus) {
-                            c->init.init_pci (pci_bus, s);
-                        }
+        for (c = soundhw; c->name; ++c) {
+            if (c->enabled) {
+                if (c->isa) {
+                    c->init.init_isa(pic);
+                } else {
+                    if (pci_bus) {
+                        c->init.init_pci(pci_bus);
                     }
                 }
             }
@@ -772,6 +831,7 @@ static int load_option_rom(const char *oprom, target_phys_addr_t start,
         }
         /* Round up optiom rom size to the next 2k boundary */
         size = (size + 2047) & ~2047;
+        option_rom_setup_reset(start, size);
         return size;
 }
 
@@ -886,8 +946,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 
     option_rom_offset = qemu_ram_alloc(0x20000);
     oprom_area_size = 0;
-    cpu_register_physical_memory(0xc0000, 0x20000,
-                                 option_rom_offset | IO_MEM_ROM);
+    cpu_register_physical_memory(0xc0000, 0x20000, option_rom_offset);
 
     if (using_vga) {
         /* VGA BIOS load */
@@ -989,6 +1048,8 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                           parallel_hds[i]);
         }
     }
+
+    watchdog_pc_init(pci_bus);
 
     for(i = 0; i < nb_nics; i++) {
         NICInfo *nd = &nd_table[i];

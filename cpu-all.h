@@ -775,6 +775,8 @@ void cpu_reset_interrupt(CPUState *env, int mask);
 
 void cpu_exit(CPUState *s);
 
+int qemu_cpu_has_work(CPUState *env);
+
 /* Breakpoint/watchpoint flags */
 #define BP_MEM_READ           0x01
 #define BP_MEM_WRITE          0x02
@@ -846,7 +848,7 @@ int cpu_inl(CPUState *env, int addr);
 #endif
 
 /* address in the RAM (different from a physical address) */
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
 typedef uint32_t ram_addr_t;
 #else
 typedef unsigned long ram_addr_t;
@@ -915,8 +917,6 @@ int cpu_register_io_memory(int io_index,
                            CPUWriteMemoryFunc **mem_write,
                            void *opaque);
 void cpu_unregister_io_memory(int table_address);
-CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index);
-CPUReadMemoryFunc **cpu_get_io_memory_read(int io_index);
 
 void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
                             int len, int is_write);

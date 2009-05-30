@@ -483,13 +483,18 @@ static int pm_load(QEMUFile* f,void* opaque,int version_id)
 
 static void piix4_reset(void *opaque)
 {
-	PIIX4PMState *s = opaque;
-	uint8_t *pci_conf = s->dev.config;
+    PIIX4PMState *s = opaque;
+    uint8_t *pci_conf = s->dev.config;
 
-	pci_conf[0x58] = 0;
-	pci_conf[0x59] = 0;
-	pci_conf[0x5a] = 0;
-	pci_conf[0x5b] = 0;
+    pci_conf[0x58] = 0;
+    pci_conf[0x59] = 0;
+    pci_conf[0x5a] = 0;
+    pci_conf[0x5b] = 0;
+
+    if (kvm_enabled()) {
+        /* Mark SMM as already inited (until KVM supports SMM). */
+        pci_conf[0x5B] = 0x02;
+    }
 }
 
 i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
@@ -510,7 +515,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
     pci_conf[0x08] = 0x03; // revision number
     pci_conf[0x09] = 0x00;
     pci_config_set_class(pci_conf, PCI_CLASS_BRIDGE_OTHER);
-    pci_conf[0x0e] = 0x00; // header_type
+    pci_conf[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; // header_type
     pci_conf[0x3d] = 0x01; // interrupt pin 1
 
     pci_conf[0x40] = 0x01; /* PM io base read only bit */
@@ -604,7 +609,7 @@ static uint32_t gpe_readb(void *opaque, uint32_t addr)
     }
 
 #if defined(DEBUG)
-    printf("gpe read %lx == %lx\n", addr, val);
+    printf("gpe read %x == %x\n", addr, val);
 #endif
     return val;
 }
@@ -646,7 +651,7 @@ static void gpe_writeb(void *opaque, uint32_t addr, uint32_t val)
    }
 
 #if defined(DEBUG)
-    printf("gpe write %lx <== %d\n", addr, val);
+    printf("gpe write %x <== %d\n", addr, val);
 #endif
 }
 
@@ -666,7 +671,7 @@ static uint32_t pcihotplug_read(void *opaque, uint32_t addr)
     }
 
 #if defined(DEBUG)
-    printf("pcihotplug read %lx == %lx\n", addr, val);
+    printf("pcihotplug read %x == %x\n", addr, val);
 #endif
     return val;
 }
@@ -684,14 +689,14 @@ static void pcihotplug_write(void *opaque, uint32_t addr, uint32_t val)
    }
 
 #if defined(DEBUG)
-    printf("pcihotplug write %lx <== %d\n", addr, val);
+    printf("pcihotplug write %x <== %d\n", addr, val);
 #endif
 }
 
 static uint32_t pciej_read(void *opaque, uint32_t addr)
 {
 #if defined(DEBUG)
-    printf("pciej read %lx == %lx\n", addr, val);
+    printf("pciej read %x\n", addr);
 #endif
     return 0;
 }
@@ -705,7 +710,7 @@ static void pciej_write(void *opaque, uint32_t addr, uint32_t val)
 #endif
 
 #if defined(DEBUG)
-    printf("pciej write %lx <== %d\n", addr, val);
+    printf("pciej write %x <== %d\n", addr, val);
 #endif
 }
 

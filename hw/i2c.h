@@ -46,12 +46,12 @@ void i2c_slave_save(QEMUFile *f, i2c_slave *dev);
 void i2c_slave_load(QEMUFile *f, i2c_slave *dev);
 
 /* max111x.c */
-struct max111x_s;
+typedef struct MAX111xState MAX111xState;
 uint32_t max111x_read(void *opaque);
 void max111x_write(void *opaque, uint32_t value);
-struct max111x_s *max1110_init(qemu_irq cb);
-struct max111x_s *max1111_init(qemu_irq cb);
-void max111x_set_input(struct max111x_s *s, int line, uint8_t value);
+MAX111xState *max1110_init(qemu_irq cb);
+MAX111xState *max1111_init(qemu_irq cb);
+void max111x_set_input(MAX111xState *s, int line, uint8_t value);
 
 /* max7310.c */
 i2c_slave *max7310_init(i2c_bus *bus);
@@ -60,7 +60,7 @@ qemu_irq *max7310_gpio_in_get(i2c_slave *i2c);
 void max7310_gpio_out_set(i2c_slave *i2c, int line, qemu_irq handler);
 
 /* wm8750.c */
-i2c_slave *wm8750_init(i2c_bus *bus, AudioState *audio);
+i2c_slave *wm8750_init(i2c_bus *bus);
 void wm8750_reset(i2c_slave *i2c);
 void wm8750_data_req_set(i2c_slave *i2c,
                 void (*data_req)(void *, int, int), void *opaque);

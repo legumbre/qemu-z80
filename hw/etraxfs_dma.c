@@ -392,10 +392,8 @@ static void channel_update_irq(struct fs_dma_ctrl *ctrl, int c)
 		 c,
 		 ctrl->channels[c].regs[R_MASKED_INTR]));
 
-        if (ctrl->channels[c].regs[R_MASKED_INTR])
-                qemu_irq_raise(ctrl->channels[c].irq[0]);
-        else
-                qemu_irq_lower(ctrl->channels[c].irq[0]);
+        qemu_set_irq(ctrl->channels[c].irq[0],
+		     !!ctrl->channels[c].regs[R_MASKED_INTR]);
 }
 
 static int channel_out_run(struct fs_dma_ctrl *ctrl, int c)
@@ -564,10 +562,7 @@ static inline int channel_in_run(struct fs_dma_ctrl *ctrl, int c)
 
 static uint32_t dma_rinvalid (void *opaque, target_phys_addr_t addr)
 {
-        struct fs_dma_ctrl *ctrl = opaque;
-        CPUState *env = ctrl->env;
-        cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-                  addr);
+        hw_error("Unsupported short access. reg=" TARGET_FMT_plx "\n", addr);
         return 0;
 }
 
@@ -602,10 +597,7 @@ dma_readl (void *opaque, target_phys_addr_t addr)
 static void
 dma_winvalid (void *opaque, target_phys_addr_t addr, uint32_t value)
 {
-        struct fs_dma_ctrl *ctrl = opaque;
-        CPUState *env = ctrl->env;
-        cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-                  addr);
+        hw_error("Unsupported short access. reg=" TARGET_FMT_plx "\n", addr);
 }
 
 static void

@@ -509,9 +509,12 @@ static inline uint8_t fat_chksum(const direntry_t* entry)
     uint8_t chksum=0;
     int i;
 
-    for(i=0;i<11;i++)
-	chksum=(((chksum&0xfe)>>1)|((chksum&0x01)?0x80:0))
-	    +(unsigned char)entry->name[i];
+    for(i=0;i<11;i++) {
+        unsigned char c;
+
+        c = (i <= 8) ? entry->name[i] : entry->extension[i-8];
+        chksum=(((chksum&0xfe)>>1)|((chksum&0x01)?0x80:0)) + c;
+    }
 
     return chksum;
 }
@@ -1778,7 +1781,7 @@ DLOG(fprintf(stderr, "read cluster %d (sector %d)\n", (int)cluster_num, (int)clu
 	}
 
 	for (i = 0; i < 0x10 * s->sectors_per_cluster; i++) {
-	    int cluster_count;
+	    int cluster_count = 0;
 
 DLOG(fprintf(stderr, "check direntry %d: \n", i); print_direntry(direntries + i));
 	    if (is_volume_label(direntries + i) || is_dot(direntries + i) ||

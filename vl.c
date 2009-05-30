@@ -138,6 +138,9 @@ int main(int argc, char **argv)
 #include "hw/isa.h"
 #include "hw/baum.h"
 #include "hw/bt.h"
+#include "hw/watchdog.h"
+#include "hw/smbios.h"
+#include "hw/xen.h"
 #include "bt-host.h"
 #include "net.h"
 #include "monitor.h"
@@ -214,6 +217,7 @@ static int rtc_date_offset = -1; /* -1 means no change */
 int cirrus_vga_enabled = 1;
 int std_vga_enabled = 0;
 int vmsvga_enabled = 0;
+int xenfb_enabled = 0;
 #ifdef TARGET_SPARC
 int graphic_width = 1024;
 int graphic_height = 768;
@@ -249,6 +253,8 @@ int graphic_rotate = 0;
 #ifndef _WIN32
 int daemonize = 0;
 #endif
+WatchdogTimerModel *watchdog = NULL;
+int watchdog_action = WDT_RESET;
 const char *option_rom[MAX_OPTION_ROMS];
 int nb_option_roms;
 int semihosting_enabled = 0;
@@ -264,9 +270,13 @@ const char *prom_envs[MAX_PROM_ENVS];
 int nb_drives_opt;
 struct drive_opt drives_opt[MAX_DRIVES];
 
+int nb_numa_nodes;
+uint64_t node_mem[MAX_NODES];
+uint64_t node_cpumask[MAX_NODES];
+
 static CPUState *cur_cpu;
 static CPUState *next_cpu;
-static int event_pending = 1;
+static int timer_alarm_pending = 1;
 /* Conversion factor from emulated instructions to virtual clock ticks.  */
 static int icount_time_shift;
 /* Arbitrarily pick 1MIPS as the minimum allowable speed.  */
@@ -434,7 +444,7 @@ void cpu_outb(CPUState *env, int addr, int val)
 {
     LOG_IOPORT("outb: %04x %02x\n", addr, val);
     ioport_write(0, addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -444,7 +454,7 @@ void cpu_outw(CPUState *env, int addr, int val)
 {
     LOG_IOPORT("outw: %04x %04x\n", addr, val);
     ioport_write(1, addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -454,7 +464,7 @@ void cpu_outl(CPUState *env, int addr, int val)
 {
     LOG_IOPORT("outl: %04x %08x\n", addr, val);
     ioport_write(2, addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -465,7 +475,7 @@ int cpu_inb(CPUState *env, int addr)
     int val;
     val = ioport_read(0, addr);
     LOG_IOPORT("inb : %04x %02x\n", addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -477,7 +487,7 @@ int cpu_inw(CPUState *env, int addr)
     int val;
     val = ioport_read(1, addr);
     LOG_IOPORT("inw : %04x %04x\n", addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -489,7 +499,7 @@ int cpu_inl(CPUState *env, int addr)
     int val;
     val = ioport_read(2, addr);
     LOG_IOPORT("inl : %04x %08x\n", addr, val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env)
         env->last_io_time = cpu_get_time_fast();
 #endif
@@ -921,17 +931,13 @@ static void qemu_rearm_alarm_timer(struct qemu_alarm_timer *t)
 #define MIN_TIMER_REARM_US 250
 
 static struct qemu_alarm_timer *alarm_timer;
-#ifndef _WIN32
-static int alarm_timer_rfd, alarm_timer_wfd;
-#endif
 
 #ifdef _WIN32
 
 struct qemu_alarm_win32 {
     MMRESULT timerId;
-    HANDLE host_alarm;
     unsigned int period;
-} alarm_win32_data = {0, NULL, -1};
+} alarm_win32_data = {0, -1};
 
 static int win32_start_timer(struct qemu_alarm_timer *t);
 static void win32_stop_timer(struct qemu_alarm_timer *t);
@@ -1186,9 +1192,8 @@ void qemu_mod_timer(QEMUTimer *ts, int64_t expire_time)
             qemu_rearm_alarm_timer(alarm_timer);
         }
         /* Interrupt execution to force deadline recalculation.  */
-        if (use_icount && cpu_single_env) {
-            cpu_exit(cpu_single_env);
-        }
+        if (use_icount)
+            qemu_notify_event();
     }
 }
 
@@ -1299,6 +1304,8 @@ static int timer_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static void qemu_event_increment(void);
+
 #ifdef _WIN32
 static void CALLBACK host_alarm_handler(UINT uTimerID, UINT uMsg,
                                         DWORD_PTR dwUser, DWORD_PTR dw1,
@@ -1342,27 +1349,22 @@ static void host_alarm_handler(int host_signum)
                                qemu_get_clock(vm_clock))) ||
         qemu_timer_expired(active_timers[QEMU_TIMER_REALTIME],
                            qemu_get_clock(rt_clock))) {
-        CPUState *env = next_cpu;
-
-#ifdef _WIN32
-        struct qemu_alarm_win32 *data = ((struct qemu_alarm_timer*)dwUser)->priv;
-        SetEvent(data->host_alarm);
-#else
-        static const char byte = 0;
-        write(alarm_timer_wfd, &byte, sizeof(byte));
-#endif
+        qemu_event_increment();
         alarm_timer->flags |= ALARM_FLAG_EXPIRED;
 
-        if (env) {
+#ifndef CONFIG_IOTHREAD
+        if (next_cpu) {
             /* stop the currently executing cpu because a timer occured */
-            cpu_exit(env);
-#ifdef USE_KQEMU
-            if (env->kqemu_enabled) {
-                kqemu_cpu_interrupt(env);
+            cpu_exit(next_cpu);
+#ifdef CONFIG_KQEMU
+            if (next_cpu->kqemu_enabled) {
+                kqemu_cpu_interrupt(next_cpu);
             }
 #endif
         }
-        event_pending = 1;
+#endif
+        timer_alarm_pending = 1;
+        qemu_notify_event();
     }
 }
 
@@ -1638,24 +1640,6 @@ static void unix_stop_timer(struct qemu_alarm_timer *t)
 
 #endif /* !defined(_WIN32) */
 
-static void try_to_rearm_timer(void *opaque)
-{
-    struct qemu_alarm_timer *t = opaque;
-#ifndef _WIN32
-    ssize_t len;
-
-    /* Drain the notify pipe */
-    do {
-        char buffer[512];
-        len = read(alarm_timer_rfd, buffer, sizeof(buffer));
-    } while ((len == -1 && errno == EINTR) || len > 0);
-#endif
-
-    if (t->flags & ALARM_FLAG_EXPIRED) {
-        alarm_timer->flags &= ~ALARM_FLAG_EXPIRED;
-        qemu_rearm_alarm_timer(alarm_timer);
-    }
-}
 
 #ifdef _WIN32
 
@@ -1664,12 +1648,6 @@ static int win32_start_timer(struct qemu_alarm_timer *t)
     TIMECAPS tc;
     struct qemu_alarm_win32 *data = t->priv;
     UINT flags;
-
-    data->host_alarm = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!data->host_alarm) {
-        perror("Failed CreateEvent");
-        return -1;
-    }
 
     memset(&tc, 0, sizeof(tc));
     timeGetDevCaps(&tc, sizeof(tc));
@@ -1693,13 +1671,9 @@ static int win32_start_timer(struct qemu_alarm_timer *t)
 
     if (!data->timerId) {
         perror("Failed to initialize win32 alarm timer");
-
         timeEndPeriod(data->period);
-        CloseHandle(data->host_alarm);
         return -1;
     }
-
-    qemu_add_wait_object(data->host_alarm, try_to_rearm_timer, t);
 
     return 0;
 }
@@ -1710,8 +1684,6 @@ static void win32_stop_timer(struct qemu_alarm_timer *t)
 
     timeKillEvent(data->timerId);
     timeEndPeriod(data->period);
-
-    CloseHandle(data->host_alarm);
 }
 
 static void win32_rearm_timer(struct qemu_alarm_timer *t)
@@ -1738,7 +1710,6 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t)
         perror("Failed to re-arm win32 alarm timer");
 
         timeEndPeriod(data->period);
-        CloseHandle(data->host_alarm);
         exit(1);
     }
 }
@@ -1749,25 +1720,6 @@ static int init_timer_alarm(void)
 {
     struct qemu_alarm_timer *t = NULL;
     int i, err = -1;
-
-#ifndef _WIN32
-    int fds[2];
-
-    err = pipe(fds);
-    if (err == -1)
-        return -errno;
-
-    err = fcntl_setfl(fds[0], O_NONBLOCK);
-    if (err < 0)
-        goto fail;
-
-    err = fcntl_setfl(fds[1], O_NONBLOCK);
-    if (err < 0)
-        goto fail;
-
-    alarm_timer_rfd = fds[0];
-    alarm_timer_wfd = fds[1];
-#endif
 
     for (i = 0; alarm_timers[i].name; i++) {
         t = &alarm_timers[i];
@@ -1782,20 +1734,11 @@ static int init_timer_alarm(void)
         goto fail;
     }
 
-#ifndef _WIN32
-    qemu_set_fd_handler2(alarm_timer_rfd, NULL,
-                         try_to_rearm_timer, NULL, t);
-#endif
-
     alarm_timer = t;
 
     return 0;
 
 fail:
-#ifndef _WIN32
-    close(fds[0]);
-    close(fds[1]);
-#endif
     return err;
 }
 
@@ -1864,12 +1807,12 @@ static int socket_init(void)
 }
 #endif
 
-const char *get_opt_name(char *buf, int buf_size, const char *p)
+const char *get_opt_name(char *buf, int buf_size, const char *p, char delim)
 {
     char *q;
 
     q = buf;
-    while (*p != '\0' && *p != '=') {
+    while (*p != '\0' && *p != delim) {
         if (q && (q - buf) < buf_size - 1)
             *q++ = *p;
         p++;
@@ -1909,7 +1852,7 @@ int get_param_value(char *buf, int buf_size,
 
     p = str;
     for(;;) {
-        p = get_opt_name(option, sizeof(option), p);
+        p = get_opt_name(option, sizeof(option), p, '=');
         if (*p != '=')
             break;
         p++;
@@ -1926,29 +1869,45 @@ int get_param_value(char *buf, int buf_size,
     return 0;
 }
 
-int check_params(char *buf, int buf_size,
-                 const char * const *params, const char *str)
+int check_params(const char * const *params, const char *str)
 {
+    int name_buf_size = 1;
     const char *p;
-    int i;
+    char *name_buf;
+    int i, len;
+    int ret = 0;
+
+    for (i = 0; params[i] != NULL; i++) {
+        len = strlen(params[i]) + 1;
+        if (len > name_buf_size) {
+            name_buf_size = len;
+        }
+    }
+    name_buf = qemu_malloc(name_buf_size);
 
     p = str;
-    for(;;) {
-        p = get_opt_name(buf, buf_size, p);
-        if (*p != '=')
-            return -1;
+    while (*p != '\0') {
+        p = get_opt_name(name_buf, name_buf_size, p, '=');
+        if (*p != '=') {
+            ret = -1;
+            break;
+        }
         p++;
         for(i = 0; params[i] != NULL; i++)
-            if (!strcmp(params[i], buf))
+            if (!strcmp(params[i], name_buf))
                 break;
-        if (params[i] == NULL)
-            return -1;
+        if (params[i] == NULL) {
+            ret = -1;
+            break;
+        }
         p = get_opt_value(NULL, 0, p);
         if (*p != ',')
             break;
         p++;
     }
-    return 0;
+
+    qemu_free(name_buf);
+    return ret;
 }
 
 /***********************************************************/
@@ -2301,7 +2260,7 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
                                            "cache", "format", "serial", "werror",
                                            NULL };
 
-    if (check_params(buf, sizeof(buf), params, str) < 0) {
+    if (check_params(params, str) < 0) {
          fprintf(stderr, "qemu: unknown parameter '%s' in '%s'\n",
                          buf, str);
          return -1;
@@ -2367,7 +2326,10 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
         } else if (!strcmp(buf, "virtio")) {
             type = IF_VIRTIO;
             max_devs = 0;
-        } else {
+	} else if (!strcmp(buf, "xen")) {
+	    type = IF_XEN;
+            max_devs = 0;
+	} else {
             fprintf(stderr, "qemu: '%s' unsupported bus type '%s'\n", str, buf);
             return -1;
 	}
@@ -2575,12 +2537,13 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
     drives_table[drives_table_idx].unit = unit_id;
     drives_table[drives_table_idx].onerror = onerror;
     drives_table[drives_table_idx].drive_opt_idx = arg - drives_opt;
-    strncpy(drives_table[nb_drives].serial, serial, sizeof(serial));
+    strncpy(drives_table[drives_table_idx].serial, serial, sizeof(serial));
     nb_drives++;
 
     switch(type) {
     case IF_IDE:
     case IF_SCSI:
+    case IF_XEN:
         switch(media) {
 	case MEDIA_DISK:
             if (cyls != 0) {
@@ -2625,6 +2588,62 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
     if (bdrv_key_required(bdrv))
         autostart = 0;
     return drives_table_idx;
+}
+
+static void numa_add(const char *optarg)
+{
+    char option[128];
+    char *endptr;
+    unsigned long long value, endvalue;
+    int nodenr;
+
+    optarg = get_opt_name(option, 128, optarg, ',') + 1;
+    if (!strcmp(option, "node")) {
+        if (get_param_value(option, 128, "nodeid", optarg) == 0) {
+            nodenr = nb_numa_nodes;
+        } else {
+            nodenr = strtoull(option, NULL, 10);
+        }
+
+        if (get_param_value(option, 128, "mem", optarg) == 0) {
+            node_mem[nodenr] = 0;
+        } else {
+            value = strtoull(option, &endptr, 0);
+            switch (*endptr) {
+            case 0: case 'M': case 'm':
+                value <<= 20;
+                break;
+            case 'G': case 'g':
+                value <<= 30;
+                break;
+            }
+            node_mem[nodenr] = value;
+        }
+        if (get_param_value(option, 128, "cpus", optarg) == 0) {
+            node_cpumask[nodenr] = 0;
+        } else {
+            value = strtoull(option, &endptr, 10);
+            if (value >= 64) {
+                value = 63;
+                fprintf(stderr, "only 64 CPUs in NUMA mode supported.\n");
+            } else {
+                if (*endptr == '-') {
+                    endvalue = strtoull(endptr+1, &endptr, 10);
+                    if (endvalue >= 63) {
+                        endvalue = 62;
+                        fprintf(stderr,
+                            "only 63 CPUs in NUMA mode supported.\n");
+                    }
+                    value = (1 << (endvalue + 1)) - (1 << value);
+                } else {
+                    value = 1 << value;
+                }
+            }
+            node_cpumask[nodenr] = value;
+        }
+        nb_numa_nodes++;
+    }
+    return;
 }
 
 /***********************************************************/
@@ -2837,11 +2856,11 @@ void usb_info(Monitor *mon)
 /* PCMCIA/Cardbus */
 
 static struct pcmcia_socket_entry_s {
-    struct pcmcia_socket_s *socket;
+    PCMCIASocket *socket;
     struct pcmcia_socket_entry_s *next;
 } *pcmcia_sockets = 0;
 
-void pcmcia_socket_register(struct pcmcia_socket_s *socket)
+void pcmcia_socket_register(PCMCIASocket *socket)
 {
     struct pcmcia_socket_entry_s *entry;
 
@@ -2851,7 +2870,7 @@ void pcmcia_socket_register(struct pcmcia_socket_s *socket)
     pcmcia_sockets = entry;
 }
 
-void pcmcia_socket_unregister(struct pcmcia_socket_s *socket)
+void pcmcia_socket_unregister(PCMCIASocket *socket)
 {
     struct pcmcia_socket_entry_s *entry, **ptr;
 
@@ -3339,15 +3358,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
 
 void qemu_service_io(void)
 {
-    CPUState *env = cpu_single_env;
-    if (env) {
-        cpu_exit(env);
-#ifdef USE_KQEMU
-        if (env->kqemu_enabled) {
-            kqemu_cpu_interrupt(env);
-        }
-#endif
-    }
+    qemu_notify_event();
 }
 
 /***********************************************************/
@@ -3415,15 +3426,12 @@ void qemu_bh_schedule_idle(QEMUBH *bh)
 
 void qemu_bh_schedule(QEMUBH *bh)
 {
-    CPUState *env = cpu_single_env;
     if (bh->scheduled)
         return;
     bh->scheduled = 1;
     bh->idle = 0;
     /* stop the currently executing CPU to execute the BH ASAP */
-    if (env) {
-        cpu_exit(env);
-    }
+    qemu_notify_event();
 }
 
 void qemu_bh_cancel(QEMUBH *bh)
@@ -3548,6 +3556,9 @@ static void vm_state_notify(int running, int reason)
     }
 }
 
+static void resume_all_vcpus(void);
+static void pause_all_vcpus(void);
+
 void vm_start(void)
 {
     if (!vm_running) {
@@ -3555,15 +3566,7 @@ void vm_start(void)
         vm_running = 1;
         vm_state_notify(1, 0);
         qemu_rearm_alarm_timer(alarm_timer);
-    }
-}
-
-void vm_stop(int reason)
-{
-    if (vm_running) {
-        cpu_disable_ticks();
-        vm_running = 0;
-        vm_state_notify(0, reason);
+        resume_all_vcpus();
     }
 }
 
@@ -3579,6 +3582,8 @@ static QEMUResetEntry *first_reset_entry;
 static int reset_requested;
 static int shutdown_requested;
 static int powerdown_requested;
+static int debug_requested;
+static int vmstop_requested;
 
 int qemu_shutdown_requested(void)
 {
@@ -3599,6 +3604,30 @@ int qemu_powerdown_requested(void)
     int r = powerdown_requested;
     powerdown_requested = 0;
     return r;
+}
+
+static int qemu_debug_requested(void)
+{
+    int r = debug_requested;
+    debug_requested = 0;
+    return r;
+}
+
+static int qemu_vmstop_requested(void)
+{
+    int r = vmstop_requested;
+    vmstop_requested = 0;
+    return r;
+}
+
+static void do_vm_stop(int reason)
+{
+    if (vm_running) {
+        cpu_disable_ticks();
+        vm_running = 0;
+        pause_all_vcpus();
+        vm_state_notify(0, reason);
+    }
 }
 
 void qemu_register_reset(QEMUResetHandler *func, void *opaque)
@@ -3623,6 +3652,8 @@ void qemu_system_reset(void)
     for(re = first_reset_entry; re != NULL; re = re->next) {
         re->func(re->opaque);
     }
+    if (kvm_enabled())
+        kvm_sync_vcpus();
 }
 
 void qemu_system_reset_request(void)
@@ -3632,23 +3663,483 @@ void qemu_system_reset_request(void)
     } else {
         reset_requested = 1;
     }
-    if (cpu_single_env)
-        cpu_exit(cpu_single_env);
+    qemu_notify_event();
 }
 
 void qemu_system_shutdown_request(void)
 {
     shutdown_requested = 1;
-    if (cpu_single_env)
-        cpu_exit(cpu_single_env);
+    qemu_notify_event();
 }
 
 void qemu_system_powerdown_request(void)
 {
     powerdown_requested = 1;
+    qemu_notify_event();
+}
+
+#ifdef CONFIG_IOTHREAD
+static void qemu_system_vmstop_request(int reason)
+{
+    vmstop_requested = reason;
+    qemu_notify_event();
+}
+#endif
+
+#ifndef _WIN32
+static int io_thread_fd = -1;
+
+static void qemu_event_increment(void)
+{
+    static const char byte = 0;
+
+    if (io_thread_fd == -1)
+        return;
+
+    write(io_thread_fd, &byte, sizeof(byte));
+}
+
+static void qemu_event_read(void *opaque)
+{
+    int fd = (unsigned long)opaque;
+    ssize_t len;
+
+    /* Drain the notify pipe */
+    do {
+        char buffer[512];
+        len = read(fd, buffer, sizeof(buffer));
+    } while ((len == -1 && errno == EINTR) || len > 0);
+}
+
+static int qemu_event_init(void)
+{
+    int err;
+    int fds[2];
+
+    err = pipe(fds);
+    if (err == -1)
+        return -errno;
+
+    err = fcntl_setfl(fds[0], O_NONBLOCK);
+    if (err < 0)
+        goto fail;
+
+    err = fcntl_setfl(fds[1], O_NONBLOCK);
+    if (err < 0)
+        goto fail;
+
+    qemu_set_fd_handler2(fds[0], NULL, qemu_event_read, NULL,
+                         (void *)(unsigned long)fds[0]);
+
+    io_thread_fd = fds[1];
+    return 0;
+
+fail:
+    close(fds[0]);
+    close(fds[1]);
+    return err;
+}
+#else
+HANDLE qemu_event_handle;
+
+static void dummy_event_handler(void *opaque)
+{
+}
+
+static int qemu_event_init(void)
+{
+    qemu_event_handle = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!qemu_event_handle) {
+        perror("Failed CreateEvent");
+        return -1;
+    }
+    qemu_add_wait_object(qemu_event_handle, dummy_event_handler, NULL);
+    return 0;
+}
+
+static void qemu_event_increment(void)
+{
+    SetEvent(qemu_event_handle);
+}
+#endif
+
+static int cpu_can_run(CPUState *env)
+{
+    if (env->stop)
+        return 0;
+    if (env->stopped)
+        return 0;
+    return 1;
+}
+
+#ifndef CONFIG_IOTHREAD
+static int qemu_init_main_loop(void)
+{
+    return qemu_event_init();
+}
+
+void qemu_init_vcpu(void *_env)
+{
+    CPUState *env = _env;
+
+    if (kvm_enabled())
+        kvm_init_vcpu(env);
+    return;
+}
+
+int qemu_cpu_self(void *env)
+{
+    return 1;
+}
+
+static void resume_all_vcpus(void)
+{
+}
+
+static void pause_all_vcpus(void)
+{
+}
+
+void qemu_cpu_kick(void *env)
+{
+    return;
+}
+
+void qemu_notify_event(void)
+{
+    CPUState *env = cpu_single_env;
+
+    if (env) {
+        cpu_exit(env);
+#ifdef USE_KQEMU
+        if (env->kqemu_enabled)
+            kqemu_cpu_interrupt(env);
+#endif
+     }
+}
+
+#define qemu_mutex_lock_iothread() do { } while (0)
+#define qemu_mutex_unlock_iothread() do { } while (0)
+
+void vm_stop(int reason)
+{
+    do_vm_stop(reason);
+}
+
+#else /* CONFIG_IOTHREAD */
+
+#include "qemu-thread.h"
+
+QemuMutex qemu_global_mutex;
+static QemuMutex qemu_fair_mutex;
+
+static QemuThread io_thread;
+
+static QemuThread *tcg_cpu_thread;
+static QemuCond *tcg_halt_cond;
+
+static int qemu_system_ready;
+/* cpu creation */
+static QemuCond qemu_cpu_cond;
+/* system init */
+static QemuCond qemu_system_cond;
+static QemuCond qemu_pause_cond;
+
+static void block_io_signals(void);
+static void unblock_io_signals(void);
+static int tcg_has_work(void);
+
+static int qemu_init_main_loop(void)
+{
+    int ret;
+
+    ret = qemu_event_init();
+    if (ret)
+        return ret;
+
+    qemu_cond_init(&qemu_pause_cond);
+    qemu_mutex_init(&qemu_fair_mutex);
+    qemu_mutex_init(&qemu_global_mutex);
+    qemu_mutex_lock(&qemu_global_mutex);
+
+    unblock_io_signals();
+    qemu_thread_self(&io_thread);
+
+    return 0;
+}
+
+static void qemu_wait_io_event(CPUState *env)
+{
+    while (!tcg_has_work())
+        qemu_cond_timedwait(env->halt_cond, &qemu_global_mutex, 1000);
+
+    qemu_mutex_unlock(&qemu_global_mutex);
+
+    /*
+     * Users of qemu_global_mutex can be starved, having no chance
+     * to acquire it since this path will get to it first.
+     * So use another lock to provide fairness.
+     */
+    qemu_mutex_lock(&qemu_fair_mutex);
+    qemu_mutex_unlock(&qemu_fair_mutex);
+
+    qemu_mutex_lock(&qemu_global_mutex);
+    if (env->stop) {
+        env->stop = 0;
+        env->stopped = 1;
+        qemu_cond_signal(&qemu_pause_cond);
+    }
+}
+
+static int qemu_cpu_exec(CPUState *env);
+
+static void *kvm_cpu_thread_fn(void *arg)
+{
+    CPUState *env = arg;
+
+    block_io_signals();
+    qemu_thread_self(env->thread);
+
+    /* signal CPU creation */
+    qemu_mutex_lock(&qemu_global_mutex);
+    env->created = 1;
+    qemu_cond_signal(&qemu_cpu_cond);
+
+    /* and wait for machine initialization */
+    while (!qemu_system_ready)
+        qemu_cond_timedwait(&qemu_system_cond, &qemu_global_mutex, 100);
+
+    while (1) {
+        if (cpu_can_run(env))
+            qemu_cpu_exec(env);
+        qemu_wait_io_event(env);
+    }
+
+    return NULL;
+}
+
+static void tcg_cpu_exec(void);
+
+static void *tcg_cpu_thread_fn(void *arg)
+{
+    CPUState *env = arg;
+
+    block_io_signals();
+    qemu_thread_self(env->thread);
+
+    /* signal CPU creation */
+    qemu_mutex_lock(&qemu_global_mutex);
+    for (env = first_cpu; env != NULL; env = env->next_cpu)
+        env->created = 1;
+    qemu_cond_signal(&qemu_cpu_cond);
+
+    /* and wait for machine initialization */
+    while (!qemu_system_ready)
+        qemu_cond_timedwait(&qemu_system_cond, &qemu_global_mutex, 100);
+
+    while (1) {
+        tcg_cpu_exec();
+        qemu_wait_io_event(cur_cpu);
+    }
+
+    return NULL;
+}
+
+void qemu_cpu_kick(void *_env)
+{
+    CPUState *env = _env;
+    qemu_cond_broadcast(env->halt_cond);
+    if (kvm_enabled())
+        qemu_thread_signal(env->thread, SIGUSR1);
+}
+
+int qemu_cpu_self(void *env)
+{
+    return (cpu_single_env != NULL);
+}
+
+static void cpu_signal(int sig)
+{
     if (cpu_single_env)
         cpu_exit(cpu_single_env);
 }
+
+static void block_io_signals(void)
+{
+    sigset_t set;
+    struct sigaction sigact;
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR2);
+    sigaddset(&set, SIGIO);
+    sigaddset(&set, SIGALRM);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+    memset(&sigact, 0, sizeof(sigact));
+    sigact.sa_handler = cpu_signal;
+    sigaction(SIGUSR1, &sigact, NULL);
+}
+
+static void unblock_io_signals(void)
+{
+    sigset_t set;
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR2);
+    sigaddset(&set, SIGIO);
+    sigaddset(&set, SIGALRM);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+static void qemu_signal_lock(unsigned int msecs)
+{
+    qemu_mutex_lock(&qemu_fair_mutex);
+
+    while (qemu_mutex_trylock(&qemu_global_mutex)) {
+        qemu_thread_signal(tcg_cpu_thread, SIGUSR1);
+        if (!qemu_mutex_timedlock(&qemu_global_mutex, msecs))
+            break;
+    }
+    qemu_mutex_unlock(&qemu_fair_mutex);
+}
+
+static void qemu_mutex_lock_iothread(void)
+{
+    if (kvm_enabled()) {
+        qemu_mutex_lock(&qemu_fair_mutex);
+        qemu_mutex_lock(&qemu_global_mutex);
+        qemu_mutex_unlock(&qemu_fair_mutex);
+    } else
+        qemu_signal_lock(100);
+}
+
+static void qemu_mutex_unlock_iothread(void)
+{
+    qemu_mutex_unlock(&qemu_global_mutex);
+}
+
+static int all_vcpus_paused(void)
+{
+    CPUState *penv = first_cpu;
+
+    while (penv) {
+        if (!penv->stopped)
+            return 0;
+        penv = (CPUState *)penv->next_cpu;
+    }
+
+    return 1;
+}
+
+static void pause_all_vcpus(void)
+{
+    CPUState *penv = first_cpu;
+
+    while (penv) {
+        penv->stop = 1;
+        qemu_thread_signal(penv->thread, SIGUSR1);
+        qemu_cpu_kick(penv);
+        penv = (CPUState *)penv->next_cpu;
+    }
+
+    while (!all_vcpus_paused()) {
+        qemu_cond_timedwait(&qemu_pause_cond, &qemu_global_mutex, 100);
+        penv = first_cpu;
+        while (penv) {
+            qemu_thread_signal(penv->thread, SIGUSR1);
+            penv = (CPUState *)penv->next_cpu;
+        }
+    }
+}
+
+static void resume_all_vcpus(void)
+{
+    CPUState *penv = first_cpu;
+
+    while (penv) {
+        penv->stop = 0;
+        penv->stopped = 0;
+        qemu_thread_signal(penv->thread, SIGUSR1);
+        qemu_cpu_kick(penv);
+        penv = (CPUState *)penv->next_cpu;
+    }
+}
+
+static void tcg_init_vcpu(void *_env)
+{
+    CPUState *env = _env;
+    /* share a single thread for all cpus with TCG */
+    if (!tcg_cpu_thread) {
+        env->thread = qemu_mallocz(sizeof(QemuThread));
+        env->halt_cond = qemu_mallocz(sizeof(QemuCond));
+        qemu_cond_init(env->halt_cond);
+        qemu_thread_create(env->thread, tcg_cpu_thread_fn, env);
+        while (env->created == 0)
+            qemu_cond_timedwait(&qemu_cpu_cond, &qemu_global_mutex, 100);
+        tcg_cpu_thread = env->thread;
+        tcg_halt_cond = env->halt_cond;
+    } else {
+        env->thread = tcg_cpu_thread;
+        env->halt_cond = tcg_halt_cond;
+    }
+}
+
+static void kvm_start_vcpu(CPUState *env)
+{
+    kvm_init_vcpu(env);
+    env->thread = qemu_mallocz(sizeof(QemuThread));
+    env->halt_cond = qemu_mallocz(sizeof(QemuCond));
+    qemu_cond_init(env->halt_cond);
+    qemu_thread_create(env->thread, kvm_cpu_thread_fn, env);
+    while (env->created == 0)
+        qemu_cond_timedwait(&qemu_cpu_cond, &qemu_global_mutex, 100);
+}
+
+void qemu_init_vcpu(void *_env)
+{
+    CPUState *env = _env;
+
+    if (kvm_enabled())
+        kvm_start_vcpu(env);
+    else
+        tcg_init_vcpu(env);
+}
+
+void qemu_notify_event(void)
+{
+    qemu_event_increment();
+}
+
+void vm_stop(int reason)
+{
+    QemuThread me;
+    qemu_thread_self(&me);
+
+    if (!qemu_thread_equal(&me, &io_thread)) {
+        qemu_system_vmstop_request(reason);
+        /*
+         * FIXME: should not return to device code in case
+         * vm_stop() has been requested.
+         */
+        if (cpu_single_env) {
+            cpu_exit(cpu_single_env);
+            cpu_single_env->stop = 1;
+        }
+        return;
+    }
+    do_vm_stop(reason);
+}
+
+#endif
+
 
 #ifdef _WIN32
 static void host_main_loop_wait(int *timeout)
@@ -3742,7 +4233,9 @@ void main_loop_wait(int timeout)
         slirp_select_fill(&nfds, &rfds, &wfds, &xfds);
     }
 #endif
+    qemu_mutex_unlock_iothread();
     ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv);
+    qemu_mutex_lock_iothread();
     if (ret > 0) {
         IOHandlerRecord **pioh;
 
@@ -3777,10 +4270,18 @@ void main_loop_wait(int timeout)
     }
 #endif
 
+    /* rearm timer, if not periodic */
+    if (alarm_timer->flags & ALARM_FLAG_EXPIRED) {
+        alarm_timer->flags &= ~ALARM_FLAG_EXPIRED;
+        qemu_rearm_alarm_timer(alarm_timer);
+    }
+
     /* vm time timers */
-    if (vm_running && likely(!(cur_cpu->singlestep_enabled & SSTEP_NOTIMER)))
-        qemu_run_timers(&active_timers[QEMU_TIMER_VIRTUAL],
-                        qemu_get_clock(vm_clock));
+    if (vm_running) {
+        if (!cur_cpu || likely(!(cur_cpu->singlestep_enabled & SSTEP_NOTIMER)))
+            qemu_run_timers(&active_timers[QEMU_TIMER_VIRTUAL],
+                qemu_get_clock(vm_clock));
+    }
 
     /* real time timers */
     qemu_run_timers(&active_timers[QEMU_TIMER_REALTIME],
@@ -3792,153 +4293,206 @@ void main_loop_wait(int timeout)
 
 }
 
-static int main_loop(void)
+static int qemu_cpu_exec(CPUState *env)
 {
-    int ret, timeout;
+    int ret;
 #ifdef CONFIG_PROFILER
     int64_t ti;
 #endif
+
+#ifdef CONFIG_PROFILER
+    ti = profile_getclock();
+#endif
+    if (use_icount) {
+        int64_t count;
+        int decr;
+        qemu_icount -= (env->icount_decr.u16.low + env->icount_extra);
+        env->icount_decr.u16.low = 0;
+        env->icount_extra = 0;
+        count = qemu_next_deadline();
+        count = (count + (1 << icount_time_shift) - 1)
+                >> icount_time_shift;
+        qemu_icount += count;
+        decr = (count > 0xffff) ? 0xffff : count;
+        count -= decr;
+        env->icount_decr.u16.low = decr;
+        env->icount_extra = count;
+    }
+    ret = cpu_exec(env);
+#ifdef CONFIG_PROFILER
+    qemu_time += profile_getclock() - ti;
+#endif
+    if (use_icount) {
+        /* Fold pending instructions back into the
+           instruction counter, and clear the interrupt flag.  */
+        qemu_icount -= (env->icount_decr.u16.low
+                        + env->icount_extra);
+        env->icount_decr.u32 = 0;
+        env->icount_extra = 0;
+    }
+    return ret;
+}
+
+static void tcg_cpu_exec(void)
+{
+    int ret = 0;
+
+    if (next_cpu == NULL)
+        next_cpu = first_cpu;
+    for (; next_cpu != NULL; next_cpu = next_cpu->next_cpu) {
+        CPUState *env = cur_cpu = next_cpu;
+
+        if (!vm_running)
+            break;
+        if (timer_alarm_pending) {
+            timer_alarm_pending = 0;
+            break;
+        }
+        if (cpu_can_run(env))
+            ret = qemu_cpu_exec(env);
+        if (ret == EXCP_DEBUG) {
+            gdb_set_stop_cpu(env);
+            debug_requested = 1;
+            break;
+        }
+    }
+}
+
+static int cpu_has_work(CPUState *env)
+{
+    if (env->stop)
+        return 1;
+    if (env->stopped)
+        return 0;
+    if (!env->halted)
+        return 1;
+    if (qemu_cpu_has_work(env))
+        return 1;
+    return 0;
+}
+
+static int tcg_has_work(void)
+{
     CPUState *env;
 
-    cur_cpu = first_cpu;
-    next_cpu = cur_cpu->next_cpu ?: first_cpu;
-    for(;;) {
-        if (vm_running) {
+    for (env = first_cpu; env != NULL; env = env->next_cpu)
+        if (cpu_has_work(env))
+            return 1;
+    return 0;
+}
 
-            for(;;) {
-                /* get next cpu */
-                env = next_cpu;
-#ifdef CONFIG_PROFILER
-                ti = profile_getclock();
-#endif
-                if (use_icount) {
-                    int64_t count;
-                    int decr;
-                    qemu_icount -= (env->icount_decr.u16.low + env->icount_extra);
-                    env->icount_decr.u16.low = 0;
-                    env->icount_extra = 0;
-                    count = qemu_next_deadline();
-                    count = (count + (1 << icount_time_shift) - 1)
-                            >> icount_time_shift;
-                    qemu_icount += count;
-                    decr = (count > 0xffff) ? 0xffff : count;
-                    count -= decr;
-                    env->icount_decr.u16.low = decr;
-                    env->icount_extra = count;
-                }
-                ret = cpu_exec(env);
-#ifdef CONFIG_PROFILER
-                qemu_time += profile_getclock() - ti;
-#endif
-                if (use_icount) {
-                    /* Fold pending instructions back into the
-                       instruction counter, and clear the interrupt flag.  */
-                    qemu_icount -= (env->icount_decr.u16.low
-                                    + env->icount_extra);
-                    env->icount_decr.u32 = 0;
-                    env->icount_extra = 0;
-                }
-                next_cpu = env->next_cpu ?: first_cpu;
-                if (event_pending && likely(ret != EXCP_DEBUG)) {
-                    ret = EXCP_INTERRUPT;
-                    event_pending = 0;
-                    break;
-                }
-                if (ret == EXCP_HLT) {
-                    /* Give the next CPU a chance to run.  */
-                    cur_cpu = env;
-                    continue;
-                }
-                if (ret != EXCP_HALTED)
-                    break;
-                /* all CPUs are halted ? */
-                if (env == cur_cpu)
-                    break;
-            }
-            cur_cpu = env;
+static int qemu_calculate_timeout(void)
+{
+    int timeout;
 
-            if (shutdown_requested) {
-                ret = EXCP_INTERRUPT;
-                if (no_shutdown) {
-                    vm_stop(0);
-                    no_shutdown = 0;
-                }
-                else
-                    break;
-            }
-            if (reset_requested) {
-                reset_requested = 0;
-                qemu_system_reset();
-                ret = EXCP_INTERRUPT;
-            }
-            if (powerdown_requested) {
-                powerdown_requested = 0;
-		qemu_system_powerdown();
-                ret = EXCP_INTERRUPT;
-            }
-            if (unlikely(ret == EXCP_DEBUG)) {
-                gdb_set_stop_cpu(cur_cpu);
-                vm_stop(EXCP_DEBUG);
-            }
-            /* If all cpus are halted then wait until the next IRQ */
-            /* XXX: use timeout computed from timers */
-            if (ret == EXCP_HALTED) {
-                if (use_icount) {
-                    int64_t add;
-                    int64_t delta;
-                    /* Advance virtual time to the next event.  */
-                    if (use_icount == 1) {
-                        /* When not using an adaptive execution frequency
-                           we tend to get badly out of sync with real time,
-                           so just delay for a reasonable amount of time.  */
-                        delta = 0;
-                    } else {
-                        delta = cpu_get_icount() - cpu_get_clock();
-                    }
-                    if (delta > 0) {
-                        /* If virtual time is ahead of real time then just
-                           wait for IO.  */
-                        timeout = (delta / 1000000) + 1;
-                    } else {
-                        /* Wait for either IO to occur or the next
-                           timer event.  */
-                        add = qemu_next_deadline();
-                        /* We advance the timer before checking for IO.
-                           Limit the amount we advance so that early IO
-                           activity won't get the guest too far ahead.  */
-                        if (add > 10000000)
-                            add = 10000000;
-                        delta += add;
-                        add = (add + (1 << icount_time_shift) - 1)
-                              >> icount_time_shift;
-                        qemu_icount += add;
-                        timeout = delta / 1000000;
-                        if (timeout < 0)
-                            timeout = 0;
-                    }
-                } else {
-                    timeout = 5000;
-                }
-            } else {
-                timeout = 0;
-            }
+    if (!vm_running)
+        timeout = 5000;
+    else if (tcg_has_work())
+        timeout = 0;
+    else if (!use_icount)
+        timeout = 5000;
+    else {
+     /* XXX: use timeout computed from timers */
+        int64_t add;
+        int64_t delta;
+        /* Advance virtual time to the next event.  */
+        if (use_icount == 1) {
+            /* When not using an adaptive execution frequency
+               we tend to get badly out of sync with real time,
+               so just delay for a reasonable amount of time.  */
+            delta = 0;
         } else {
-            if (shutdown_requested) {
-                ret = EXCP_INTERRUPT;
-                break;
-            }
-            timeout = 5000;
+            delta = cpu_get_icount() - cpu_get_clock();
         }
-#ifdef CONFIG_PROFILER
-        ti = profile_getclock();
-#endif
-        main_loop_wait(timeout);
-#ifdef CONFIG_PROFILER
-        dev_time += profile_getclock() - ti;
-#endif
+        if (delta > 0) {
+            /* If virtual time is ahead of real time then just
+               wait for IO.  */
+            timeout = (delta / 1000000) + 1;
+        } else {
+            /* Wait for either IO to occur or the next
+               timer event.  */
+            add = qemu_next_deadline();
+            /* We advance the timer before checking for IO.
+               Limit the amount we advance so that early IO
+               activity won't get the guest too far ahead.  */
+            if (add > 10000000)
+                add = 10000000;
+            delta += add;
+            add = (add + (1 << icount_time_shift) - 1)
+                  >> icount_time_shift;
+            qemu_icount += add;
+            timeout = delta / 1000000;
+            if (timeout < 0)
+                timeout = 0;
+        }
     }
-    cpu_disable_ticks();
-    return ret;
+
+    return timeout;
+}
+
+static int vm_can_run(void)
+{
+    if (powerdown_requested)
+        return 0;
+    if (reset_requested)
+        return 0;
+    if (shutdown_requested)
+        return 0;
+    if (debug_requested)
+        return 0;
+    return 1;
+}
+
+static void main_loop(void)
+{
+    int r;
+
+#ifdef CONFIG_IOTHREAD
+    qemu_system_ready = 1;
+    qemu_cond_broadcast(&qemu_system_cond);
+#endif
+
+    for (;;) {
+        do {
+#ifdef CONFIG_PROFILER
+            int64_t ti;
+#endif
+#ifndef CONFIG_IOTHREAD
+            tcg_cpu_exec();
+#endif
+#ifdef CONFIG_PROFILER
+            ti = profile_getclock();
+#endif
+#ifdef CONFIG_IOTHREAD
+            main_loop_wait(1000);
+#else
+            main_loop_wait(qemu_calculate_timeout());
+#endif
+#ifdef CONFIG_PROFILER
+            dev_time += profile_getclock() - ti;
+#endif
+        } while (vm_can_run());
+
+        if (qemu_debug_requested())
+            vm_stop(EXCP_DEBUG);
+        if (qemu_shutdown_requested()) {
+            if (no_shutdown) {
+                vm_stop(0);
+                no_shutdown = 0;
+            } else
+                break;
+        }
+        if (qemu_reset_requested()) {
+            pause_all_vcpus();
+            qemu_system_reset();
+            resume_all_vcpus();
+        }
+        if (qemu_powerdown_requested())
+            qemu_system_powerdown();
+        if ((r = qemu_vmstop_requested()))
+            vm_stop(r);
+    }
+    pause_all_vcpus();
 }
 
 static void version(void)
@@ -4154,23 +4708,19 @@ static void select_vgahw (const char *p)
 {
     const char *opts;
 
+    cirrus_vga_enabled = 0;
+    std_vga_enabled = 0;
+    vmsvga_enabled = 0;
+    xenfb_enabled = 0;
     if (strstart(p, "std", &opts)) {
         std_vga_enabled = 1;
-        cirrus_vga_enabled = 0;
-        vmsvga_enabled = 0;
     } else if (strstart(p, "cirrus", &opts)) {
         cirrus_vga_enabled = 1;
-        std_vga_enabled = 0;
-        vmsvga_enabled = 0;
     } else if (strstart(p, "vmware", &opts)) {
-        cirrus_vga_enabled = 0;
-        std_vga_enabled = 0;
         vmsvga_enabled = 1;
-    } else if (strstart(p, "none", &opts)) {
-        cirrus_vga_enabled = 0;
-        std_vga_enabled = 0;
-        vmsvga_enabled = 0;
-    } else {
+    } else if (strstart(p, "xenfb", &opts)) {
+        xenfb_enabled = 1;
+    } else if (!strstart(p, "none", &opts)) {
     invalid_vga:
         fprintf(stderr, "Unknown vga type: %s\n", p);
         exit(1);
@@ -4198,7 +4748,7 @@ static BOOL WINAPI qemu_ctrl_handler(DWORD type)
 }
 #endif
 
-static int qemu_uuid_parse(const char *str, uint8_t *uuid)
+int qemu_uuid_parse(const char *str, uint8_t *uuid)
 {
     int ret;
 
@@ -4211,6 +4761,10 @@ static int qemu_uuid_parse(const char *str, uint8_t *uuid)
 
     if(ret != 16)
         return -1;
+
+#ifdef TARGET_I386
+    smbios_add_field(1, offsetof(struct smbios_type_1, uuid), 16, uuid);
+#endif
 
     return 0;
 }
@@ -4239,9 +4793,7 @@ static void termsig_setup(void)
 
 int main(int argc, char **argv, char **envp)
 {
-#ifdef CONFIG_GDBSTUB
     const char *gdbstub_dev = NULL;
-#endif
     uint32_t boot_devices_bitmap = 0;
     int i;
     int snapshot, linux_boot, net_boot;
@@ -4283,6 +4835,7 @@ int main(int argc, char **argv, char **envp)
     const char *chroot_dir = NULL;
     const char *run_as = NULL;
 #endif
+    CPUState *env;
 
     qemu_cache_utils_init(envp);
 
@@ -4346,18 +4899,26 @@ int main(int argc, char **argv, char **envp)
         virtio_consoles[i] = NULL;
     virtio_console_index = 0;
 
+    for (i = 0; i < MAX_NODES; i++) {
+        node_mem[i] = 0;
+        node_cpumask[i] = 0;
+    }
+
     usb_devices_index = 0;
 
     nb_net_clients = 0;
     nb_bt_opts = 0;
     nb_drives = 0;
     nb_drives_opt = 0;
+    nb_numa_nodes = 0;
     hda_index = -1;
 
     nb_nics = 0;
 
     tb_size = 0;
     autostart= 1;
+
+    register_watchdogs();
 
     optind = 1;
     for(;;) {
@@ -4501,6 +5062,13 @@ int main(int argc, char **argv, char **envp)
 			             ",trans=none" : "");
                 }
                 break;
+            case QEMU_OPTION_numa:
+                if (nb_numa_nodes >= MAX_NODES) {
+                    fprintf(stderr, "qemu: too many NUMA nodes\n");
+                    exit(1);
+                }
+                numa_add(optarg);
+                break;
             case QEMU_OPTION_nographic:
                 nographic = 1;
                 break;
@@ -4582,7 +5150,7 @@ int main(int argc, char **argv, char **envp)
                 break;
 #endif
             case QEMU_OPTION_redir:
-                net_slirp_redir(optarg);
+                net_slirp_redir(NULL, optarg);
                 break;
 #endif
             case QEMU_OPTION_bt:
@@ -4627,7 +5195,7 @@ int main(int argc, char **argv, char **envp)
 
                 /* On 32-bit hosts, QEMU is limited by virtual address space */
                 if (value > (2047 << 20)
-#ifndef USE_KQEMU
+#ifndef CONFIG_KQEMU
                     && HOST_LONG_BITS == 32
 #endif
                     ) {
@@ -4657,14 +5225,12 @@ int main(int argc, char **argv, char **envp)
                     cpu_set_log(mask);
                 }
                 break;
-#ifdef CONFIG_GDBSTUB
             case QEMU_OPTION_s:
                 gdbstub_dev = "tcp::" DEFAULT_GDBSTUB_PORT;
                 break;
             case QEMU_OPTION_gdb:
                 gdbstub_dev = optarg;
                 break;
-#endif
             case QEMU_OPTION_L:
                 bios_dir = optarg;
                 break;
@@ -4743,6 +5309,17 @@ int main(int argc, char **argv, char **envp)
                 serial_devices[serial_device_index] = optarg;
                 serial_device_index++;
                 break;
+            case QEMU_OPTION_watchdog:
+                i = select_watchdog(optarg);
+                if (i > 0)
+                    exit (i == 1 ? 1 : 0);
+                break;
+            case QEMU_OPTION_watchdog_action:
+                if (select_watchdog_action(optarg) == -1) {
+                    fprintf(stderr, "Unknown -watchdog-action parameter\n");
+                    exit(1);
+                }
+                break;
             case QEMU_OPTION_virtiocon:
                 if (virtio_console_index >= MAX_VIRTIO_CONSOLES) {
                     fprintf(stderr, "qemu: too many virtio consoles\n");
@@ -4795,8 +5372,14 @@ int main(int argc, char **argv, char **envp)
                     exit(1);
                 }
                 break;
+            case QEMU_OPTION_smbios:
+                if(smbios_entry_add(optarg) < 0) {
+                    fprintf(stderr, "Wrong smbios provided\n");
+                    exit(1);
+                }
+                break;
 #endif
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
             case QEMU_OPTION_no_kqemu:
                 kqemu_allowed = 0;
                 break;
@@ -4807,7 +5390,7 @@ int main(int argc, char **argv, char **envp)
 #ifdef CONFIG_KVM
             case QEMU_OPTION_enable_kvm:
                 kvm_allowed = 1;
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
                 kqemu_allowed = 0;
 #endif
                 break;
@@ -4959,11 +5542,22 @@ int main(int argc, char **argv, char **envp)
                 run_as = optarg;
                 break;
 #endif
+#ifdef CONFIG_XEN
+            case QEMU_OPTION_xen_domid:
+                xen_domid = atoi(optarg);
+                break;
+            case QEMU_OPTION_xen_create:
+                xen_mode = XEN_CREATE;
+                break;
+            case QEMU_OPTION_xen_attach:
+                xen_mode = XEN_ATTACH;
+                break;
+#endif
             }
         }
     }
 
-#if defined(CONFIG_KVM) && defined(USE_KQEMU)
+#if defined(CONFIG_KVM) && defined(CONFIG_KQEMU)
     if (kvm_allowed && kqemu_allowed) {
         fprintf(stderr,
                 "You can not enable both KVM and kqemu at the same time\n");
@@ -5042,10 +5636,14 @@ int main(int argc, char **argv, char **envp)
     }
 #endif
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (smp_cpus > 1)
         kqemu_allowed = 0;
 #endif
+    if (qemu_init_main_loop()) {
+        fprintf(stderr, "qemu_init_main_loop failed\n");
+        exit(1);
+    }
     linux_boot = (kernel_filename != NULL);
     net_boot = (boot_devices_bitmap >> ('n' - 'a')) & 0xF;
 
@@ -5135,7 +5733,7 @@ int main(int argc, char **argv, char **envp)
     if (ram_size == 0)
         ram_size = DEFAULT_RAM_SIZE * 1024 * 1024;
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     /* FIXME: This is a nasty hack because kqemu can't cope with dynamic
        guest ram allocation.  It needs to go away.  */
     if (kqemu_allowed) {
@@ -5194,6 +5792,48 @@ int main(int argc, char **argv, char **envp)
                 monitor_device = NULL;
                 serial_devices[i] = "mon:stdio";
                 break;
+            }
+        }
+    }
+
+    if (nb_numa_nodes > 0) {
+        int i;
+
+        if (nb_numa_nodes > smp_cpus) {
+            nb_numa_nodes = smp_cpus;
+        }
+
+        /* If no memory size if given for any node, assume the default case
+         * and distribute the available memory equally across all nodes
+         */
+        for (i = 0; i < nb_numa_nodes; i++) {
+            if (node_mem[i] != 0)
+                break;
+        }
+        if (i == nb_numa_nodes) {
+            uint64_t usedmem = 0;
+
+            /* On Linux, the each node's border has to be 8MB aligned,
+             * the final node gets the rest.
+             */
+            for (i = 0; i < nb_numa_nodes - 1; i++) {
+                node_mem[i] = (ram_size / nb_numa_nodes) & ~((1 << 23UL) - 1);
+                usedmem += node_mem[i];
+            }
+            node_mem[i] = ram_size - usedmem;
+        }
+
+        for (i = 0; i < nb_numa_nodes; i++) {
+            if (node_cpumask[i] != 0)
+                break;
+        }
+        /* assigning the VCPUs round-robin is easier to implement, guest OSes
+         * must cope with this anyway, because there are BIOSes out there in
+         * real machines which also use this scheme.
+         */
+        if (i == nb_numa_nodes) {
+            for (i = 0; i < smp_cpus; i++) {
+                node_cpumask[i % nb_numa_nodes] |= 1 << i;
             }
         }
     }
@@ -5260,6 +5900,15 @@ int main(int argc, char **argv, char **envp)
 
     machine->init(ram_size, vga_ram_size, boot_devices,
                   kernel_filename, kernel_cmdline, initrd_filename, cpu_model);
+
+
+    for (env = first_cpu; env != NULL; env = env->next_cpu) {
+        for (i = 0; i < nb_numa_nodes; i++) {
+            if (node_cpumask[i] & (1 << env->cpu_index)) {
+                env->numa_node = i;
+            }
+        }
+    }
 
     current_machine = machine;
 
@@ -5368,13 +6017,11 @@ int main(int argc, char **argv, char **envp)
         }
     }
 
-#ifdef CONFIG_GDBSTUB
     if (gdbstub_dev && gdbserver_start(gdbstub_dev) < 0) {
         fprintf(stderr, "qemu: could not open gdbserver on device '%s'\n",
                 gdbstub_dev);
         exit(1);
     }
-#endif
 
     if (loadvm)
         do_loadvm(cur_mon, loadvm);

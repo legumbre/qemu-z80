@@ -957,7 +957,8 @@ static void gen_tst_cc (DisasContext *dc, TCGv cc, int cond)
 				else if (dc->cc_size == 2)
 					bits = 15;	
 
-				tcg_gen_shri_tl(cc, cc_result, 31);
+				tcg_gen_shri_tl(cc, cc_result, bits);
+				tcg_gen_andi_tl(cc, cc, 1);
 			}
 			else {
 				cris_evaluate_flags(dc);
@@ -3405,6 +3406,7 @@ CPUCRISState *cpu_cris_init (const char *cpu_model)
 
 	cpu_exec_init(env);
 	cpu_reset(env);
+	qemu_init_vcpu(env);
 
 	if (tcg_initialized)
 		return env;

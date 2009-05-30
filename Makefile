@@ -1,7 +1,13 @@
 # Makefile for QEMU.
 
+ifneq ($(wildcard config-host.mak),)
 include config-host.mak
 include $(SRC_PATH)/rules.mak
+else
+config-host.mak:
+	@echo "Please call configure before running make!"
+	@exit 1
+endif
 
 .PHONY: all clean cscope distclean dvi html info install install-doc \
 	recurse-all speed tar tarbin test
@@ -24,7 +30,8 @@ else
 DOCS=
 endif
 
-LIBS+=$(AIOLIBS)
+LIBS+=$(PTHREADLIBS)
+LIBS+=$(CLOCKLIBS)
 
 ifdef CONFIG_SOLARIS
 LIBS+=-lsocket -lnsl -lresolv
@@ -36,10 +43,17 @@ endif
 
 all: $(TOOLS) $(DOCS) recurse-all
 
+config-host.mak: configure
+ifneq ($(wildcard config-host.mak),)
+	@echo $@ is out-of-date, running configure
+	@sed -n "/.*Configured with/s/[^:]*: //p" $@ | sh
+endif
+
+SUBDIR_MAKEFLAGS=$(if $(V),,--no-print-directory)
 SUBDIR_RULES=$(patsubst %,subdir-%, $(TARGET_DIRS))
 
 subdir-%:
-	$(call quiet-command,$(MAKE) -C $* V="$(V)" TARGET_DIR="$*/" all,)
+	$(call quiet-command,$(MAKE) $(SUBDIR_MAKEFLAGS) -C $* V="$(V)" TARGET_DIR="$*/" all,)
 
 $(filter %-softmmu,$(SUBDIR_RULES)): libqemu_common.a
 $(filter %-user,$(SUBDIR_RULES)): libqemu_user.a
@@ -49,7 +63,7 @@ recurse-all: $(SUBDIR_RULES)
 #######################################################################
 # BLOCK_OBJS is code used by both qemu system emulation and qemu-img
 
-BLOCK_OBJS=cutils.o qemu-malloc.o
+BLOCK_OBJS=cutils.o cache-utils.o qemu-malloc.o
 BLOCK_OBJS+=block-cow.o block-qcow.o aes.o block-vmdk.o block-cloop.o
 BLOCK_OBJS+=block-dmg.o block-bochs.o block-vpc.o block-vvfat.o
 BLOCK_OBJS+=block-qcow2.o block-parallels.o block-nbd.o
@@ -158,6 +172,10 @@ ifdef CONFIG_COCOA
 OBJS+=cocoa.o
 endif
 
+ifdef CONFIG_IOTHREAD
+OBJS+=qemu-thread.o
+endif
+
 ifdef CONFIG_SLIRP
 CPPFLAGS+=-I$(SRC_PATH)/slirp
 SLIRP_OBJS=cksum.o if.o ip_icmp.o ip_input.o ip_output.o \
@@ -243,30 +261,30 @@ BLOBS=
 endif
 
 install-doc: $(DOCS)
-	mkdir -p "$(DESTDIR)$(docdir)"
-	$(INSTALL) -m 644 qemu-doc.html  qemu-tech.html "$(DESTDIR)$(docdir)"
+	$(INSTALL_DIR) "$(DESTDIR)$(docdir)"
+	$(INSTALL_DATA) qemu-doc.html  qemu-tech.html "$(DESTDIR)$(docdir)"
 ifndef CONFIG_WIN32
-	mkdir -p "$(DESTDIR)$(mandir)/man1"
-	$(INSTALL) -m 644 qemu.1 qemu-img.1 "$(DESTDIR)$(mandir)/man1"
-	mkdir -p "$(DESTDIR)$(mandir)/man8"
-	$(INSTALL) -m 644 qemu-nbd.8 "$(DESTDIR)$(mandir)/man8"
+	$(INSTALL_DIR) "$(DESTDIR)$(mandir)/man1"
+	$(INSTALL_DATA) qemu.1 qemu-img.1 "$(DESTDIR)$(mandir)/man1"
+	$(INSTALL_DIR) "$(DESTDIR)$(mandir)/man8"
+	$(INSTALL_DATA) qemu-nbd.8 "$(DESTDIR)$(mandir)/man8"
 endif
 
 install: all $(if $(BUILD_DOCS),install-doc)
-	mkdir -p "$(DESTDIR)$(bindir)"
+	$(INSTALL_DIR) "$(DESTDIR)$(bindir)"
 ifneq ($(TOOLS),)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(TOOLS) "$(DESTDIR)$(bindir)"
+	$(INSTALL_PROG) $(STRIP_OPT) $(TOOLS) "$(DESTDIR)$(bindir)"
 endif
 ifneq ($(BLOBS),)
-	mkdir -p "$(DESTDIR)$(datadir)"
+	$(INSTALL_DIR) "$(DESTDIR)$(datadir)"
 	set -e; for x in $(BLOBS); do \
-		$(INSTALL) -m 644 $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
+		$(INSTALL_DATA) $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
 	done
 endif
 ifndef CONFIG_WIN32
-	mkdir -p "$(DESTDIR)$(datadir)/keymaps"
+	$(INSTALL_DIR) "$(DESTDIR)$(datadir)/keymaps"
 	set -e; for x in $(KEYMAPS); do \
-		$(INSTALL) -m 644 $(SRC_PATH)/keymaps/$$x "$(DESTDIR)$(datadir)/keymaps"; \
+		$(INSTALL_DATA) $(SRC_PATH)/keymaps/$$x "$(DESTDIR)$(datadir)/keymaps"; \
 	done
 endif
 	for d in $(TARGET_DIRS); do \
@@ -298,7 +316,7 @@ cscope:
 qemu-options.texi: $(SRC_PATH)/qemu-options.hx
 	$(call quiet-command,sh $(SRC_PATH)/hxtool -t < $< > $@,"  GEN   $@")
 
-qemu.1: qemu-doc.texi
+qemu.1: qemu-doc.texi qemu-options.texi
 	$(call quiet-command, \
 	  perl -Ww -- $(SRC_PATH)/texi2pod.pl $< qemu.pod && \
 	  pod2man --section=1 --center=" " --release=" " qemu.pod > $@, \

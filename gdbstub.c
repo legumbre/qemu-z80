@@ -334,7 +334,7 @@ static int get_char(GDBState *s)
 
 static gdb_syscall_complete_cb gdb_current_syscall_cb;
 
-enum {
+static enum {
     GDB_SYS_UNKNOWN,
     GDB_SYS_ENABLED,
     GDB_SYS_DISABLED,
@@ -1333,11 +1333,11 @@ static const char *get_feature_xml(const char *p, const char **newp)
                      GDB_CORE_XML);
 
             for (r = first_cpu->gdb_regs; r; r = r->next) {
-                strcat(target_xml, "<xi:include href=\"");
-                strcat(target_xml, r->xml);
-                strcat(target_xml, "\"/>");
+                pstrcat(target_xml, sizeof(target_xml), "<xi:include href=\"");
+                pstrcat(target_xml, sizeof(target_xml), r->xml);
+                pstrcat(target_xml, sizeof(target_xml), "\"/>");
             }
-            strcat(target_xml, "</target>");
+            pstrcat(target_xml, sizeof(target_xml), "</target>");
         }
         return target_xml;
     }
@@ -1868,7 +1868,7 @@ static int gdb_handle_packet(GDBState *s, const char *line_buf)
         if (strncmp(p, "Supported", 9) == 0) {
             snprintf(buf, sizeof(buf), "PacketSize=%x", MAX_PACKET_LENGTH);
 #ifdef GDB_CORE_XML
-            strcat(buf, ";qXfer:features:read+");
+            pstrcat(buf, sizeof(buf), ";qXfer:features:read+");
 #endif
             put_packet(s, buf);
             break;

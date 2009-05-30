@@ -71,9 +71,9 @@
 #define TARGET_VIRT_ADDR_SPACE_BITS 42
 #elif defined(TARGET_PPC64)
 #define TARGET_PHYS_ADDR_SPACE_BITS 42
-#elif defined(TARGET_X86_64) && !defined(USE_KQEMU)
+#elif defined(TARGET_X86_64) && !defined(CONFIG_KQEMU)
 #define TARGET_PHYS_ADDR_SPACE_BITS 42
-#elif defined(TARGET_I386) && !defined(USE_KQEMU)
+#elif defined(TARGET_I386) && !defined(CONFIG_KQEMU)
 #define TARGET_PHYS_ADDR_SPACE_BITS 36
 #else
 /* Note: for compatibility with kqemu, we use 32 bits for x86_64 */
@@ -120,7 +120,7 @@ typedef struct RAMBlock {
 
 static RAMBlock *ram_blocks;
 /* TODO: When we implement (and use) ram deallocation (e.g. for hotplug)
-   then we can no longet assume contiguous ram offsets, and external uses
+   then we can no longer assume contiguous ram offsets, and external uses
    of this variable will break.  */
 ram_addr_t last_ram_offset;
 #endif
@@ -398,7 +398,7 @@ static void tlb_unprotect_code_phys(CPUState *env, ram_addr_t ram_addr,
 #define DEFAULT_CODE_GEN_BUFFER_SIZE (32 * 1024 * 1024)
 
 #if defined(CONFIG_USER_ONLY)
-/* Currently it is not recommanded to allocate big chunks of data in
+/* Currently it is not recommended to allocate big chunks of data in
    user mode. It will change when a dedicated libc will be used */
 #define USE_STATIC_CODE_GEN_BUFFER
 #endif
@@ -420,7 +420,7 @@ static void code_gen_alloc(unsigned long tb_size)
         /* in user mode, phys_ram_size is not meaningful */
         code_gen_buffer_size = DEFAULT_CODE_GEN_BUFFER_SIZE;
 #else
-        /* XXX: needs ajustments */
+        /* XXX: needs adjustments */
         code_gen_buffer_size = (unsigned long)(ram_size / 4);
 #endif
     }
@@ -554,6 +554,7 @@ void cpu_exec_init(CPUState *env)
         cpu_index++;
     }
     env->cpu_index = cpu_index;
+    env->numa_node = 0;
     TAILQ_INIT(&env->breakpoints);
     TAILQ_INIT(&env->watchpoints);
     *penv = env;
@@ -1466,7 +1467,7 @@ void cpu_single_step(CPUState *env, int enabled)
         if (kvm_enabled())
             kvm_update_guest_debug(env, 0);
         else {
-            /* must flush all the translated code to avoid inconsistancies */
+            /* must flush all the translated code to avoid inconsistencies */
             /* XXX: only flush what is necessary */
             tb_flush(env);
         }
@@ -1540,6 +1541,17 @@ void cpu_interrupt(CPUState *env, int mask)
 
     old_mask = env->interrupt_request;
     env->interrupt_request |= mask;
+
+#ifndef CONFIG_USER_ONLY
+    /*
+     * If called from iothread context, wake the target cpu in
+     * case its halted.
+     */
+    if (!qemu_cpu_self(env)) {
+        qemu_cpu_kick(env);
+        return;
+    }
+#endif
 
     if (use_icount) {
         env->icount_decr.u16.high = 0xffff;
@@ -1760,7 +1772,7 @@ void tlb_flush(CPUState *env, int flush_global)
 
     memset (env->tb_jmp_cache, 0, TB_JMP_CACHE_SIZE * sizeof (void *));
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env->kqemu_enabled) {
         kqemu_flush(env, flush_global);
     }
@@ -1809,7 +1821,7 @@ void tlb_flush_page(CPUState *env, target_ulong addr)
 
     tlb_flush_jmp_cache(env, addr);
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (env->kqemu_enabled) {
         kqemu_flush_page(env, addr);
     }
@@ -1861,7 +1873,7 @@ void cpu_physical_memory_reset_dirty(ram_addr_t start, ram_addr_t end,
     if (length == 0)
         return;
     len = length >> TARGET_PAGE_BITS;
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     /* XXX: should not depend on cpu context */
     env = first_cpu;
     if (env->kqemu_enabled) {
@@ -2034,7 +2046,7 @@ int tlb_set_page_exec(CPUState *env, target_ulong vaddr,
         else
             iotlb |= IO_MEM_ROM;
     } else {
-        /* IO handlers are currently passed a phsical address.
+        /* IO handlers are currently passed a physical address.
            It would be nice to pass an offset from the base address
            of that region.  This would avoid having to special case RAM,
            and avoid full address decoding in every device.
@@ -2163,7 +2175,7 @@ int page_get_flags(target_ulong address)
 }
 
 /* modify the flags of a page and invalidate the code if
-   necessary. The flag PAGE_WRITE_ORG is positionned automatically
+   necessary. The flag PAGE_WRITE_ORG is positioned automatically
    depending on PAGE_WRITE */
 void page_set_flags(target_ulong start, target_ulong end, int flags)
 {
@@ -2230,7 +2242,7 @@ int page_check_range(target_ulong start, target_ulong len, int flags)
 }
 
 /* called from signal handler: invalidate the code and unprotect the
-   page. Return TRUE if the fault was succesfully handled. */
+   page. Return TRUE if the fault was successfully handled. */
 int page_unprotect(target_ulong address, unsigned long pc, void *puc)
 {
     unsigned int page_index, prot, pindex;
@@ -2314,7 +2326,7 @@ static void *subpage_init (target_phys_addr_t base, ram_addr_t *phys,
    page size. If (phys_offset & ~TARGET_PAGE_MASK) != 0, then it is an
    io memory page.  The address used when calling the IO function is
    the offset from the start of the region, plus region_offset.  Both
-   start_region and regon_offset are rounded down to a page boundary
+   start_addr and region_offset are rounded down to a page boundary
    before calculating this offset.  This should not be a problem unless
    the low bits of start_addr and region_offset differ.  */
 void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
@@ -2328,7 +2340,7 @@ void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
     ram_addr_t orig_size = size;
     void *subpage;
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     /* XXX: should not depend on cpu context */
     env = first_cpu;
     if (env->kqemu_enabled) {
@@ -2429,7 +2441,7 @@ void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size)
         kvm_uncoalesce_mmio_region(addr, size);
 }
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
 /* XXX: better than nothing */
 static ram_addr_t kqemu_ram_alloc(ram_addr_t size)
 {
@@ -2449,7 +2461,7 @@ ram_addr_t qemu_ram_alloc(ram_addr_t size)
 {
     RAMBlock *new_block;
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (kqemu_phys_ram_base) {
         return kqemu_ram_alloc(size);
     }
@@ -2471,6 +2483,9 @@ ram_addr_t qemu_ram_alloc(ram_addr_t size)
            0xff, size >> TARGET_PAGE_BITS);
 
     last_ram_offset += size;
+
+    if (kvm_enabled())
+        kvm_setup_guest_memory(new_block->host, size);
 
     return new_block->offset;
 }
@@ -2494,7 +2509,7 @@ void *qemu_get_ram_ptr(ram_addr_t addr)
     RAMBlock **prevp;
     RAMBlock *block;
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (kqemu_phys_ram_base) {
         return kqemu_phys_ram_base + addr;
     }
@@ -2532,7 +2547,7 @@ ram_addr_t qemu_ram_addr_from_host(void *ptr)
     RAMBlock *block;
     uint8_t *host = ptr;
 
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (kqemu_phys_ram_base) {
         return host - kqemu_phys_ram_base;
     }
@@ -2642,7 +2657,7 @@ static void notdirty_mem_writeb(void *opaque, target_phys_addr_t ram_addr,
 #endif
     }
     stb_p(qemu_get_ram_ptr(ram_addr), val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (cpu_single_env->kqemu_enabled &&
         (dirty_flags & KQEMU_MODIFY_PAGE_MASK) != KQEMU_MODIFY_PAGE_MASK)
         kqemu_modify_page(cpu_single_env, ram_addr);
@@ -2667,7 +2682,7 @@ static void notdirty_mem_writew(void *opaque, target_phys_addr_t ram_addr,
 #endif
     }
     stw_p(qemu_get_ram_ptr(ram_addr), val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (cpu_single_env->kqemu_enabled &&
         (dirty_flags & KQEMU_MODIFY_PAGE_MASK) != KQEMU_MODIFY_PAGE_MASK)
         kqemu_modify_page(cpu_single_env, ram_addr);
@@ -2692,7 +2707,7 @@ static void notdirty_mem_writel(void *opaque, target_phys_addr_t ram_addr,
 #endif
     }
     stl_p(qemu_get_ram_ptr(ram_addr), val);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (cpu_single_env->kqemu_enabled &&
         (dirty_flags & KQEMU_MODIFY_PAGE_MASK) != KQEMU_MODIFY_PAGE_MASK)
         kqemu_modify_page(cpu_single_env, ram_addr);
@@ -2993,7 +3008,7 @@ static void io_mem_init(void)
 
     io_mem_watch = cpu_register_io_memory(0, watch_mem_read,
                                           watch_mem_write, NULL);
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     if (kqemu_phys_ram_base) {
         /* alloc dirty bits array */
         phys_ram_dirty = qemu_vmalloc(kqemu_phys_ram_size >> TARGET_PAGE_BITS);
@@ -3004,8 +3019,7 @@ static void io_mem_init(void)
 
 /* mem_read and mem_write are arrays of functions containing the
    function to access byte (index 0), word (index 1) and dword (index
-   2). Functions can be omitted with a NULL function pointer. The
-   registered functions may be modified dynamically later.
+   2). Functions can be omitted with a NULL function pointer.
    If io_index is non zero, the corresponding io zone is
    modified. If it is zero, a new io zone is allocated. The return
    value can be used with cpu_register_physical_memory(). (-1) is
@@ -3047,16 +3061,6 @@ void cpu_unregister_io_memory(int io_table_address)
     }
     io_mem_opaque[io_index] = NULL;
     io_mem_used[io_index] = 0;
-}
-
-CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index)
-{
-    return io_mem_write[io_index >> IO_MEM_SHIFT];
-}
-
-CPUReadMemoryFunc **cpu_get_io_memory_read(int io_index)
-{
-    return io_mem_read[io_index >> IO_MEM_SHIFT];
 }
 
 #endif /* !defined(CONFIG_USER_ONLY) */

@@ -131,8 +131,11 @@ all: $(PROGS)
 
 #########################################################
 # cpu emulator library
-LIBOBJS=exec.o kqemu.o translate-all.o cpu-exec.o\
+LIBOBJS=exec.o translate-all.o cpu-exec.o\
         translate.o host-utils.o
+ifdef CONFIG_KQEMU
+LIBOBJS+= kqemu.o
+endif
 # TCG code generator
 LIBOBJS+= tcg/tcg.o tcg/tcg-runtime.o
 CPPFLAGS+=-I$(SRC_PATH)/tcg -I$(SRC_PATH)/tcg/$(ARCH)
@@ -323,8 +326,9 @@ CFLAGS+=-p
 endif
 
 OBJS= main.o syscall.o strace.o mmap.o signal.o path.o thunk.o \
-      elfload.o linuxload.o uaccess.o envlist.o
-LIBS+= $(AIOLIBS)
+      elfload.o linuxload.o uaccess.o envlist.o gdbstub.o gdbstub-xml.o
+LIBS+= $(PTHREADLIBS)
+LIBS+= $(CLOCKLIBS)
 ifdef TARGET_HAS_BFLT
 OBJS+= flatload.o
 endif
@@ -343,10 +347,6 @@ nwfpe/fpa11_cpdt.o nwfpe/fpa11_cprt.o nwfpe/fpopcode.o nwfpe/single_cpdo.o \
 endif
 ifeq ($(TARGET_ARCH), m68k)
 OBJS+= m68k-sim.o m68k-semi.o
-endif
-
-ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o gdbstub-xml.o
 endif
 
 OBJS+= libqemu.a
@@ -378,13 +378,10 @@ LDFLAGS+=-Wl,-segaddr,__STD_PROG_ZONE,0x1000 -image_base 0x0e000000
 
 LIBS+=-lmx
 
-OBJS= main.o commpage.o machload.o mmap.o signal.o syscall.o thunk.o
+OBJS= main.o commpage.o machload.o mmap.o signal.o syscall.o thunk.o \
+      gdbstub.o gdbstub-xml.o
 
 OBJS+= libqemu.a
-
-ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o gdbstub-xml.o
-endif
 
 # Note: this is a workaround. The real fix is to avoid compiling
 # cpu_signal_handler() in cpu-exec.c.
@@ -481,14 +478,11 @@ LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH)el.ld
 endif
 endif
 
-OBJS= main.o bsdload.o elfload.o mmap.o path.o signal.o strace.o syscall.o
+OBJS= main.o bsdload.o elfload.o mmap.o path.o signal.o strace.o syscall.o \
+      gdbstub.o gdbstub-xml.o
 OBJS+= uaccess.o
 
 OBJS+= libqemu.a
-
-ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o
-endif
 
 # Note: this is a workaround. The real fix is to avoid compiling
 # cpu_signal_handler() in cpu-exec.c.
@@ -503,7 +497,8 @@ endif #CONFIG_BSD_USER
 # System emulator target
 ifndef CONFIG_USER_ONLY
 
-OBJS=vl.o osdep.o monitor.o pci.o loader.o isa_mmio.o machine.o dma-helpers.o
+OBJS=vl.o osdep.o monitor.o pci.o loader.o isa_mmio.o machine.o dma-helpers.o \
+     gdbstub.o gdbstub-xml.o
 # virtio has to be here due to weird dependency between PCI and virtio-net.
 # need to fix this properly
 OBJS+=virtio.o virtio-blk.o virtio-balloon.o virtio-net.o virtio-console.o
@@ -566,6 +561,14 @@ ifdef CONFIG_BLUEZ
 LIBS += $(CONFIG_BLUEZ_LIBS)
 endif
 
+# xen backend driver support
+XEN_OBJS := xen_machine_pv.o xen_backend.o xen_devconfig.o xen_domainbuild.o
+XEN_OBJS += xen_console.o xenfb.o xen_disk.o xen_nic.o
+ifeq ($(CONFIG_XEN), yes)
+  OBJS += $(XEN_OBJS)
+  LIBS += $(XEN_LIBS)
+endif
+
 # SCSI layer
 OBJS+= lsi53c895a.o esp.o
 
@@ -579,13 +582,17 @@ OBJS += pcnet.o
 OBJS += rtl8139.o
 OBJS += e1000.o
 
+# Generic watchdog support and some watchdog devices
+OBJS += watchdog.o
+OBJS += wdt_ib700.o wdt_i6300esb.o
+
 ifeq ($(TARGET_BASE_ARCH), i386)
 # Hardware support
 OBJS+= ide.o pckbd.o vga.o $(SOUND_HW) dma.o
 OBJS+= fdc.o mc146818rtc.o serial.o i8259.o i8254.o pcspk.o pc.o
 OBJS+= cirrus_vga.o apic.o ioapic.o parallel.o acpi.o piix_pci.o
 OBJS+= usb-uhci.o vmmouse.o vmport.o vmware_vga.o hpet.o
-OBJS += device-hotplug.o pci-hotplug.o
+OBJS += device-hotplug.o pci-hotplug.o smbios.o
 CPPFLAGS += -DHAS_AUDIO -DHAS_AUDIO_CHOICE
 endif
 ifeq ($(TARGET_BASE_ARCH), ppc)
@@ -617,7 +624,7 @@ endif
 ifeq ($(TARGET_BASE_ARCH), mips)
 OBJS+= mips_r4k.o mips_jazz.o mips_malta.o mips_mipssim.o
 OBJS+= mips_timer.o mips_int.o dma.o vga.o serial.o i8254.o i8259.o rc4030.o
-OBJS+= g364fb.o jazz_led.o
+OBJS+= g364fb.o jazz_led.o dp8393x.o
 OBJS+= ide.o gt64xxx.o pckbd.o fdc.o mc146818rtc.o usb-uhci.o acpi.o ds1225y.o
 OBJS+= piix_pci.o parallel.o cirrus_vga.o pcspk.o $(SOUND_HW)
 OBJS+= mipsnet.o
@@ -683,9 +690,6 @@ ifeq ($(TARGET_BASE_ARCH), z80)
 OBJS+= zx_spectrum.o zx_video.o dma.o
 OBJS+= serial.o i8259.o
 endif
-ifdef CONFIG_GDBSTUB
-OBJS+=gdbstub.o gdbstub-xml.o
-endif
 ifdef CONFIG_COCOA
 COCOA_LIBS=-F/System/Library/Frameworks -framework Cocoa -framework IOKit
 ifdef CONFIG_COREAUDIO
@@ -696,7 +700,8 @@ ifdef CONFIG_SLIRP
 CPPFLAGS+=-I$(SRC_PATH)/slirp
 endif
 
-LIBS+=$(AIOLIBS)
+LIBS+=$(PTHREADLIBS)
+LIBS+=$(CLOCKLIBS)
 # specific flags are needed for non soft mmu emulator
 ifdef CONFIG_STATIC
 LDFLAGS+=-static

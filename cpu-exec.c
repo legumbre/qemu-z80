@@ -50,6 +50,11 @@ int tb_invalidated_flag;
 //#define DEBUG_EXEC
 //#define DEBUG_SIGNAL
 
+int qemu_cpu_has_work(CPUState *env)
+{
+    return cpu_has_work(env);
+}
+
 void cpu_loop_exit(void)
 {
     /* NOTE: the register at this point must be saved by hand because
@@ -315,7 +320,7 @@ int cpu_exec(CPUState *env1)
                 }
                 env->exception_index = -1;
             }
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
             if (kqemu_is_ok(env) && env->interrupt_request == 0 && env->exit_request == 0) {
                 int ret;
                 env->eflags = env->eflags | helper_cc_compute_all(CC_OP) | (DF & DF_MASK);
@@ -604,7 +609,7 @@ int cpu_exec(CPUState *env1)
                    jump. */
                 {
                     if (next_tb != 0 &&
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
                         (env->kqemu_enabled != 2) &&
 #endif
                         tb->page_addr[1] == -1) {
@@ -661,7 +666,7 @@ int cpu_exec(CPUState *env1)
                 }
                 /* reset soft MMU for next block (it can currently
                    only be set by a memory fault) */
-#if defined(USE_KQEMU)
+#if defined(CONFIG_KQEMU)
 #define MIN_CYCLE_BEFORE_SWITCH (100 * 1000)
                 if (kqemu_is_ok(env) &&
                     (cpu_get_time_fast() - env->last_io_time) >= MIN_CYCLE_BEFORE_SWITCH) {
@@ -1388,12 +1393,24 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     if ((insn >> 30) == 3) {
       switch((insn >> 19) & 0x3f) {
       case 0x05: // stb
+      case 0x15: // stba
       case 0x06: // sth
+      case 0x16: // stha
       case 0x04: // st
+      case 0x14: // sta
       case 0x07: // std
+      case 0x17: // stda
+      case 0x0e: // stx
+      case 0x1e: // stxa
       case 0x24: // stf
+      case 0x34: // stfa
       case 0x27: // stdf
+      case 0x37: // stdfa
+      case 0x26: // stqf
+      case 0x36: // stqfa
       case 0x25: // stfsr
+      case 0x3c: // casa
+      case 0x3e: // casxa
 	is_write = 1;
 	break;
       }

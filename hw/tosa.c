@@ -45,9 +45,9 @@
 #define DAC_CH1		0
 #define DAC_CH2		1
 
-static void tosa_microdrive_attach(struct pxa2xx_state_s *cpu)
+static void tosa_microdrive_attach(PXA2xxState *cpu)
 {
-    struct pcmcia_card_s *md;
+    PCMCIACardState *md;
     int index;
     BlockDriverState *bs;
 
@@ -83,10 +83,10 @@ static void tosa_out_switch(void *opaque, int line, int level)
 }
 
 
-static void tosa_gpio_setup(struct pxa2xx_state_s *cpu,
-                struct scoop_info_s *scp0,
-                struct scoop_info_s *scp1,
-                struct tc6393xb_s *tmio)
+static void tosa_gpio_setup(PXA2xxState *cpu,
+                ScoopInfo *scp0,
+                ScoopInfo *scp1,
+                TC6393xbState *tmio)
 {
     qemu_irq *outsignals = qemu_allocate_irqs(tosa_out_switch, cpu, 4);
     /* MMC/SD host */
@@ -124,15 +124,15 @@ static void tosa_ssp_write(void *opaque, uint32_t value)
     fprintf(stderr, "TG: %d %02x\n", value >> 5, value & 0x1f);
 }
 
-struct tosa_dac_i2c {
+typedef struct {
     i2c_slave i2c;
     int len;
     char buf[3];
-};
+} TosaDACState;
 
 static int tosa_dac_send(i2c_slave *i2c, uint8_t data)
 {
-    struct tosa_dac_i2c *s = (struct tosa_dac_i2c *)i2c;
+    TosaDACState *s = (TosaDACState *)i2c;
     s->buf[s->len] = data;
     if (s->len ++ > 2) {
 #ifdef VERBOSE
@@ -151,7 +151,7 @@ static int tosa_dac_send(i2c_slave *i2c, uint8_t data)
 
 static void tosa_dac_event(i2c_slave *i2c, enum i2c_event event)
 {
-    struct tosa_dac_i2c *s = (struct tosa_dac_i2c *)i2c;
+    TosaDACState *s = (TosaDACState *)i2c;
     s->len = 0;
     switch (event) {
     case I2C_START_SEND:
@@ -178,10 +178,10 @@ static int tosa_dac_recv(i2c_slave *s)
     return -1;
 }
 
-static void tosa_tg_init(struct pxa2xx_state_s *cpu)
+static void tosa_tg_init(PXA2xxState *cpu)
 {
-    struct i2c_bus *bus = pxa2xx_i2c_bus(cpu->i2c[0]);
-    struct i2c_slave *dac = i2c_slave_init(bus, 0, sizeof(struct tosa_dac_i2c));
+    i2c_bus *bus = pxa2xx_i2c_bus(cpu->i2c[0]);
+    i2c_slave *dac = i2c_slave_init(bus, 0, sizeof(TosaDACState));
     dac->send = tosa_dac_send;
     dac->event = tosa_dac_event;
     dac->recv = tosa_dac_recv;
@@ -201,9 +201,9 @@ static void tosa_init(ram_addr_t ram_size, int vga_ram_size,
                 const char *kernel_filename, const char *kernel_cmdline,
                 const char *initrd_filename, const char *cpu_model)
 {
-    struct pxa2xx_state_s *cpu;
-    struct tc6393xb_s *tmio;
-    struct scoop_info_s *scp0, *scp1;
+    PXA2xxState *cpu;
+    TC6393xbState *tmio;
+    ScoopInfo *scp0, *scp1;
 
     if (!cpu_model)
         cpu_model = "pxa255";

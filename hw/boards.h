@@ -32,6 +32,9 @@ extern QEMUMachine axisdev88_machine;
 extern QEMUMachine pc_machine;
 extern QEMUMachine isapc_machine;
 
+/* xen_machine.c */
+extern QEMUMachine xenpv_machine;
+
 /* zx_spectrum.c */
 extern QEMUMachine zxspec_machine;
 

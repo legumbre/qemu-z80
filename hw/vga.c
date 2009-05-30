@@ -1279,8 +1279,6 @@ static void vga_draw_text(VGAState *s, int full_update)
     vga_draw_glyph8_func *vga_draw_glyph8;
     vga_draw_glyph9_func *vga_draw_glyph9;
 
-    vga_dirty_log_stop(s);
-
     /* compute font data address (in plane 2) */
     v = s->sr[3];
     offset = (((v >> 4) & 1) | ((v << 1) & 6)) * 8192 * 4 + 2;
@@ -1579,7 +1577,6 @@ static void vga_sync_dirty_bitmap(VGAState *s)
         cpu_physical_sync_dirty_bitmap(isa_mem_base + 0xa0000, 0xa8000);
         cpu_physical_sync_dirty_bitmap(isa_mem_base + 0xa8000, 0xb0000);
     }
-    vga_dirty_log_start(s);
 }
 
 /*
@@ -1587,8 +1584,9 @@ static void vga_sync_dirty_bitmap(VGAState *s)
  */
 static void vga_draw_graphic(VGAState *s, int full_update)
 {
-    int y1, y, update, page_min, page_max, linesize, y_start, double_scan, mask, depth;
-    int width, height, shift_control, line_offset, page0, page1, bwidth, bits;
+    int y1, y, update, linesize, y_start, double_scan, mask, depth;
+    int width, height, shift_control, line_offset, bwidth, bits;
+    ram_addr_t page0, page1, page_min, page_max;
     int disp_width, multi_scan, multi_run;
     uint8_t *d;
     uint32_t v, addr1, addr;
@@ -1726,8 +1724,8 @@ static void vga_draw_graphic(VGAState *s, int full_update)
     addr1 = (s->start_addr * 4);
     bwidth = (width * bits + 7) / 8;
     y_start = -1;
-    page_min = 0x7fffffff;
-    page_max = -1;
+    page_min = -1;
+    page_max = 0;
     d = ds_get_data(s->ds);
     linesize = ds_get_linesize(s->ds);
     y1 = 0;
@@ -1794,7 +1792,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
                    disp_width, y - y_start);
     }
     /* reset modified pages */
-    if (page_max != -1) {
+    if (page_max >= page_min) {
         cpu_physical_memory_reset_dirty(page_min, page_max + TARGET_PAGE_SIZE,
                                         VGA_DIRTY_FLAG);
     }
@@ -1810,7 +1808,6 @@ static void vga_draw_blank(VGAState *s, int full_update)
         return;
     if (s->last_scr_width <= 0 || s->last_scr_height <= 0)
         return;
-    vga_dirty_log_stop(s);
 
     s->rgb_to_pixel =
         rgb_to_pixel_dup_table[get_depth_index(s->ds)];
@@ -2238,17 +2235,6 @@ void vga_dirty_log_start(VGAState *s)
     }
 }
 
-void vga_dirty_log_stop(VGAState *s)
-{
-    if (kvm_enabled() && s->map_addr)
-        kvm_log_stop(s->map_addr, s->map_end - s->map_addr);
-
-    if (kvm_enabled() && s->lfb_vram_mapped) {
-        kvm_log_stop(isa_mem_base + 0xa0000, 0x8000);
-        kvm_log_stop(isa_mem_base + 0xa8000, 0x8000);
-    }
-}
-
 static void vga_map(PCIDevice *pci_dev, int region_num,
                     uint32_t addr, uint32_t size, int type)
 {
@@ -2258,12 +2244,10 @@ static void vga_map(PCIDevice *pci_dev, int region_num,
         cpu_register_physical_memory(addr, s->bios_size, s->bios_offset);
     } else {
         cpu_register_physical_memory(addr, s->vram_size, s->vram_offset);
+        s->map_addr = addr;
+        s->map_end = addr + s->vram_size;
+        vga_dirty_log_start(s);
     }
-
-    s->map_addr = addr;
-    s->map_end = addr + VGA_RAM_SIZE;
-
-    vga_dirty_log_start(s);
 }
 
 void vga_common_init(VGAState *s, int vga_ram_size)
@@ -2491,9 +2475,9 @@ static void pci_vga_write_config(PCIDevice *d,
     PCIVGAState *pvs = container_of(d, PCIVGAState, dev);
     VGAState *s = &pvs->vga_state;
 
-    vga_dirty_log_stop(s);
     pci_default_write_config(d, address, val, len);
-    vga_dirty_log_start(s);
+    if (s->map_addr && pvs->dev.io_regions[0].addr == -1)
+        s->map_addr = 0;
 }
 
 int pci_vga_init(PCIBus *bus, int vga_ram_size,
@@ -2523,7 +2507,7 @@ int pci_vga_init(PCIBus *bus, int vga_ram_size,
     pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_QEMU);
     pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_QEMU_VGA);
     pci_config_set_class(pci_conf, PCI_CLASS_DISPLAY_VGA);
-    pci_conf[0x0e] = 0x00; // header_type
+    pci_conf[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; // header_type
 
     /* XXX: vga_ram_size must be a power of two */
     pci_register_io_region(&d->dev, 0, vga_ram_size,

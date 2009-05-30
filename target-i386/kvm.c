@@ -34,6 +34,86 @@
     do { } while (0)
 #endif
 
+#ifdef KVM_CAP_EXT_CPUID
+
+static struct kvm_cpuid2 *try_get_cpuid(KVMState *s, int max)
+{
+    struct kvm_cpuid2 *cpuid;
+    int r, size;
+
+    size = sizeof(*cpuid) + max * sizeof(*cpuid->entries);
+    cpuid = (struct kvm_cpuid2 *)qemu_mallocz(size);
+    cpuid->nent = max;
+    r = kvm_ioctl(s, KVM_GET_SUPPORTED_CPUID, cpuid);
+    if (r < 0) {
+        if (r == -E2BIG) {
+            qemu_free(cpuid);
+            return NULL;
+        } else {
+            fprintf(stderr, "KVM_GET_SUPPORTED_CPUID failed: %s\n",
+                    strerror(-r));
+            exit(1);
+        }
+    }
+    return cpuid;
+}
+
+uint32_t kvm_arch_get_supported_cpuid(CPUState *env, uint32_t function, int reg)
+{
+    struct kvm_cpuid2 *cpuid;
+    int i, max;
+    uint32_t ret = 0;
+    uint32_t cpuid_1_edx;
+
+    if (!kvm_check_extension(env->kvm_state, KVM_CAP_EXT_CPUID)) {
+        return -1U;
+    }
+
+    max = 1;
+    while ((cpuid = try_get_cpuid(env->kvm_state, max)) == NULL) {
+        max *= 2;
+    }
+
+    for (i = 0; i < cpuid->nent; ++i) {
+        if (cpuid->entries[i].function == function) {
+            switch (reg) {
+            case R_EAX:
+                ret = cpuid->entries[i].eax;
+                break;
+            case R_EBX:
+                ret = cpuid->entries[i].ebx;
+                break;
+            case R_ECX:
+                ret = cpuid->entries[i].ecx;
+                break;
+            case R_EDX:
+                ret = cpuid->entries[i].edx;
+                if (function == 0x80000001) {
+                    /* On Intel, kvm returns cpuid according to the Intel spec,
+                     * so add missing bits according to the AMD spec:
+                     */
+                    cpuid_1_edx = kvm_arch_get_supported_cpuid(env, 1, R_EDX);
+                    ret |= cpuid_1_edx & 0xdfeff7ff;
+                }
+                break;
+            }
+        }
+    }
+
+    qemu_free(cpuid);
+
+    return ret;
+}
+
+#else
+
+uint32_t kvm_arch_get_supported_cpuid(CPUState *env, uint32_t function, int reg)
+{
+    return -1U;
+}
+
+#endif
+
 int kvm_arch_init_vcpu(CPUState *env)
 {
     struct {
@@ -41,12 +121,11 @@ int kvm_arch_init_vcpu(CPUState *env)
         struct kvm_cpuid_entry2 entries[100];
     } __attribute__((packed)) cpuid_data;
     uint32_t limit, i, j, cpuid_i;
-    uint32_t eax, ebx, ecx, edx;
+    uint32_t unused;
 
     cpuid_i = 0;
 
-    cpu_x86_cpuid(env, 0, 0, &eax, &ebx, &ecx, &edx);
-    limit = eax;
+    cpu_x86_cpuid(env, 0, 0, &limit, &unused, &unused, &unused);
 
     for (i = 0; i <= limit; i++) {
         struct kvm_cpuid_entry2 *c = &cpuid_data.entries[cpuid_i++];
@@ -56,26 +135,17 @@ int kvm_arch_init_vcpu(CPUState *env)
             /* Keep reading function 2 till all the input is received */
             int times;
 
-            cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
-            times = eax & 0xff;
-
             c->function = i;
-            c->flags |= KVM_CPUID_FLAG_STATEFUL_FUNC;
-            c->flags |= KVM_CPUID_FLAG_STATE_READ_NEXT;
-            c->eax = eax;
-            c->ebx = ebx;
-            c->ecx = ecx;
-            c->edx = edx;
+            c->flags = KVM_CPUID_FLAG_STATEFUL_FUNC |
+                       KVM_CPUID_FLAG_STATE_READ_NEXT;
+            cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
+            times = c->eax & 0xff;
 
             for (j = 1; j < times; ++j) {
-                cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
+                c = &cpuid_data.entries[cpuid_i++];
                 c->function = i;
-                c->flags |= KVM_CPUID_FLAG_STATEFUL_FUNC;
-                c->eax = eax;
-                c->ebx = ebx;
-                c->ecx = ecx;
-                c->edx = edx;
-                c = &cpuid_data.entries[++cpuid_i];
+                c->flags = KVM_CPUID_FLAG_STATEFUL_FUNC;
+                cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
             }
             break;
         }
@@ -83,46 +153,36 @@ int kvm_arch_init_vcpu(CPUState *env)
         case 0xb:
         case 0xd:
             for (j = 0; ; j++) {
-                cpu_x86_cpuid(env, i, j, &eax, &ebx, &ecx, &edx);
                 c->function = i;
                 c->flags = KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
                 c->index = j;
-                c->eax = eax;
-                c->ebx = ebx;
-                c->ecx = ecx;
-                c->edx = edx;
-                c = &cpuid_data.entries[++cpuid_i];
+                cpu_x86_cpuid(env, i, j, &c->eax, &c->ebx, &c->ecx, &c->edx);
 
-                if (i == 4 && eax == 0)
+                if (i == 4 && c->eax == 0)
                     break;
-                if (i == 0xb && !(ecx & 0xff00))
+                if (i == 0xb && !(c->ecx & 0xff00))
                     break;
-                if (i == 0xd && eax == 0)
+                if (i == 0xd && c->eax == 0)
                     break;
+
+                c = &cpuid_data.entries[cpuid_i++];
             }
             break;
         default:
-            cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
             c->function = i;
-            c->eax = eax;
-            c->ebx = ebx;
-            c->ecx = ecx;
-            c->edx = edx;
+            c->flags = 0;
+            cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
             break;
         }
     }
-    cpu_x86_cpuid(env, 0x80000000, 0, &eax, &ebx, &ecx, &edx);
-    limit = eax;
+    cpu_x86_cpuid(env, 0x80000000, 0, &limit, &unused, &unused, &unused);
 
     for (i = 0x80000000; i <= limit; i++) {
         struct kvm_cpuid_entry2 *c = &cpuid_data.entries[cpuid_i++];
 
-        cpu_x86_cpuid(env, i, 0, &eax, &ebx, &ecx, &edx);
         c->function = i;
-        c->eax = eax;
-        c->ebx = ebx;
-        c->ecx = ecx;
-        c->edx = edx;
+        c->flags = 0;
+        cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
     }
 
     cpuid_data.cpuid.nent = cpuid_i;

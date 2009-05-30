@@ -27,6 +27,7 @@
 #include "hw/pcmcia.h"
 #include "hw/pc.h"
 #include "hw/pci.h"
+#include "hw/watchdog.h"
 #include "gdbstub.h"
 #include "net.h"
 #include "qemu-char.h"
@@ -580,7 +581,6 @@ static void encrypted_bdrv_it(void *opaque, BlockDriverState *bs)
     }
 }
 
-#ifdef CONFIG_GDBSTUB
 static void do_gdbserver(Monitor *mon, const char *device)
 {
     if (!device)
@@ -595,7 +595,13 @@ static void do_gdbserver(Monitor *mon, const char *device)
                        device);
     }
 }
-#endif
+
+static void do_watchdog_action(Monitor *mon, const char *action)
+{
+    if (select_watchdog_action(action) == -1) {
+        monitor_printf(mon, "Unknown watchdog action '%s'\n", action);
+    }
+}
 
 static void monitor_printc(Monitor *mon, int c)
 {
@@ -1368,7 +1374,7 @@ static void tlb_info(Monitor *mon)
 
 static void do_info_kqemu(Monitor *mon)
 {
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     CPUState *env;
     int val;
     val = 0;
@@ -1409,6 +1415,25 @@ static void do_info_kvm(Monitor *mon)
 #endif
 }
 
+static void do_info_numa(Monitor *mon)
+{
+    int i;
+    CPUState *env;
+
+    monitor_printf(mon, "%d nodes\n", nb_numa_nodes);
+    for (i = 0; i < nb_numa_nodes; i++) {
+        monitor_printf(mon, "node %d cpus:", i);
+        for (env = first_cpu; env != NULL; env = env->next_cpu) {
+            if (env->numa_node == i) {
+                monitor_printf(mon, " %d", env->cpu_index);
+            }
+        }
+        monitor_printf(mon, "\n");
+        monitor_printf(mon, "node %d size: %" PRId64 " MB\n", i,
+            node_mem[i] >> 20);
+    }
+}
+
 #ifdef CONFIG_PROFILER
 
 int64_t kqemu_time;
@@ -1445,7 +1470,7 @@ static void do_info_profile(Monitor *mon)
     kqemu_ret_int_count = 0;
     kqemu_ret_excp_count = 0;
     kqemu_ret_intr_count = 0;
-#ifdef USE_KQEMU
+#ifdef CONFIG_KQEMU
     kqemu_record_dump();
 #endif
 }
@@ -1640,7 +1665,7 @@ static const mon_cmd_t mon_cmds[] = {
     { "commit", "s", do_commit,
       "device|all", "commit changes to the disk images (if -snapshot is used) or backing files" },
     { "info", "s?", do_info,
-      "subcommand", "show various information about the system state" },
+      "[subcommand]", "show various information about the system state" },
     { "q|quit", "", do_quit,
       "", "quit the emulator" },
     { "eject", "-fB", do_eject,
@@ -1654,7 +1679,7 @@ static const mon_cmd_t mon_cmds[] = {
     { "log", "s", do_log,
       "item1[,...]", "activate logging of the specified items to '/tmp/qemu.log'" },
     { "savevm", "s?", do_savevm,
-      "tag|id", "save a VM snapshot. If no tag or id are provided, a new snapshot is created" },
+      "[tag|id]", "save a VM snapshot. If no tag or id are provided, a new snapshot is created" },
     { "loadvm", "s", do_loadvm,
       "tag|id", "restore a VM snapshot from its tag or id" },
     { "delvm", "s", do_delvm,
@@ -1665,10 +1690,8 @@ static const mon_cmd_t mon_cmds[] = {
       "", "stop emulation", },
     { "c|cont", "", do_cont,
       "", "resume emulation", },
-#ifdef CONFIG_GDBSTUB
     { "gdbserver", "s?", do_gdbserver,
-      "[port]", "start gdbserver session (default port=1234)", },
-#endif
+      "[device]", "start gdbserver on given device (default 'tcp::1234'), stop with 'none'", },
     { "x", "/l", do_memory_dump,
       "/fmt addr", "virtual memory dump starting at 'addr'", },
     { "xp", "/l", do_physical_memory_dump,
@@ -1700,7 +1723,7 @@ static const mon_cmd_t mon_cmds[] = {
       "index", "set which mouse device receives events" },
 #ifdef HAS_AUDIO
     { "wavcapture", "si?i?i?", do_wav_capture,
-      "path [frequency bits channels]",
+      "path [frequency [bits [channels]]]",
       "capture audio to a wave file (default frequency=44100 bits=16 channels=2)" },
 #endif
     { "stopcapture", "i", do_stop_capture,
@@ -1730,16 +1753,22 @@ static const mon_cmd_t mon_cmds[] = {
                                         "add drive to PCI storage controller" },
     { "pci_add", "sss", pci_device_hot_add, "pci_addr=auto|[[<domain>:]<bus>:]<slot> nic|storage [[vlan=n][,macaddr=addr][,model=type]] [file=file][,if=type][,bus=nr]...", "hot-add PCI device" },
     { "pci_del", "s", pci_device_hot_remove, "pci_addr=[[<domain>:]<bus>:]<slot>", "hot remove PCI device" },
-    { "host_net_add", "ss", net_host_device_add,
-      "[tap,user,socket,vde] options", "add host VLAN client" },
+#endif
+    { "host_net_add", "ss?", net_host_device_add,
+      "tap|user|socket|vde|dump [options]", "add host VLAN client" },
     { "host_net_remove", "is", net_host_device_remove,
       "vlan_id name", "remove host VLAN client" },
+#ifdef CONFIG_SLIRP
+    { "host_net_redir", "s", net_slirp_redir,
+      "[tcp|udp]:host-port:[guest-host]:guest-port", "redirect TCP or UDP connections from host to guest (requires -net user)" },
 #endif
     { "balloon", "i", do_balloon,
       "target", "request VM to change it's memory allocation (in MB)" },
     { "set_link", "ss", do_set_link,
-      "name [up|down]", "change the link status of a network adapter" },
-    { "acl", "sss?i?", do_acl, "<command> <aclname> [<match>] [<index>]\n",
+      "name up|down", "change the link status of a network adapter" },
+    { "watchdog_action", "s", do_watchdog_action,
+      "[reset|shutdown|poweroff|pause|debug|none]", "change watchdog action" },
+    { "acl", "sss?i?", do_acl, "<command> <aclname> [<match> [<index>]]\n",
                                "acl show vnc.username\n"
                                "acl policy vnc.username deny\n"
                                "acl allow vnc.username fred\n"
@@ -1788,6 +1817,8 @@ static const mon_cmd_t info_cmds[] = {
       "", "show KQEMU information", },
     { "kvm", "", do_info_kvm,
       "", "show KVM information", },
+    { "numa", "", do_info_numa,
+      "", "show NUMA information", },
     { "usb", "", usb_info,
       "", "show guest USB devices", },
     { "usbhost", "", usb_host_info,

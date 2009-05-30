@@ -1308,19 +1308,15 @@ static void ac97_on_reset (void *opaque)
     mixer_reset (s);
 }
 
-int ac97_init (PCIBus *bus, AudioState *audio)
+int ac97_init (PCIBus *bus)
 {
+    AudioState *audio = AUD_init();
     PCIAC97LinkState *d;
     AC97LinkState *s;
     uint8_t *c;
 
     if (!bus) {
         AUD_log ("ac97", "No PCI bus\n");
-        return -1;
-    }
-
-    if (!audio) {
-        AUD_log ("ac97", "No audio state\n");
         return -1;
     }
 
@@ -1348,7 +1344,7 @@ int ac97_init (PCIBus *bus, AudioState *audio)
     c[0x08] = 0x01;      /* rid revision ro */
     c[0x09] = 0x00;      /* pi programming interface ro */
     pci_config_set_class(c, PCI_CLASS_MULTIMEDIA_AUDIO); /* ro */
-    c[0x0e] = 0x00;      /* headtyp header type ro */
+    c[PCI_HEADER_TYPE] = PCI_HEADER_TYPE_NORMAL; /* headtyp header type ro */
 
     c[0x10] = 0x01;      /* nabmar native audio mixer base
                             address rw */
