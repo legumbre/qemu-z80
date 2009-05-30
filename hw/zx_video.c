@@ -349,14 +349,14 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
     }
 };
 
-void zx_video_init(uint8_t *zx_vram_base)
+void zx_video_init(ram_addr_t zx_vram_offset)
 {
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
     zxvstate = s;
     s->invalidate = 1;
     s->prevborder = -1;
     s->flashcount = 0;
-    s->vram_ptr = zx_vram_base;
+    s->vram_ptr = qemu_get_ram_ptr(zx_vram_offset);
 
     s->ds = graphic_console_init(zx_update_display, zx_invalidate_display,
                                  NULL, NULL, s);

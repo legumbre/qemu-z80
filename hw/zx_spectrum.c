@@ -269,6 +269,11 @@ static void zx_keyboard_init(void)
     qemu_add_kbd_event_handler(zx_put_keycode, NULL);
 }
 
+static const uint8_t halthack_oldip[16] =
+    {253, 203, 1,110, 200, 58, 8, 92, 253, 203, 1, 174};
+static const uint8_t halthack_newip[16] =
+    {33, 59, 92, 118, 203, 110, 200, 58, 8, 92, 203, 174};
+
 /* ZX Spectrum initialisation */
 static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
                              const char *boot_device,
@@ -278,6 +283,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
                              const char *cpu_model)
 {
     char buf[1024];
+    uint8_t halthack_curip[12];
     int ret;
     ram_addr_t ram_offset, rom_offset;
     int rom_size;
@@ -313,16 +319,15 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
     }
 
     /* hack from xz80 adding HALT to the keyboard input loop to save CPU */
-    static unsigned char oldip[]={253,203,1,110,200,58,8,92,253,203,1,174};
-    static unsigned char newip[]={33,59,92,118,203,110,200,58,8,92,203,174};
-    if (!memcmp(phys_ram_base + rom_offset + 0x10b0,oldip,12)) {
-        memcpy(phys_ram_base + rom_offset + 0x10b0,newip,12);
+    cpu_physical_memory_read(0x10b0, halthack_curip, 12);
+    if (!memcmp(halthack_curip, halthack_oldip, 12)) {
+        cpu_physical_memory_write_rom(0x10b0, halthack_newip, 12);
     }
 
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
 
-    zx_video_init(phys_ram_base + ram_offset);
+    zx_video_init(ram_offset);
 
     zx_keyboard_init();
     zx_timer_init();
