@@ -349,7 +349,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
             fprintf(stderr, "%s: %s is not a snapshot\n", __FUNCTION__, kernel_filename);
             exit(1);
         }
-        snapmem = malloc(65536);
+        snapmem = qemu_mallocz(0x10000);
         length = load_image(kernel_filename, snapmem);
         //printf("loaded %d bytes from %s\n",length, kernel_filename);
         if (libspectrum_snap_read(snap, snapmem, length, type, NULL) != LIBSPECTRUM_ERROR_NONE) {
@@ -394,7 +394,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
         env->iff2 = libspectrum_snap_iff2(snap);
         env->imode = libspectrum_snap_im(snap);
 
-        free(snapmem);
+        qemu_free(snapmem);
     }
 #endif
 }
