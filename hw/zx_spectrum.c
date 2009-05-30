@@ -304,8 +304,8 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
         goto rom_error;
     }
     rom_offset = qemu_ram_alloc(rom_size);
-    ret = load_image(buf, phys_ram_base + rom_offset);
-
+    cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
+    ret = load_image_targphys(buf, 0, rom_size);
     if (ret != rom_size) {
     rom_error:
         fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n", buf);
@@ -318,8 +318,6 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
     if (!memcmp(phys_ram_base + rom_offset + 0x10b0,oldip,12)) {
         memcpy(phys_ram_base + rom_offset + 0x10b0,newip,12);
     }
-
-    cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
 
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
