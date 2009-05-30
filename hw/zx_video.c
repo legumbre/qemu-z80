@@ -351,8 +351,6 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 
 void zx_video_init(uint8_t *zx_vram_base)
 {
-    int zx_io_memory;
-
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
     zxvstate = s;
     s->invalidate = 1;
