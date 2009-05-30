@@ -124,51 +124,34 @@ static const uint32_t dmask4[4] = {
 typedef void zx_draw_line_func(uint8_t *d, uint32_t font_data,
                                uint32_t xorcol, uint32_t bgcol);
 
-static inline void zx_draw_line_8(uint8_t *d,
-                                  uint32_t font_data,
-                                  uint32_t xorcol,
-                                  uint32_t bgcol)
-{
-    ((uint32_t *)d)[0] = (dmask16[(font_data >> 4)] & xorcol) ^ bgcol;
-    ((uint32_t *)d)[1] = (dmask16[(font_data >> 0) & 0xf] & xorcol) ^ bgcol;
-}
+#define DEPTH 8
+#include "zx_glyphs.h"
 
-static inline void zx_draw_line_16(uint8_t *d,
-                                   uint32_t font_data,
-                                   uint32_t xorcol,
-                                   uint32_t bgcol)
-{
-    ((uint32_t *)d)[0] = (dmask4[(font_data >> 6)] & xorcol) ^ bgcol;
-    ((uint32_t *)d)[1] = (dmask4[(font_data >> 4) & 3] & xorcol) ^ bgcol;
-    ((uint32_t *)d)[2] = (dmask4[(font_data >> 2) & 3] & xorcol) ^ bgcol;
-    ((uint32_t *)d)[3] = (dmask4[(font_data >> 0) & 3] & xorcol) ^ bgcol;
-}
+#define DEPTH 16
+#include "zx_glyphs.h"
 
-static inline void zx_draw_line_32(uint8_t *d,
-                                   uint32_t font_data,
-                                   uint32_t xorcol,
-                                   uint32_t bgcol)
-{
-    ((uint32_t *)d)[0] = (-((font_data >> 7)) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[1] = (-((font_data >> 6) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[2] = (-((font_data >> 5) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[3] = (-((font_data >> 4) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[4] = (-((font_data >> 3) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[5] = (-((font_data >> 2) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[6] = (-((font_data >> 1) & 1) & xorcol) ^ bgcol;
-    ((uint32_t *)d)[7] = (-((font_data >> 0) & 1) & xorcol) ^ bgcol;
-}
+#define DEPTH 32
+#include "zx_glyphs.h"
 
-#define NB_DEPTHS 7
+enum {
+    zx_pixfmt_8 = 0,
+    zx_pixfmt_15rgb,
+    zx_pixfmt_16rgb,
+    zx_pixfmt_32rgb,
+    zx_pixfmt_32bgr,
+    zx_pixfmt_15bgr,
+    zx_pixfmt_16bgr,
+    NB_DEPTHS
+};
 
 static zx_draw_line_func *zx_draw_line_table[NB_DEPTHS] = {
-    zx_draw_line_8,
-    zx_draw_line_16,
-    zx_draw_line_16,
-    zx_draw_line_32,
-    zx_draw_line_32,
-    zx_draw_line_16,
-    zx_draw_line_16,
+    zx_draw_glyph_line_8,
+    zx_draw_glyph_line_16,
+    zx_draw_glyph_line_16,
+    zx_draw_glyph_line_32,
+    zx_draw_glyph_line_32,
+    zx_draw_glyph_line_16,
+    zx_draw_glyph_line_16,
 };
 
 static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
@@ -181,27 +164,30 @@ static rgb_to_pixel_dup_func *rgb_to_pixel_dup_table[NB_DEPTHS] = {
     rgb_to_pixel16bgr_dup,
 };
 
-static inline int get_depth_index(DisplayState *s)
+static inline int get_pixfmt_index(DisplayState *s)
 {
     switch(s->depth) {
     default:
     case 8:
         return 0;
     case 15:
-        if (s->bgr)
-            return 5;
-        else
-            return 1;
+        if (s->bgr) {
+            return zx_pixfmt_15bgr;
+        } else {
+            return zx_pixfmt_15rgb;
+        }
     case 16:
-        if (s->bgr)
-            return 6;
-        else
-            return 2;
+        if (s->bgr) {
+            return zx_pixfmt_16bgr;
+        } else {
+            return zx_pixfmt_16rgb;
+        }
     case 32:
-        if (s->bgr)
-            return 4;
-        else
-            return 3;
+        if (s->bgr) {
+            return zx_pixfmt_32bgr;
+        } else {
+            return zx_pixfmt_32rgb;
+        }
     }
 }
 
@@ -226,7 +212,7 @@ static void zx_draw_scanline(ZXVState *s1, uint8_t *d,
     int x, x_incr;
     zx_draw_line_func *zx_draw_line;
 
-    zx_draw_line = zx_draw_line_table[get_depth_index(s1->ds)];
+    zx_draw_line = zx_draw_line_table[get_pixfmt_index(s1->ds)];
     x_incr = (s1->ds->depth + 7) >> 3;
 
     for (x = 0; x < 32; x++) {
@@ -257,7 +243,7 @@ static void zx_border_row(ZXVState *s, uint8_t *d)
     int x, x_incr;
     zx_draw_line_func *zx_draw_line;
 
-    zx_draw_line = zx_draw_line_table[get_depth_index(s->ds)];
+    zx_draw_line = zx_draw_line_table[get_pixfmt_index(s->ds)];
     x_incr = (s->ds->depth + 7) >> 3;
 
     for (x = 0; x < s->twidth / 8; x++) {
@@ -271,7 +257,7 @@ static void zx_border_sides(ZXVState *s, uint8_t *d)
     int x, x_incr;
     zx_draw_line_func *zx_draw_line;
 
-    zx_draw_line = zx_draw_line_table[get_depth_index(s->ds)];
+    zx_draw_line = zx_draw_line_table[get_pixfmt_index(s->ds)];
     x_incr = (s->ds->depth + 7) >> 3;
 
     for (x = 0; x < s->bwidth / 8; x++) {
@@ -308,7 +294,7 @@ static void zx_update_display(void *opaque)
     x_incr = (s->ds->depth + 7) >> 3;
 
     if (unlikely(inited == 0)) {
-        s->rgb_to_pixel = rgb_to_pixel_dup_table[get_depth_index(s->ds)];
+        s->rgb_to_pixel = rgb_to_pixel_dup_table[get_pixfmt_index(s->ds)];
         update_palette(s);
         inited = 1;
     }
