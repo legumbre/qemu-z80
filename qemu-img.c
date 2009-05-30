@@ -25,6 +25,7 @@
 #include "osdep.h"
 #include "block_int.h"
 #include <assert.h>
+#include <stdio.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -57,7 +58,7 @@ static void help(void)
            "QEMU disk image utility\n"
            "\n"
            "Command syntax:\n"
-           "  create [-e] [-6] [-b base_image] [-f fmt] filename [size]\n"
+           "  create [-e] [-6] [-F fmt] [-b base_image] [-f fmt] filename [size]\n"
            "  commit [-f fmt] filename\n"
            "  convert [-c] [-e] [-6] [-f fmt] [-O output_fmt] [-B output_base_image] filename [filename2 [...]] output_filename\n"
            "  info [-f fmt] filename\n"
@@ -217,6 +218,7 @@ static int img_create(int argc, char **argv)
 {
     int c, ret, flags;
     const char *fmt = "raw";
+    const char *base_fmt = NULL;
     const char *filename;
     const char *base_filename = NULL;
     uint64_t size;
@@ -226,12 +228,15 @@ static int img_create(int argc, char **argv)
 
     flags = 0;
     for(;;) {
-        c = getopt(argc, argv, "b:f:he6");
+        c = getopt(argc, argv, "F:b:f:he6");
         if (c == -1)
             break;
         switch(c) {
         case 'h':
             help();
+            break;
+        case 'F':
+            base_fmt = optarg;
             break;
         case 'b':
             base_filename = optarg;
@@ -253,7 +258,15 @@ static int img_create(int argc, char **argv)
     size = 0;
     if (base_filename) {
         BlockDriverState *bs;
-        bs = bdrv_new_open(base_filename, NULL);
+        BlockDriver *base_drv = NULL;
+
+        if (base_fmt) {
+            base_drv = bdrv_find_format(base_fmt);
+            if (base_drv == NULL)
+                error("Unknown basefile format '%s'", base_fmt);
+        }
+
+        bs = bdrv_new_open(base_filename, base_fmt);
         bdrv_get_geometry(bs, &size);
         size *= 512;
         bdrv_delete(bs);
@@ -284,9 +297,12 @@ static int img_create(int argc, char **argv)
     if (base_filename) {
         printf(", backing_file=%s",
                base_filename);
+         if (base_fmt)
+             printf(", backing_fmt=%s",
+                    base_fmt);
     }
     printf(", size=%" PRIu64 " kB\n", size / 1024);
-    ret = bdrv_create(drv, filename, size / 512, base_filename, flags);
+    ret = bdrv_create2(drv, filename, size / 512, base_filename, base_fmt, flags);
     if (ret < 0) {
         if (ret == -ENOTSUP) {
             error("Formatting or formatting option not supported for file format '%s'", fmt);
@@ -477,7 +493,7 @@ static int img_convert(int argc, char **argv)
     ret = bdrv_create(drv, out_filename, total_sectors, out_baseimg, flags);
     if (ret < 0) {
         if (ret == -ENOTSUP) {
-            error("Formatting not supported for file format '%s'", fmt);
+            error("Formatting not supported for file format '%s'", out_fmt);
         } else {
             error("Error while formatting '%s'", out_filename);
         }
@@ -576,18 +592,17 @@ static int img_convert(int argc, char **argv)
             if (n > bs_offset + bs_sectors - sector_num)
                 n = bs_offset + bs_sectors - sector_num;
 
-            /* If the output image is being created as a copy on write image,
-               assume that sectors which are unallocated in the input image
-               are present in both the output's and input's base images (no
-               need to copy them). */
-            if (out_baseimg) {
-               if (!bdrv_is_allocated(bs[bs_i], sector_num - bs_offset, n, &n1)) {
-                  sector_num += n1;
-                  continue;
-               }
-               /* The next 'n1' sectors are allocated in the input image. Copy
-                  only those as they may be followed by unallocated sectors. */
-               n = n1;
+            if (drv != &bdrv_host_device) {
+                if (!bdrv_is_allocated(bs[bs_i], sector_num - bs_offset,
+                                       n, &n1)) {
+                    sector_num += n1;
+                    continue;
+                }
+                /* The next 'n1' sectors are allocated in the input image. Copy
+                   only those as they may be followed by unallocated sectors. */
+                n = n1;
+            } else {
+                n1 = n;
             }
 
             if (bdrv_read(bs[bs_i], sector_num - bs_offset, buf, n) < 0) 
@@ -599,8 +614,13 @@ static int img_convert(int argc, char **argv)
             while (n > 0) {
                 /* If the output image is being created as a copy on write image,
                    copy all sectors even the ones containing only NUL bytes,
-                   because they may differ from the sectors in the base image. */
-                if (out_baseimg || is_allocated_sectors(buf1, n, &n1)) {
+                   because they may differ from the sectors in the base image.
+
+                   If the output is to a host device, we also write out
+                   sectors that are entirely 0, since whatever data was
+                   already there is garbage, not 0s. */
+                if (drv == &bdrv_host_device || out_baseimg ||
+                    is_allocated_sectors(buf1, n, &n1)) {
                     if (bdrv_write(out_bs, sector_num, buf1, n1) < 0)
                         error("error while writing");
                 }

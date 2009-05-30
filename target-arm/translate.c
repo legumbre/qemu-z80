@@ -2783,10 +2783,12 @@ static int disas_vfp_insn(CPUState * env, DisasContext *s, uint32_t insn)
                         } else if (size == 1) {
                             gen_neon_dup_low16(tmp);
                         }
-                        tmp2 = new_tmp();
-                        tcg_gen_mov_i32(tmp2, tmp);
-                        neon_store_reg(rn, 0, tmp2);
-                        neon_store_reg(rn, 1, tmp);
+                        for (n = 0; n <= pass * 2; n++) {
+                            tmp2 = new_tmp();
+                            tcg_gen_mov_i32(tmp2, tmp);
+                            neon_store_reg(rn, n, tmp2);
+                        }
+                        neon_store_reg(rn, n, tmp);
                     } else {
                         /* VMOV */
                         switch (size) {
@@ -8789,6 +8791,7 @@ static inline void gen_intermediate_code_internal(CPUState *env,
         num_insns ++;
     } while (!dc->is_jmp && gen_opc_ptr < gen_opc_end &&
              !env->singlestep_enabled &&
+             !singlestep &&
              dc->pc < next_page_start &&
              num_insns < max_insns);
 

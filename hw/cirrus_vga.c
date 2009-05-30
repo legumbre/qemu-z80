@@ -49,8 +49,6 @@
  *
  ***************************************/
 
-#define qemu_MIN(a,b) ((a) < (b) ? (a) : (b))
-
 // ID
 #define CIRRUS_ID_CLGD5422  (0x23<<2)
 #define CIRRUS_ID_CLGD5426  (0x24<<2)
@@ -172,10 +170,6 @@
 #define CIRRUS_MMIO_BRESENHAM_DIRECTION 0x38	// byte
 #define CIRRUS_MMIO_LINEDRAW_MODE     0x39	// byte
 #define CIRRUS_MMIO_BLTSTATUS         0x40	// byte
-
-// PCI 0x02: device
-#define PCI_DEVICE_CLGD5462           0x00d0
-#define PCI_DEVICE_CLGD5465           0x00d6
 
 // PCI 0x04: command(word), 0x06(word): status
 #define PCI_COMMAND_IOACCESS                0x0001
@@ -1398,6 +1392,8 @@ cirrus_hook_write_sr(CirrusVGAState * s, unsigned reg_index, int reg_value)
 	break;
     }
 
+    vga_update_resolution((VGAState *)s);
+
     return CIRRUS_HOOK_HANDLED;
 }
 
@@ -1425,6 +1421,7 @@ static void cirrus_write_hidden_dac(CirrusVGAState * s, int reg_value)
 #endif
     }
     s->cirrus_hidden_dac_lockindex = 0;
+    vga_update_resolution((VGAState *)s);
 }
 
 /***************************************
@@ -1710,6 +1707,8 @@ cirrus_hook_write_cr(CirrusVGAState * s, unsigned reg_index, int reg_value)
 #endif
 	break;
     }
+
+    vga_update_resolution((VGAState *)s);
 
     return CIRRUS_HOOK_HANDLED;
 }
@@ -2637,11 +2636,16 @@ static void map_linear_vram(CirrusVGAState *s)
 
     s->lfb_vram_mapped = 0;
 
+    cpu_register_physical_memory(isa_mem_base + 0xa0000, 0x8000,
+                                (s->vram_offset + s->cirrus_bank_base[0]) | IO_MEM_UNASSIGNED);
+    cpu_register_physical_memory(isa_mem_base + 0xa8000, 0x8000,
+                                (s->vram_offset + s->cirrus_bank_base[1]) | IO_MEM_UNASSIGNED);
     if (!(s->cirrus_srcptr != s->cirrus_srcptr_end)
         && !((s->sr[0x07] & 0x01) == 0)
         && !((s->gr[0x0B] & 0x14) == 0x14)
         && !(s->gr[0x0B] & 0x02)) {
 
+        vga_dirty_log_stop((VGAState *)s);
         cpu_register_physical_memory(isa_mem_base + 0xa0000, 0x8000,
                                     (s->vram_offset + s->cirrus_bank_base[0]) | IO_MEM_RAM);
         cpu_register_physical_memory(isa_mem_base + 0xa8000, 0x8000,
@@ -2831,6 +2835,7 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
 	if (s->ar_flip_flop == 0) {
 	    val &= 0x3f;
 	    s->ar_index = val;
+            vga_update_resolution((VGAState *)s);
 	} else {
 	    index = s->ar_index & 0x1f;
 	    switch (index) {
@@ -2924,6 +2929,7 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
 	    /* can always write bit 4 of CR7 */
 	    if (s->cr_index == 7)
 		s->cr[7] = (s->cr[7] & ~0x10) | (val & 0x10);
+            vga_update_resolution((VGAState *)s);
 	    return;
 	}
 	switch (s->cr_index) {
@@ -2952,6 +2958,7 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
 	    s->update_retrace_info((VGAState *) s);
 	    break;
 	}
+        vga_update_resolution((VGAState *)s);
 	break;
     case 0x3ba:
     case 0x3da:
@@ -3158,7 +3165,8 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
 
     cirrus_update_memory_access(s);
     /* force refresh */
-    s->graphic_mode = -1;
+    vga_update_resolution((VGAState *)s);
+    s->want_full_update = 1;
     cirrus_update_bank_ptr(s, 0);
     cirrus_update_bank_ptr(s, 1);
     return 0;

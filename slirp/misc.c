@@ -5,7 +5,6 @@
  * terms and conditions of the copyright.
  */
 
-#define WANT_SYS_IOCTL_H
 #include <slirp.h>
 
 u_int curtime, time_fasttimo, last_slowtimo;
@@ -778,7 +777,11 @@ void
 fd_nonblock(int fd)
 {
 #ifdef FIONBIO
-	int opt = 1;
+#ifdef _WIN32
+        long opt = 1;
+#else
+        int opt = 1;
+#endif
 
 	ioctlsocket(fd, FIONBIO, &opt);
 #else

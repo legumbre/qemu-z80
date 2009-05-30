@@ -1822,11 +1822,6 @@ void net_host_device_remove(Monitor *mon, int vlan_id, const char *device)
     VLANState *vlan;
     VLANClientState *vc;
 
-    if (!net_host_check_device(device)) {
-        monitor_printf(mon, "invalid host network device %s\n", device);
-        return;
-    }
-
     vlan = qemu_find_vlan(vlan_id);
     if (!vlan) {
         monitor_printf(mon, "can't find vlan %d\n", vlan_id);
@@ -1908,9 +1903,9 @@ done:
 
 void net_cleanup(void)
 {
+#if !defined(_WIN32)
     VLANState *vlan;
 
-#if !defined(_WIN32)
     /* close network clients */
     for(vlan = first_vlan; vlan != NULL; vlan = vlan->next) {
         VLANClientState *vc;
