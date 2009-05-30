@@ -300,7 +300,7 @@ static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
     snprintf(buf, sizeof(buf), "%s/%s", bios_dir, ROM_FILENAME);
     rom_size = get_image_size(buf);
     if (rom_size <= 0 ||
-        (rom_size % 16384) != 0) {
+        (rom_size % 0x4000) != 0) {
         goto rom_error;
     }
     rom_offset = qemu_ram_alloc(rom_size);
