@@ -80,13 +80,12 @@ static QEMUTimer *zx_ula_timer;
 
 static void zx_50hz_timer(void *opaque)
 {
-//    printf("zx_irq_timer()\n");
     int64_t next_time;
 
     CPUState *env = opaque;
     cpu_interrupt(env, CPU_INTERRUPT_HARD);
 
-    /* FIXME: 50 Hz */
+    /* FIXME: not exactly 50 Hz */
     next_time = qemu_get_clock(vm_clock) + muldiv64(1, ticks_per_sec, 50);
     qemu_mod_timer(zx_ula_timer, next_time);
 
@@ -95,9 +94,7 @@ static void zx_50hz_timer(void *opaque)
 
 static CPUState *zx_env;
 
-static void zx_timer_init(DisplayState *ds) {
-    /* FIXME */
-
+static void zx_timer_init(void) {
     int64_t t = qemu_get_clock(vm_clock);
     zx_ula_timer = qemu_new_timer(vm_clock, zx_50hz_timer, zx_env);
     qemu_mod_timer(zx_ula_timer, t);
@@ -272,10 +269,12 @@ static void zx_keyboard_init(void)
 }
 
 /* ZX Spectrum initialisation */
-static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
-                     const char *boot_device, DisplayState *ds,
-                     const char *kernel_filename, const char *kernel_cmdline,
-                     const char *initrd_filename, const char *cpu_model)
+static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
+                             const char *boot_device,
+                             const char *kernel_filename,
+                             const char *kernel_cmdline,
+                             const char *initrd_filename,
+                             const char *cpu_model)
 {
     char buf[1024];
     int ret;
@@ -324,10 +323,10 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
 
-    zx_video_init(ds, phys_ram_base + ram_size, ram_size);
+    zx_video_init(phys_ram_base + ram_size, ram_size);
 
     zx_keyboard_init();
-    zx_timer_init(ds);
+    zx_timer_init();
 
 #ifdef CONFIG_LIBSPECTRUM
     /* load a snapshot */
@@ -398,18 +397,6 @@ static void zx_init1(ram_addr_t ram_size, int vga_ram_size,
         free(snapmem);
     }
 #endif
-}
-
-static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
-                             const char *boot_device, DisplayState *ds,
-                             const char *kernel_filename,
-                             const char *kernel_cmdline,
-                             const char *initrd_filename,
-                             const char *cpu_model)
-{
-    zx_init1(ram_size, vga_ram_size, boot_device, ds,
-             kernel_filename, kernel_cmdline,
-             initrd_filename, cpu_model);
 }
 
 QEMUMachine zxspec_machine = {

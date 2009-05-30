@@ -38,7 +38,6 @@ typedef unsigned int rgb_to_pixel_dup_func(unsigned int r,
 
 typedef struct {
     DisplayState *ds;
-    QEMUConsole *console;
     uint8_t *vram_ptr;
     unsigned long vram_offset;
 
@@ -281,7 +280,7 @@ static void zx_update_display(void *opaque)
 
     if (unlikely(ds_get_width(s->ds) != s->twidth ||
                  ds_get_height(s->ds) != s->theight)) {
-        qemu_console_resize(s->console, s->twidth, s->theight);
+        qemu_console_resize(s->ds, s->twidth, s->theight);
         s->invalidate = 1;
         s->prevborder = -1;
     }
@@ -344,8 +343,7 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
     }
 };
 
-void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
-                   unsigned long ula_ram_offset)
+void zx_video_init(uint8_t *zx_screen_base, unsigned long ula_ram_offset)
 {
     int zx_io_memory;
 
@@ -354,16 +352,14 @@ void zx_video_init(DisplayState *ds, uint8_t *zx_screen_base,
         return;
     }
     zxvstate = s;
-    s->ds = ds;
     s->invalidate = 1;
     s->prevborder = -1;
     s->flashcount = 0;
 //    s->vram_ptr = zx_screen_base;
 //    s->vram_offset = ula_ram_offset;
 
-    s->console = graphic_console_init(ds, zx_update_display,
-                                      zx_invalidate_display,
-                                      NULL, NULL, s);
+    s->ds = graphic_console_init(zx_update_display, zx_invalidate_display,
+                                 NULL, NULL, s);
 
     s->bwidth = 32;
     s->bheight = 24;
