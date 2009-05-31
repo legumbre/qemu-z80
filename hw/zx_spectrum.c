@@ -296,7 +296,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     env = cpu_init(cpu_model);
     zx_env = env; // XXX
     register_savevm("cpu", 0, 4, cpu_save, cpu_load, env);
-    qemu_register_reset(main_cpu_reset, env);
+    qemu_register_reset(main_cpu_reset, 0, env);
 
     /* allocate RAM */
     ram_offset = qemu_ram_alloc(0xc000);
