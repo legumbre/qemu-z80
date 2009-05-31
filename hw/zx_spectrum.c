@@ -403,8 +403,14 @@ static void zx_spectrum_init(ram_addr_t ram_size,
 #endif
 }
 
-QEMUMachine zxspec_machine = {
+static QEMUMachine zxspec_machine = {
     .name = "zxspec",
     .desc = "ZX Spectrum",
     .init = zx_spectrum_init,
 };
+
+static void zxspec_machine_init(void) {
+    qemu_register_machine(&zxspec_machine);
+}
+
+machine_init(zxspec_machine_init);
