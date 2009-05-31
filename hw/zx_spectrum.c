@@ -275,7 +275,7 @@ static const uint8_t halthack_newip[16] =
     {33, 59, 92, 118, 203, 110, 200, 58, 8, 92, 203, 174};
 
 /* ZX Spectrum initialisation */
-static void zx_spectrum_init(ram_addr_t ram_size, int vga_ram_size,
+static void zx_spectrum_init(ram_addr_t ram_size,
                              const char *boot_device,
                              const char *kernel_filename,
                              const char *kernel_cmdline,
