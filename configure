@@ -1993,6 +1993,7 @@ case "$target_cpu" in
     echo "TARGET_ARCH=z80" >> $config_mak
     echo "#define TARGET_ARCH \"z80\"" >> $config_h
     echo "#define TARGET_Z80 1" >> $config_h
+    target_phys_bits=32
   ;;
   *)
     echo "Unsupported target CPU"
