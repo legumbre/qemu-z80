@@ -152,9 +152,12 @@ static const int map[0x100][2] = {
     [0x19] = {ZX_KEY_P, -1},
 
     [0x0d] = {ZX_KEY_SYMBSHIFT, ZX_KEY_L}, /* Equals */
+    [0x0f] = {ZX_KEY_CAPSSHIFT, ZX_KEY_1}, /* Tab */
 
     [0x1c] = {ZX_KEY_ENTER,     -1}, /* Enter */
+
     [0x1d] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Control */
+
     [0x1e] = {ZX_KEY_A, -1},
     [0x1f] = {ZX_KEY_S, -1},
     [0x20] = {ZX_KEY_D, -1},
@@ -185,15 +188,37 @@ static const int map[0x100][2] = {
     [0x35] = {ZX_KEY_SYMBSHIFT, ZX_KEY_V}, /* Slash */
 
     [0x36] = {ZX_KEY_CAPSSHIFT, -1}, /* Right Shift */
+    [0x37] = {ZX_KEY_SYMBSHIFT, ZX_KEY_B}, /* * (Numpad) */
     [0x38] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Alt */
     [0x39] = {ZX_KEY_SPACE,     -1}, /* Space Bar */
-    [0x9c] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Alt */
 
-    [0xb7] = {ZX_KEY_CAPSSHIFT, ZX_KEY_7}, /* Up Arrow */
-    [0xb8] = {ZX_KEY_CAPSSHIFT, ZX_KEY_5}, /* Left Arrow */
-    [0xc6] = {ZX_KEY_CAPSSHIFT, ZX_KEY_8}, /* Right Arrow */
+    [0x47] = {ZX_KEY_7,         -1}, /* 7 (Numpad) */
+    [0x48] = {ZX_KEY_8,         -1}, /* 8 (Numpad) */
+    [0x49] = {ZX_KEY_9,         -1}, /* 9 (Numpad) */
+    [0x4a] = {ZX_KEY_SYMBSHIFT, ZX_KEY_J}, /* Minus (Numpad) */
+    [0x4b] = {ZX_KEY_4,         -1}, /* 4 (Numpad) */
+    [0x4c] = {ZX_KEY_5,         -1}, /* 5 (Numpad) */
+    [0x4d] = {ZX_KEY_6,         -1}, /* 6 (Numpad) */
+    [0x4e] = {ZX_KEY_SYMBSHIFT, ZX_KEY_K}, /* Plus (Numpad) */
+    [0x4f] = {ZX_KEY_1,         -1}, /* 1 (Numpad) */
+    [0x50] = {ZX_KEY_2,         -1}, /* 2 (Numpad) */
+    [0x51] = {ZX_KEY_3,         -1}, /* 3 (Numpad) */
+    [0x52] = {ZX_KEY_0,         -1}, /* 0 (Numpad) */
+    [0x53] = {ZX_KEY_SYMBSHIFT, ZX_KEY_M}, /* Period (Numpad) */
 
-    [0xd1] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Control */
+    [0x9c] = {ZX_KEY_SYMBSHIFT, -1}, /* Enter (Numpad) */
+    [0x9d] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Control */
+    [0xb5] = {ZX_KEY_SYMBSHIFT, ZX_KEY_V}, /* Slash (Numpad) */
+    [0xb8] = {ZX_KEY_SYMBSHIFT, -1}, /* Right Alt */
+
+    [0xc8] = {ZX_KEY_CAPSSHIFT, ZX_KEY_7}, /* Up Arrow */
+    [0xcb] = {ZX_KEY_CAPSSHIFT, ZX_KEY_5}, /* Left Arrow */
+    [0xcd] = {ZX_KEY_CAPSSHIFT, ZX_KEY_8}, /* Right Arrow */
+    [0xd0] = {ZX_KEY_CAPSSHIFT, ZX_KEY_6}, /* Down Arrow */
+
+    [0xdb] = {ZX_KEY_CAPSSHIFT, ZX_KEY_SYMBSHIFT}, /* Left Meta */
+    [0xdc] = {ZX_KEY_CAPSSHIFT, ZX_KEY_SYMBSHIFT}, /* Menu */
+    [0xdd] = {ZX_KEY_CAPSSHIFT, ZX_KEY_SYMBSHIFT}, /* Right Meta */
 };
 
 /* FIXME:
