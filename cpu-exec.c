@@ -547,8 +547,7 @@ int cpu_exec(CPUState *env1)
 #elif defined(TARGET_Z80)
                     if (interrupt_request & CPU_INTERRUPT_HARD) {
 			env->interrupt_request &= ~CPU_INTERRUPT_HARD;
-//                      Z80 FIXME Z80
-//                        env->exception_index = EXCP_IRQ;
+                        /* TODO: Add support for NMIs */
                         do_interrupt(env);
                     }
 #endif
