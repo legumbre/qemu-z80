@@ -84,7 +84,7 @@ static void realview_init(ram_addr_t ram_size,
                                     cpu_irq[3], NULL);
     }
     for (n = 0; n < 64; n++) {
-        pic[n] = qdev_get_irq_sink(dev, n);
+        pic[n] = qdev_get_gpio_in(dev, n);
     }
 
     sysbus_create_simple("pl050_keyboard", 0x10006000, pic[20]);
@@ -109,7 +109,7 @@ static void realview_init(ram_addr_t ram_size,
 
     dev = sysbus_create_varargs("realview_pci", 0x60000000,
                                 pic[48], pic[49], pic[50], pic[51], NULL);
-    pci_bus = qdev_get_child_bus(dev, "pci");
+    pci_bus = (PCIBus *)qdev_get_child_bus(dev, "pci");
     if (usb_enabled) {
         usb_ohci_init_pci(pci_bus, 3, -1);
     }

@@ -431,7 +431,7 @@ static i2c_interface *musicpal_audio_init(qemu_irq irq)
     s->irq = irq;
 
     i2c = qemu_mallocz(sizeof(i2c_interface));
-    i2c->bus = i2c_init_bus();
+    i2c->bus = i2c_init_bus(NULL, "i2c");
     i2c->current_addr = -1;
 
     s->wm = i2c_create_slave(i2c->bus, "wm8750", MP_WM_ADDR);
@@ -1040,7 +1040,7 @@ static void mv88w8618_pic_init(SysBusDevice *dev)
     mv88w8618_pic_state *s = FROM_SYSBUS(mv88w8618_pic_state, dev);
     int iomemtype;
 
-    qdev_init_irq_sink(&dev->qdev, mv88w8618_pic_set_irq, 32);
+    qdev_init_gpio_in(&dev->qdev, mv88w8618_pic_set_irq, 32);
     sysbus_init_irq(dev, &s->parent_irq);
     iomemtype = cpu_register_io_memory(0, mv88w8618_pic_readfn,
                                        mv88w8618_pic_writefn, s);
@@ -1534,7 +1534,7 @@ static void musicpal_init(ram_addr_t ram_size,
     dev = sysbus_create_simple("mv88w8618_pic", MP_PIC_BASE,
                                cpu_pic[ARM_PIC_CPU_IRQ]);
     for (i = 0; i < 32; i++) {
-        pic[i] = qdev_get_irq_sink(dev, i);
+        pic[i] = qdev_get_gpio_in(dev, i);
     }
     sysbus_create_varargs("mv88w8618_pit", MP_PIT_BASE, pic[MP_TIMER1_IRQ],
                           pic[MP_TIMER2_IRQ], pic[MP_TIMER3_IRQ],
