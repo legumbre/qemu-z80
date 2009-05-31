@@ -407,6 +407,7 @@ static QEMUMachine zxspec_machine = {
     .name = "zxspec",
     .desc = "ZX Spectrum",
     .init = zx_spectrum_init,
+    .is_default = 1,
 };
 
 static void zxspec_machine_init(void) {
