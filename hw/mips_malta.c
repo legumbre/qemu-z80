@@ -37,14 +37,9 @@
 #include "audio/audio.h"
 #include "boards.h"
 #include "qemu-log.h"
+#include "mips-bios.h"
 
 //#define DEBUG_BOARD_INIT
-
-#ifdef TARGET_WORDS_BIGENDIAN
-#define BIOS_FILENAME "mips_bios.bin"
-#else
-#define BIOS_FILENAME "mipsel_bios.bin"
-#endif
 
 #ifdef TARGET_MIPS64
 #define PHYS_TO_VIRT(x) ((x) | ~0x7fffffffULL)
@@ -911,7 +906,11 @@ void mips_malta_init (ram_addr_t ram_size,
     eeprom_buf = qemu_mallocz(8 * 256); /* XXX: make this persistent */
     for (i = 0; i < 8; i++) {
         /* TODO: Populate SPD eeprom data.  */
-        smbus_eeprom_device_init(smbus, 0x50 + i, eeprom_buf + (i * 256));
+        DeviceState *eeprom;
+        eeprom = qdev_create(smbus, "smbus-eeprom");
+        qdev_set_prop_int(eeprom, "address", 0x50 + i);
+        qdev_set_prop_ptr(eeprom, "data", eeprom_buf + (i * 256));
+        qdev_init(eeprom);
     }
     pit = pit_init(0x40, i8259[0]);
     DMA_init(0);

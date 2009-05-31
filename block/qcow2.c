@@ -23,6 +23,7 @@
  */
 #include "qemu-common.h"
 #include "block_int.h"
+#include "module.h"
 #include <zlib.h>
 #include "aes.h"
 
@@ -2258,6 +2259,11 @@ static int qcow_snapshot_list(BlockDriverState *bs,
     QCowSnapshot *sn;
     int i;
 
+    if (!s->nb_snapshots) {
+        *psn_tab = NULL;
+        return s->nb_snapshots;
+    }
+
     sn_tab = qemu_mallocz(s->nb_snapshots * sizeof(QEMUSnapshotInfo));
     for(i = 0; i < s->nb_snapshots; i++) {
         sn_info = sn_tab + i;
@@ -2891,7 +2897,7 @@ static int qcow_get_buffer(BlockDriverState *bs, uint8_t *buf,
     return ret;
 }
 
-BlockDriver bdrv_qcow2 = {
+static BlockDriver bdrv_qcow2 = {
     .format_name	= "qcow2",
     .instance_size	= sizeof(BDRVQcowState),
     .bdrv_probe		= qcow_probe,
@@ -2921,3 +2927,10 @@ BlockDriver bdrv_qcow2 = {
     .bdrv_create2 = qcow_create2,
     .bdrv_check = qcow_check,
 };
+
+static void bdrv_qcow2_init(void)
+{
+    bdrv_register(&bdrv_qcow2);
+}
+
+block_init(bdrv_qcow2_init);

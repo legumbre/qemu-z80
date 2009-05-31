@@ -32,12 +32,7 @@
 #include "boards.h"
 #include "net.h"
 #include "scsi.h"
-
-#ifdef TARGET_WORDS_BIGENDIAN
-#define BIOS_FILENAME "mips_bios.bin"
-#else
-#define BIOS_FILENAME "mipsel_bios.bin"
-#endif
+#include "mips-bios.h"
 
 enum jazz_model_e
 {
@@ -129,8 +124,6 @@ void mips_jazz_init (ram_addr_t ram_size,
     qemu_irq *rc4030, *i8259;
     rc4030_dma *dmas;
     void* rc4030_opaque;
-    void *scsi_hba;
-    int hd;
     int s_rtc, s_dma_dummy;
     NICInfo *nd;
     PITState *pit;
@@ -226,15 +219,9 @@ void mips_jazz_init (ram_addr_t ram_size,
     }
 
     /* SCSI adapter */
-    scsi_hba = esp_init(0x80002000, 0,
-                        rc4030_dma_read, rc4030_dma_write, dmas[0],
-                        rc4030[5], &esp_reset);
-    for (n = 0; n < ESP_MAX_DEVS; n++) {
-        hd = drive_get_index(IF_SCSI, 0, n);
-        if (hd != -1) {
-            esp_scsi_attach(scsi_hba, drives_table[hd].bdrv, n);
-        }
-    }
+    esp_init(0x80002000, 0,
+             rc4030_dma_read, rc4030_dma_write, dmas[0],
+             rc4030[5], &esp_reset);
 
     /* Floppy */
     if (drive_get_max_bus(IF_FLOPPY) >= MAX_FD) {

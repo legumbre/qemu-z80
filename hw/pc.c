@@ -33,9 +33,6 @@
 #include "boards.h"
 #include "monitor.h"
 #include "fw_cfg.h"
-#include "virtio-blk.h"
-#include "virtio-balloon.h"
-#include "virtio-console.h"
 #include "hpet_emul.h"
 #include "watchdog.h"
 #include "smbios.h"
@@ -599,7 +596,8 @@ static long get_file_size(FILE *f)
 static void load_linux(target_phys_addr_t option_rom,
                        const char *kernel_filename,
 		       const char *initrd_filename,
-		       const char *kernel_cmdline)
+		       const char *kernel_cmdline,
+               target_phys_addr_t max_ram_size)
 {
     uint16_t protocol;
     uint32_t gpr[8];
@@ -665,8 +663,8 @@ static void load_linux(target_phys_addr_t option_rom,
     else
 	initrd_max = 0x37ffffff;
 
-    if (initrd_max >= ram_size-ACPI_DATA_SIZE)
-	initrd_max = ram_size-ACPI_DATA_SIZE-1;
+    if (initrd_max >= max_ram_size-ACPI_DATA_SIZE)
+    	initrd_max = max_ram_size-ACPI_DATA_SIZE-1;
 
     /* kernel command line */
     pstrcpy_targphys(cmdline_addr, 4096, kernel_cmdline);
@@ -707,9 +705,6 @@ static void load_linux(target_phys_addr_t option_rom,
 
 	initrd_size = get_file_size(fi);
 	initrd_addr = (initrd_max-initrd_size) & ~4095;
-
-        fprintf(stderr, "qemu: loading initrd (%#x bytes) at 0x" TARGET_FMT_plx
-                "\n", initrd_size, initrd_addr);
 
 	if (!fread_targphys_ok(initrd_addr, initrd_size, fi)) {
 	    fprintf(stderr, "qemu: read error on initial ram disk '%s'\n",
@@ -781,21 +776,14 @@ static int parallel_irq[MAX_PARALLEL_PORTS] = { 7, 7, 7 };
 static void audio_init (PCIBus *pci_bus, qemu_irq *pic)
 {
     struct soundhw *c;
-    int audio_enabled = 0;
 
-    for (c = soundhw; !audio_enabled && c->name; ++c) {
-        audio_enabled = c->enabled;
-    }
-
-    if (audio_enabled) {
-        for (c = soundhw; c->name; ++c) {
-            if (c->enabled) {
-                if (c->isa) {
-                    c->init.init_isa(pic);
-                } else {
-                    if (pci_bus) {
-                        c->init.init_pci(pci_bus);
-                    }
+    for (c = soundhw; c->name; ++c) {
+        if (c->enabled) {
+            if (c->isa) {
+                c->init.init_isa(pic);
+            } else {
+                if (pci_bus) {
+                    c->init.init_pci(pci_bus);
                 }
             }
         }
@@ -911,10 +899,14 @@ static void pc_init1(ram_addr_t ram_size,
 
     /* above 4giga memory allocation */
     if (above_4g_mem_size > 0) {
+#if TARGET_PHYS_ADDR_BITS == 32
+        hw_error("To much RAM for 32-bit physical address");
+#else
         ram_addr = qemu_ram_alloc(above_4g_mem_size);
         cpu_register_physical_memory(0x100000000ULL,
                                      above_4g_mem_size,
                                      ram_addr);
+#endif
     }
 
 
@@ -966,7 +958,7 @@ static void pc_init1(ram_addr_t ram_size,
 
     if (linux_boot) {
         load_linux(0xc0000 + oprom_area_size,
-                   kernel_filename, initrd_filename, kernel_cmdline);
+                   kernel_filename, initrd_filename, kernel_cmdline, below_4g_mem_size);
         oprom_area_size += 2048;
     }
 
@@ -1112,7 +1104,11 @@ static void pc_init1(ram_addr_t ram_size,
         /* TODO: Populate SPD eeprom data.  */
         smbus = piix4_pm_init(pci_bus, piix3_devfn + 3, 0xb100, i8259[9]);
         for (i = 0; i < 8; i++) {
-            smbus_eeprom_device_init(smbus, 0x50 + i, eeprom_buf + (i * 256));
+            DeviceState *eeprom;
+            eeprom = qdev_create(smbus, "smbus-eeprom");
+            qdev_set_prop_int(eeprom, "address", 0x50 + i);
+            qdev_set_prop_ptr(eeprom, "data", eeprom_buf + (i * 256));
+            qdev_init(eeprom);
         }
     }
 
@@ -1122,19 +1118,11 @@ static void pc_init1(ram_addr_t ram_size,
 
     if (pci_enabled) {
 	int max_bus;
-        int bus, unit;
-        void *scsi;
+        int bus;
 
         max_bus = drive_get_max_bus(IF_SCSI);
-
 	for (bus = 0; bus <= max_bus; bus++) {
-            scsi = lsi_scsi_init(pci_bus, -1);
-            for (unit = 0; unit < LSI_MAX_DEVS; unit++) {
-	        index = drive_get_index(IF_SCSI, bus, unit);
-		if (index == -1)
-		    continue;
-		lsi_scsi_attach(scsi, drives_table[index].bdrv, unit);
-	    }
+            pci_create_simple(pci_bus, -1, "lsi53c895a");
         }
     }
 
@@ -1144,20 +1132,22 @@ static void pc_init1(ram_addr_t ram_size,
         int unit_id = 0;
 
         while ((index = drive_get_index(IF_VIRTIO, 0, unit_id)) != -1) {
-            virtio_blk_init(pci_bus, drives_table[index].bdrv);
+            pci_create_simple(pci_bus, -1, "virtio-blk-pci");
             unit_id++;
         }
     }
 
     /* Add virtio balloon device */
-    if (pci_enabled)
-        virtio_balloon_init(pci_bus);
+    if (pci_enabled) {
+        pci_create_simple(pci_bus, -1, "virtio-balloon-pci");
+    }
 
     /* Add virtio console devices */
     if (pci_enabled) {
         for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
-            if (virtcon_hds[i])
-                virtio_console_init(pci_bus, virtcon_hds[i]);
+            if (virtcon_hds[i]) {
+                pci_create_simple(pci_bus, -1, "virtio-console-pci");
+            }
         }
     }
 }
