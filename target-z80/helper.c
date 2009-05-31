@@ -190,8 +190,6 @@ int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
     prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
     page_size = TARGET_PAGE_SIZE;
 
-    /* Even if 4MB pages, we map only one 4KB page in the cache to
-       avoid filling it too fast */
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
     paddr = (addr & TARGET_PAGE_MASK) + page_offset;
     vaddr = virt_addr + page_offset;
