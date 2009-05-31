@@ -52,6 +52,7 @@ CPUZ80State *cpu_z80_init(const char *model)
     }
     env->model = id;
     cpu_reset(env);
+    qemu_init_vcpu(env);
     return env;
 }
 
