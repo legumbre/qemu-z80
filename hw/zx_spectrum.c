@@ -307,7 +307,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
                              const char *initrd_filename,
                              const char *cpu_model)
 {
-    char buf[1024];
+    char *filename;
     uint8_t halthack_curip[12];
     int ret;
     ram_addr_t ram_offset, rom_offset;
@@ -329,19 +329,30 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     cpu_register_physical_memory(0x4000, 0xc000, ram_offset | IO_MEM_RAM);
 
     /* ROM load */
-    snprintf(buf, sizeof(buf), "%s/%s", bios_dir, ROM_FILENAME);
-    rom_size = get_image_size(buf);
+    if (bios_name == NULL) {
+        bios_name = ROM_FILENAME;
+    }
+    filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
+    if (filename) {
+        rom_size = get_image_size(filename);
+    } else {
+        rom_size = -1;
+    }
     if (rom_size <= 0 ||
         (rom_size % 0x4000) != 0) {
         goto rom_error;
     }
     rom_offset = qemu_ram_alloc(rom_size);
     cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
-    ret = load_image_targphys(buf, 0, rom_size);
+    ret = load_image_targphys(filename, 0, rom_size);
     if (ret != rom_size) {
     rom_error:
-        fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n", buf);
+        fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n",
+                        bios_name);;
         exit(1);
+    }
+    if (filename) {
+        qemu_free(filename);
     }
 
     /* hack from xz80 adding HALT to the keyboard input loop to save CPU */
