@@ -386,7 +386,8 @@ static void zx_spectrum_init(ram_addr_t ram_size,
         uint8_t* snapmem;
         libspectrum_byte* page;
         int length;
-        int i;
+        int i, p;
+        const int pages_48k[3] = { 5, 2, 0 };
 
         if (libspectrum_init() != LIBSPECTRUM_ERROR_NONE ||
             libspectrum_identify_file(&type, kernel_filename, NULL, 0) != LIBSPECTRUM_ERROR_NONE ||
@@ -409,18 +410,11 @@ static void zx_spectrum_init(ram_addr_t ram_size,
         //printf("snap pc = %d\n",libspectrum_snap_pc(snap));
 
         /* fill memory */
-        page = libspectrum_snap_pages(snap, 5);
-        for (i = 0x4000; i < 0x8000; i++) {
-            //printf("storing 0x%x in 0x%x\n",page[i-0x4000],i);
-            stb_phys(i, page[i - 0x4000]);
-        }
-        page = libspectrum_snap_pages(snap, 2);
-        for (i = 0x8000; i < 0xc000; i++) {
-            stb_phys(i, page[i - 0x8000]);
-        }
-        page = libspectrum_snap_pages(snap, 0);
-        for (i = 0xc000; i < 0x10000; i++) {
-            stb_phys(i, page[i - 0xc000]);
+        for (p = 0; p < 3; p++) {
+            page = libspectrum_snap_pages(snap, pages_48k[p]);
+            for (i = 0x0000; i < 0x4000; i++) {
+                stb_phys(i + ((p + 1) << 14), page[i]);
+            }
         }
 
         /* restore registers */
