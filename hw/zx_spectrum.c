@@ -63,11 +63,18 @@ static uint32_t io_keyboard_read(void *opaque, uint32_t addr)
 
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
-    if (addr & 1) {
+    if ((addr & 1) == 0) {
+        return io_keyboard_read(opaque, addr);
+    } else {
         return 0xff;
     }
+}
 
-    return io_keyboard_read(opaque, addr);
+static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
+{
+    if ((addr & 1) == 0) {
+        zx_video_set_border(data & 0x7);
+    }
 }
 
 static void main_cpu_reset(void *opaque)
@@ -344,7 +351,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     }
     rom_offset = qemu_ram_alloc(rom_size);
     cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
-    ret = load_image_targphys(filename, 0, rom_size);
+    ret = load_image_targphys(filename, 0x0000, rom_size);
     if (ret != rom_size) {
     rom_error:
         fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n",
@@ -363,6 +370,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
 
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
+    register_ioport_write(0, 0x10000, 1, io_spectrum_write, NULL);
 
     zx_video_init(ram_offset);
 
@@ -379,6 +387,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
         libspectrum_byte* page;
         int length;
         int i;
+
         if (libspectrum_init() != LIBSPECTRUM_ERROR_NONE ||
             libspectrum_identify_file(&type, kernel_filename, NULL, 0) != LIBSPECTRUM_ERROR_NONE ||
             libspectrum_identify_class(&cls, type) != LIBSPECTRUM_ERROR_NONE) {

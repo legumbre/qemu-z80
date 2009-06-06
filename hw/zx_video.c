@@ -179,6 +179,13 @@ static inline int get_pixfmt_index(DisplayState *s)
 
 static ZXVState *zxvstate;
 
+void zx_video_set_border(int col)
+{
+    ZXVState *s = zxvstate;
+
+    s->border = col;
+};
+
 void zx_video_do_retrace(void)
 {
     ZXVState *s = zxvstate;
@@ -339,16 +346,6 @@ static void zx_invalidate_display(void *opaque)
     s->prevborder = -1;
 }
 
-static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
-{
-    ZXVState *s = (ZXVState *)opaque;
-
-    /* port xxfe */
-    if (!(addr & 1)) {
-        s->border = data & 0x07;
-    }
-};
-
 void zx_video_init(ram_addr_t zx_vram_offset)
 {
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
@@ -369,7 +366,4 @@ void zx_video_init(ram_addr_t zx_vram_offset)
     s->theight = s->sheight + s->bheight * 2;
     s->border = 0;
     s->flash = 0;
-
-    /* ZX Spectrum ULA */
-    register_ioport_write(0, 0x10000, 1, io_spectrum_write, s);
 }
