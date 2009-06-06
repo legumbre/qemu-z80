@@ -348,7 +348,7 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     if (ret != rom_size) {
     rom_error:
         fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n",
-                        bios_name);;
+                        bios_name);
         exit(1);
     }
     if (filename) {
