@@ -417,6 +417,8 @@ static void zx_spectrum_init(ram_addr_t ram_size,
             }
         }
 
+        zx_video_set_border(libspectrum_snap_out_ula(snap) & 0x7);
+
         /* restore registers */
         env->regs[R_A] = libspectrum_snap_a(snap);
         env->regs[R_F] = libspectrum_snap_f(snap);
