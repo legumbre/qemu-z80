@@ -107,7 +107,7 @@ static const int map[0x100][2] = {
     [0x0d] = {ZX_KEY_SYMBSHIFT, ZX_KEY_L}, /* Equals */
     [0x0f] = {ZX_KEY_CAPSSHIFT, ZX_KEY_1}, /* Tab */
 
-    [0x1c] = {ZX_KEY_ENTER,     -1}, /* Enter */
+    [0x1c] = {ZX_KEY_ENTER,     -1},
 
     [0x1d] = {ZX_KEY_SYMBSHIFT, -1}, /* Left Control */
 
@@ -136,8 +136,8 @@ static const int map[0x100][2] = {
     [0x31] = {ZX_KEY_N, -1},
     [0x32] = {ZX_KEY_M, -1},
 
-    [0x33] = {ZX_KEY_SYMBSHIFT, ZX_KEY_N}, /* Period */
-    [0x34] = {ZX_KEY_SYMBSHIFT, ZX_KEY_M}, /* Comma */
+    [0x33] = {ZX_KEY_SYMBSHIFT, ZX_KEY_N}, /* Comma */
+    [0x34] = {ZX_KEY_SYMBSHIFT, ZX_KEY_M}, /* Period */
     [0x35] = {ZX_KEY_SYMBSHIFT, ZX_KEY_V}, /* Slash */
 
     [0x36] = {ZX_KEY_CAPSSHIFT, -1}, /* Right Shift */
