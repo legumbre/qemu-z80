@@ -698,6 +698,7 @@ endif
 ifeq ($(TARGET_BASE_ARCH), z80)
 OBJS+= zx_spectrum.o zx_keyboard.o zx_video.o dma.o
 OBJS+= serial.o i8259.o
+OBJS+= msx.o msx_mmu.o v9918.o
 endif
 ifdef CONFIG_COCOA
 COCOA_LIBS=-F/System/Library/Frameworks -framework Cocoa -framework IOKit
