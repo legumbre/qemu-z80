@@ -583,18 +583,22 @@ void HELPER(bli_cp_rep)(uint32_t next_pc)
 void HELPER(bli_io_inc)(void)
 {
     HL = (uint16_t)(HL + 1);
-    BC = (uint16_t)BC - 0x0100;
+    BC = (uint16_t)(BC - 0x0100);
+    F = ((BC & 0xff00) ? 0 : CC_Z) |
+        ((HL + (HL & 0xff)) > 0xff ? (CC_C | CC_H) : 0);
 }
 
 void HELPER(bli_io_dec)(void)
 {
     HL = (uint16_t)(HL - 1);
-    BC = (uint16_t)BC - 0x0100;
+    BC = (uint16_t)(BC - 0x0100);
+    F = ((BC & 0xff00) ? 0 : CC_Z) |
+        ((HL + (HL & 0xff)) > 0xff ? (CC_C | CC_H) : 0);
 }
 
 void HELPER(bli_io_rep)(uint32_t next_pc)
 {
-    if (BC & 0xff00) {
+    if (F & CC_Z) {
         PC = (uint16_t)(next_pc - 2);
     } else {
         PC = next_pc;
