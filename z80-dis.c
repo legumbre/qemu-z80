@@ -30,25 +30,25 @@ struct buffer
   signed char data[4];
 } ;
 
-typedef int (*func)(struct buffer *, disassemble_info *, char *);
+typedef int (*func)(struct buffer *, disassemble_info *, const char *);
 
 struct tab_elt
 {
   unsigned char val;
   unsigned char mask;
   func          fp;
-  char *        text;
+  const char *  text;
 } ;
 
 #define TXTSIZ 24
 /* Names of 16-bit registers.  */
-static char * rr_str[] = { "bc", "de", "hl", "sp" };
+static const char * rr_str[] = { "bc", "de", "hl", "sp" };
 /* Names of 8-bit registers.  */
-static char * r_str[]  = { "b", "c", "d", "e", "h", "l", "(hl)", "a" };
+static const char * r_str[]  = { "b", "c", "d", "e", "h", "l", "(hl)", "a" };
 /* Texts for condition codes.  */
-static char * cc_str[] = { "nz", "z", "nc", "c", "po", "pe", "p", "m" };
+static const char * cc_str[] = { "nz", "z", "nc", "c", "po", "pe", "p", "m" };
 /* Instruction names for 8-bit arithmetic, operand "a" is often implicit */
-static char * arit_str[] =
+static const char * arit_str[] =
 {
   "add a,", "adc a,", "sub ", "sbc a,", "and ", "xor ", "or ", "cp "
 } ;
@@ -70,7 +70,7 @@ fetch_data (struct buffer *buf, disassemble_info * info, int n)
 }
 
 static int
-prt (struct buffer *buf, disassemble_info * info, char *txt)
+prt (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, "%s", txt);
   buf->n_used = buf->n_fetch;
@@ -78,7 +78,7 @@ prt (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_e (struct buffer *buf, disassemble_info * info, char *txt)
+prt_e (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char e;
   int target_addr;
@@ -97,7 +97,7 @@ prt_e (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-jr_cc (struct buffer *buf, disassemble_info * info, char *txt)
+jr_cc (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
 
@@ -106,7 +106,7 @@ jr_cc (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_nn (struct buffer *buf, disassemble_info * info, char *txt)
+prt_nn (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   int nn;
   unsigned char *p;
@@ -124,7 +124,7 @@ prt_nn (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_rr_nn (struct buffer *buf, disassemble_info * info, char *txt)
+prt_rr_nn (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
 
@@ -133,7 +133,7 @@ prt_rr_nn (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_rr (struct buffer *buf, disassemble_info * info, char *txt)
+prt_rr (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, "%s%s", txt,
 		      rr_str[(buf->data[buf->n_fetch - 1] >> 4) & 3]);
@@ -142,7 +142,7 @@ prt_rr (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_n (struct buffer *buf, disassemble_info * info, char *txt)
+prt_n (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   int n;
   unsigned char *p;
@@ -162,7 +162,7 @@ prt_n (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-ld_r_n (struct buffer *buf, disassemble_info * info, char *txt)
+ld_r_n (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
 
@@ -171,7 +171,7 @@ ld_r_n (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_r (struct buffer *buf, disassemble_info * info, char *txt)
+prt_r (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, txt,
 		      r_str[(buf->data[buf->n_fetch - 1] >> 3) & 7]);
@@ -180,7 +180,7 @@ prt_r (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-ld_r_r (struct buffer *buf, disassemble_info * info, char *txt)
+ld_r_r (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, txt,
 		      r_str[(buf->data[buf->n_fetch - 1] >> 3) & 7],
@@ -190,7 +190,7 @@ ld_r_r (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-arit_r (struct buffer *buf, disassemble_info * info, char *txt)
+arit_r (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, txt,
 		      arit_str[(buf->data[buf->n_fetch - 1] >> 3) & 7],
@@ -200,7 +200,7 @@ arit_r (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_cc (struct buffer *buf, disassemble_info * info, char *txt)
+prt_cc (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, "%s%s", txt,
 		      cc_str[(buf->data[0] >> 3) & 7]);
@@ -209,9 +209,9 @@ prt_cc (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-pop_rr (struct buffer *buf, disassemble_info * info, char *txt)
+pop_rr (struct buffer *buf, disassemble_info * info, const char *txt)
 {
-  static char *rr_stack[] = { "bc","de","hl","af"};
+  static const char *rr_stack[] = { "bc","de","hl","af"};
 
   info->fprintf_func (info->stream, "%s %s", txt,
 		      rr_stack[(buf->data[0] >> 4) & 3]);
@@ -221,7 +221,7 @@ pop_rr (struct buffer *buf, disassemble_info * info, char *txt)
 
 
 static int
-jp_cc_nn (struct buffer *buf, disassemble_info * info, char *txt)
+jp_cc_nn (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
 
@@ -231,7 +231,7 @@ jp_cc_nn (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-arit_n (struct buffer *buf, disassemble_info * info, char *txt)
+arit_n (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
 
@@ -240,7 +240,7 @@ arit_n (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-rst (struct buffer *buf, disassemble_info * info, char *txt)
+rst (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   info->fprintf_func (info->stream, txt, buf->data[0] & 0x38);
   buf->n_used = buf->n_fetch;
@@ -249,10 +249,10 @@ rst (struct buffer *buf, disassemble_info * info, char *txt)
 
 
 static int
-cis (struct buffer *buf, disassemble_info * info, char *txt ATTRIBUTE_UNUSED)
+cis (struct buffer *buf, disassemble_info * info, const char *txt ATTRIBUTE_UNUSED)
 {
-  static char * opar[] = { "ld", "cp", "in", "out" };
-  char * op;
+  static const char * opar[] = { "ld", "cp", "in", "out" };
+  const char * op;
   char c;
 
   c = buf->data[1];
@@ -266,7 +266,7 @@ cis (struct buffer *buf, disassemble_info * info, char *txt ATTRIBUTE_UNUSED)
 }
 
 static int
-dump (struct buffer *buf, disassemble_info * info, char *txt)
+dump (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   int i;
 
@@ -310,7 +310,7 @@ struct tab_elt opc_ed[] =
 
 static int
 pref_ed (struct buffer * buf, disassemble_info * info, 
-	 char* txt ATTRIBUTE_UNUSED)
+	 const char* txt ATTRIBUTE_UNUSED)
 {
   struct tab_elt *p;
 
@@ -327,16 +327,16 @@ pref_ed (struct buffer * buf, disassemble_info * info,
 }
 
 /* Instruction names for the instructions addressing single bits.  */
-static char *cb1_str[] = { "", "bit", "res", "set"};
+static const char *cb1_str[] = { "", "bit", "res", "set"};
 /* Instruction names for shifts and rotates.  */
-static char *cb2_str[] =
+static const char *cb2_str[] =
 {
   "rlc", "rrc", "rl", "rr", "sla", "sra", "sli", "srl"
 };
 
 static int
 pref_cb (struct buffer * buf, disassemble_info * info,
-	 char* txt ATTRIBUTE_UNUSED)
+	 const char* txt ATTRIBUTE_UNUSED)
 {
   if (fetch_data (buf, info, 1))
     {
@@ -358,7 +358,7 @@ pref_cb (struct buffer * buf, disassemble_info * info,
 }
 
 static int
-addvv (struct buffer * buf, disassemble_info * info, char* txt)
+addvv (struct buffer * buf, disassemble_info * info, const char* txt)
 {
   info->fprintf_func (info->stream, "add %s,%s", txt, txt);
 
@@ -366,7 +366,7 @@ addvv (struct buffer * buf, disassemble_info * info, char* txt)
 }
 
 static int
-ld_v_v (struct buffer * buf, disassemble_info * info, char* txt)
+ld_v_v (struct buffer * buf, disassemble_info * info, const char* txt)
 {
   char mytxt[TXTSIZ];
 
@@ -375,7 +375,7 @@ ld_v_v (struct buffer * buf, disassemble_info * info, char* txt)
 }
 
 static int
-prt_d (struct buffer *buf, disassemble_info * info, char *txt)
+prt_d (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   int d;
   signed char *p;
@@ -395,7 +395,7 @@ prt_d (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-prt_d_n (struct buffer *buf, disassemble_info * info, char *txt)
+prt_d_n (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
   int d;
@@ -416,7 +416,7 @@ prt_d_n (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-arit_d (struct buffer *buf, disassemble_info * info, char *txt)
+arit_d (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
   signed char c;
@@ -427,7 +427,7 @@ arit_d (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-ld_r_d (struct buffer *buf, disassemble_info * info, char *txt)
+ld_r_d (struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
   signed char c;
@@ -438,7 +438,7 @@ ld_r_d (struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-ld_d_r(struct buffer *buf, disassemble_info * info, char *txt)
+ld_d_r(struct buffer *buf, disassemble_info * info, const char *txt)
 {
   char mytxt[TXTSIZ];
   signed char c;
@@ -449,7 +449,7 @@ ld_d_r(struct buffer *buf, disassemble_info * info, char *txt)
 }
 
 static int
-pref_xd_cb (struct buffer * buf, disassemble_info * info, char* txt)
+pref_xd_cb (struct buffer * buf, disassemble_info * info, const char* txt)
 {
   if (fetch_data (buf, info, 2))
     {
@@ -519,7 +519,7 @@ static struct tab_elt opc_ind[] =
 } ;
 
 static int
-pref_ind (struct buffer * buf, disassemble_info * info, char* txt)
+pref_ind (struct buffer * buf, disassemble_info * info, const char* txt)
 {
   if (fetch_data (buf, info, 1))
     {
