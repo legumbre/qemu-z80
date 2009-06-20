@@ -530,9 +530,6 @@ static void msx_init(ram_addr_t ram_size,
                      const char *cpu_model)
 {
     MSXState *s = qemu_mallocz(sizeof(*s));
-    if (!s) {
-        hw_error("%s: unable to allocate memory\n", __FUNCTION__);
-    }
     if (!cpu_model) {
         cpu_model = "z80";
     }
