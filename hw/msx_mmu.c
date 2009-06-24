@@ -313,12 +313,13 @@ static void msx_mmu_load_plain_cartridge(void *opaque, int slot, int fd,
     }
     if (rom_size / CART_PAGESIZE < CARTPAGES_PER_SLOTPAGE) {
         /* mirror sub-slotpagesize cart */
-        void *src = qemu_get_ram_ptr(page[0]);
-        void *dst = src + CART_PAGESIZE;
-        int i = CARTPAGES_PER_SLOTPAGE - 1;
-        for (; i--; dst += CART_PAGESIZE) {
-            memcpy(dst, src, CART_PAGESIZE);
+        void *page = qemu_malloc(CART_PAGESIZE);
+        cpu_physical_memory_read(0, page, CART_PAGESIZE);
+        int i;
+        for (i = CART_PAGESIZE; i < SLOT_PAGESIZE; i += CART_PAGESIZE) {
+            cpu_physical_memory_write_rom(i, page, CART_PAGESIZE);
         }
+        qemu_free(page);
     }
 }
 
