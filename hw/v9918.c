@@ -206,7 +206,7 @@ static void v9918_sprite_collision_check(V9918State *s)
     }
 }
 
-static const unsigned int V9918Palette[16 * 3] = {
+static unsigned int V9918Palette[16 * 3] = {
       0,   0,   0,
       0,   0,   0,
      33, 200,  66,
@@ -371,7 +371,11 @@ static void v9918_render_screen(V9918State *s)
         return;
     }
 
-    int i;
+    int i = BG_COLOR * 3 ?: 3;
+    V9918Palette[0] = V9918Palette[i];
+    V9918Palette[1] = V9918Palette[i + 1];
+    V9918Palette[2] = V9918Palette[i + 2];
+    
     for (i = 0; i < SCREEN_HEIGHT + 2 * BORDER_SIZE; i++) {
         render_fn(s, i, fb, linesize);
         fb += linesize * s->zoom;
