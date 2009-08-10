@@ -50,8 +50,8 @@ DEF_HELPER_0(bli_cp_cc, void)
 DEF_HELPER_0(bli_cp_inc_cc, void)
 DEF_HELPER_0(bli_cp_dec_cc, void)
 DEF_HELPER_1(bli_cp_rep, void, i32)
-DEF_HELPER_0(bli_io_inc, void)
-DEF_HELPER_0(bli_io_dec, void)
+DEF_HELPER_1(bli_io_T0_inc, void, i32)
+DEF_HELPER_1(bli_io_T0_dec, void, i32)
 DEF_HELPER_1(bli_io_rep, void, i32)
 
 /* Misc */

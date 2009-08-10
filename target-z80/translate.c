@@ -1600,9 +1600,9 @@ next_byte:
                     gen_movw_v_HL(cpu_A0);
                     tcg_gen_qemu_st8(cpu_T[0], cpu_A0, MEM_INDEX);
                     if (!(y & 1)) {
-                        gen_helper_bli_io_inc();
+                        gen_helper_bli_io_T0_inc(0);
                     } else {
-                        gen_helper_bli_io_dec();
+                        gen_helper_bli_io_T0_dec(0);
                     }
                     if ((y & 2)) {
                         gen_helper_bli_io_rep(tcg_const_tl(s->pc));
@@ -1624,9 +1624,9 @@ next_byte:
                         gen_io_end();
                     }
                     if (!(y & 1)) {
-                        gen_helper_bli_io_inc();
+                        gen_helper_bli_io_T0_inc(1);
                     } else {
-                        gen_helper_bli_io_dec();
+                        gen_helper_bli_io_T0_dec(1);
                     }
                     if ((y & 2)) {
                         gen_helper_bli_io_rep(tcg_const_tl(s->pc));

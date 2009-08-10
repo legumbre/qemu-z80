@@ -580,20 +580,30 @@ void HELPER(bli_cp_rep)(uint32_t next_pc)
     }
 }
 
-void HELPER(bli_io_inc)(void)
+void HELPER(bli_io_T0_inc)(uint32_t out)
 {
     HL = (uint16_t)(HL + 1);
     BC = (uint16_t)(BC - 0x0100);
-    F = ((BC & 0xff00) ? 0 : CC_Z) |
-        ((HL + (HL & 0xff)) > 0xff ? (CC_C | CC_H) : 0);
+    /* TODO: update X & Y flags */
+    uint32_t ff = out ? (HL & 0xff) : (((F & CC_C) + 1) & 0xff);
+    F = ((BC & 0x8000) ? CC_S : 0) |
+        ((BC & 0xff00) ? 0 : CC_Z) |
+        ((T0 + ff) > 0xff ? (CC_C | CC_H) : 0) |
+        parity_table[(((T0 + ff) & 0x07) ^ (BC >> 8)) & 0xff] |
+        ((T0 & 0x80) ? CC_N : 0);
 }
 
-void HELPER(bli_io_dec)(void)
+void HELPER(bli_io_T0_dec)(uint32_t out)
 {
     HL = (uint16_t)(HL - 1);
     BC = (uint16_t)(BC - 0x0100);
-    F = ((BC & 0xff00) ? 0 : CC_Z) |
-        ((HL + (HL & 0xff)) > 0xff ? (CC_C | CC_H) : 0);
+    /* TODO: update X & Y flags */
+    uint32_t ff = out ? (HL & 0xff) : (((F & CC_C) - 1) & 0xff);
+    F = ((BC & 0x8000) ? CC_S : 0) |
+        ((BC & 0xff00) ? 0 : CC_Z) |
+        ((T0 + ff) > 0xff ? (CC_C | CC_H) : 0) |
+        parity_table[(((T0 + ff) & 0x07) ^ (BC >> 8)) & 0xff] |
+        ((T0 & 0x80) ? CC_N : 0);
 }
 
 void HELPER(bli_io_rep)(uint32_t next_pc)
