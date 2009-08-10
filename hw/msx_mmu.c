@@ -27,21 +27,25 @@ typedef struct {
     MMUMegaCart *megacart;
 } MMUMegaCartMapper;
 
+typedef struct MMUState MMUState;
+
 struct MMUMegaCart {
     int pagecount;
     ram_addr_t *pages;
     msx_mapper_fn_t mapper_fn;
     MMUMegaCartMapper mapper[CART_NUMPAGES];
+    MMUState *mmu;
+    int slotnum;
 };
 
-typedef struct {
+struct MMUState {
     CPUState *cpu;
     struct {
         ram_addr_t page[SLOT_NUMPAGES];
         MMUMegaCart *megacart;
     } slot[NUMSLOTS];
     int slot_for_page[SLOT_NUMPAGES];
-} MMUState;
+};
 
 static uint32_t msx_dummy_read(void *opaque, target_phys_addr_t addr)
 {
@@ -87,9 +91,12 @@ static inline void msx_mmu_megacart_remap(MMUMegaCartMapper *m, int pnum)
 {
     if (pnum != m->cart_pagenum) {
         m->cart_pagenum = pnum;
-        cpu_register_physical_memory(m->phys_addr, CART_PAGESIZE,
-                                     IO_MEM_UNASSIGNED);
-        msx_mmu_megacart_map(m->megacart, m->phys_addr);
+        if (m->megacart->mmu->slot_for_page[m->phys_addr / SLOT_PAGESIZE]
+            == m->megacart->slotnum) {
+            cpu_register_physical_memory(m->phys_addr, CART_PAGESIZE,
+                                         IO_MEM_UNASSIGNED);
+            msx_mmu_megacart_map(m->megacart, m->phys_addr);
+        }
     }
 }
 
@@ -329,10 +336,13 @@ static void msx_mmu_load_mega_cartridge(void *opaque, int slot, int fd,
     if (req_mapper >= MSX_NB_MAPPERS) {
         req_mapper = 0;
     }
+    MMUState *mmu = (MMUState *)opaque;
     MMUMegaCart *mc = qemu_mallocz(sizeof(*mc));
     mc->pagecount = (rom_size + CART_PAGESIZE - 1) / CART_PAGESIZE;
     mc->pages = qemu_mallocz(sizeof(ram_addr_t) * mc->pagecount);
     mc->mapper_fn = msx_mapper_fn_table[req_mapper];
+    mc->mmu = mmu;
+    mc->slotnum = slot;
     uint32_t i, j;
     int lastfirst = 1;
     for (i = 0, j = 0; i < rom_size; i += CART_PAGESIZE, j++) {
@@ -370,8 +380,7 @@ static void msx_mmu_load_mega_cartridge(void *opaque, int slot, int fd,
         mc->mapper[4].cart_pagenum = 2;
         mc->mapper[5].cart_pagenum = 3;
     }
-    MMUState *s = (MMUState *)opaque;
-    s->slot[slot].megacart = mc;
+    mmu->slot[slot].megacart = mc;
 }
 
 static int msx_is_mega_cartridge(int fd, uint32_t size)
