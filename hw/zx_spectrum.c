@@ -35,7 +35,10 @@
 #include <libspectrum.h>
 #endif
 
-#define ROM_FILENAME "zx-rom.bin"
+#define ROM_FILENAME_48  "zx-rom.bin"
+#define ROM_FILENAME_128 "zx-rom128.bin"
+
+static int page_tab[4];
 
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
@@ -51,6 +54,31 @@ static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
     if ((addr & 1) == 0) {
         zx_video_set_border(data & 0x7);
     }
+}
+
+static void io_page_write(void *opaque, uint32_t addr, uint32_t data)
+{
+    int newrom, newram;
+    int changed = 0;
+
+    newrom = 8 + !!(data & 0x10);
+    newram = data & 0x7;
+    if (page_tab[0] != newrom) {
+        page_tab[0] = newrom;
+        changed = 1;
+    }
+    if (page_tab[3] != newram) {
+        page_tab[3] = newram;
+        changed = 1;
+    }
+    if (changed) {
+        cpu_interrupt(first_cpu, CPU_INTERRUPT_EXITTB);
+        tlb_flush(first_cpu, 1);
+    }
+}
+
+static target_ulong zx_mapaddr_128k(target_ulong addr) {
+    return (page_tab[addr >> 14] << 14) | (addr & ~(~0 << 14));
 }
 
 static void main_cpu_reset(void *opaque)
@@ -90,19 +118,21 @@ static const uint8_t halthack_newip[16] =
     {33, 59, 92, 118, 203, 110, 200, 58, 8, 92, 203, 174};
 
 /* ZX Spectrum initialisation */
-static void zx_spectrum_init(ram_addr_t ram_size,
-                             const char *boot_device,
-                             const char *kernel_filename,
-                             const char *kernel_cmdline,
-                             const char *initrd_filename,
-                             const char *cpu_model)
+static void zx_spectrum_common_init(ram_addr_t ram_size,
+                                    const char *boot_device,
+                                    const char *kernel_filename,
+                                    const char *cpu_model,
+                                    int is_128k)
 {
     char *filename;
     uint8_t halthack_curip[12];
     int ret;
     ram_addr_t ram_offset, rom_offset;
     int rom_size;
+    int ram_base, rom_base;
     CPUState *env;
+    int port, pagebyte;
+    int haltaddr;
 
     /* init CPUs */
     if (!cpu_model) {
@@ -114,13 +144,33 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     qemu_register_reset(main_cpu_reset, 0, env);
     main_cpu_reset(env);
 
+    if (is_128k) {
+        env->mapaddr = zx_mapaddr_128k;
+    } else {
+        env->mapaddr = NULL;
+    }
+
+    if (is_128k) {
+        /* RAM first, then ROM */
+        ram_size = 0x20000;
+        ram_base = 0;
+    } else {
+        /* ROM first, then RAM, matching the 48K's memory map */
+        ram_size = 0xc000;
+        ram_base = 0x4000;
+    }
+
     /* allocate RAM */
-    ram_offset = qemu_ram_alloc(0xc000);
-    cpu_register_physical_memory(0x4000, 0xc000, ram_offset | IO_MEM_RAM);
+    ram_offset = qemu_ram_alloc(ram_size);
+    cpu_register_physical_memory(ram_base, ram_size, ram_offset | IO_MEM_RAM);
 
     /* ROM load */
     if (bios_name == NULL) {
-        bios_name = ROM_FILENAME;
+        if (is_128k) {
+            bios_name = ROM_FILENAME_128;
+        } else {
+            bios_name = ROM_FILENAME_48;
+        }
     }
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
     if (filename) {
@@ -132,9 +182,14 @@ static void zx_spectrum_init(ram_addr_t ram_size,
         (rom_size % 0x4000) != 0) {
         goto rom_error;
     }
+    if (is_128k) {
+        rom_base = ram_size;
+    } else {
+        rom_base = 0;
+    }
     rom_offset = qemu_ram_alloc(rom_size);
-    cpu_register_physical_memory(0x0000, 0x4000, rom_offset | IO_MEM_ROM);
-    ret = load_image_targphys(filename, 0x0000, rom_size);
+    cpu_register_physical_memory(rom_base, rom_size, rom_offset | IO_MEM_ROM);
+    ret = load_image_targphys(filename, rom_base, rom_size);
     if (ret != rom_size) {
     rom_error:
         fprintf(stderr, "qemu: could not load ZX Spectrum ROM '%s'\n",
@@ -146,19 +201,36 @@ static void zx_spectrum_init(ram_addr_t ram_size,
     }
 
     /* hack from xz80 adding HALT to the keyboard input loop to save CPU */
-    cpu_physical_memory_read(0x10b0, halthack_curip, 12);
+    haltaddr = rom_base + 0x10b0 + 0x4000;
+    cpu_physical_memory_read(haltaddr, halthack_curip, 12);
     if (!memcmp(halthack_curip, halthack_oldip, 12)) {
-        cpu_physical_memory_write_rom(0x10b0, halthack_newip, 12);
+        cpu_physical_memory_write_rom(haltaddr, halthack_newip, 12);
     }
 
     /* map entire I/O space */
     register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
-    register_ioport_write(0, 0x10000, 1, io_spectrum_write, NULL);
+    for (port = 0; port < 0x10000; port++) {
+        if ((port & 1) == 0) {
+            register_ioport_write(port, 1, 1, io_spectrum_write, NULL);
+        }
+        if (is_128k) {
+            if ((port & 0x8002) == 0) {
+                register_ioport_write(port, 1, 1, io_page_write, env);
+            }
+        }
+    }
 
-    zx_video_init(ram_offset);
+    zx_video_init(ram_offset, is_128k);
 
     zx_keyboard_init();
     zx_timer_init();
+
+    if (is_128k) {
+        page_tab[0] = 8;
+        page_tab[1] = 5;
+        page_tab[2] = 2;
+        page_tab[3] = 0;
+    }
 
 #ifdef CONFIG_LIBSPECTRUM
     /* load a snapshot */
@@ -193,13 +265,46 @@ static void zx_spectrum_init(ram_addr_t ram_size,
         //printf("snap pc = %d\n",libspectrum_snap_pc(snap));
 
         /* fill memory */
-        for (p = 0; p < 3; p++) {
-            page = libspectrum_snap_pages(snap, pages_48k[p]);
-            for (i = 0x0000; i < 0x4000; i++) {
-                stb_phys(i + ((p + 1) << 14), page[i]);
+        if (is_128k) {
+            for (p = 0; p < 8; p++) {
+                page = libspectrum_snap_pages(snap, p);
+                if (page) {
+                    for (i = 0x0000; i < 0x4000; i++) {
+                        stb_phys(i + (p << 14), page[i]);
+                    }
+                }
+            }
+        } else {
+            for (p = 0; p < 3; p++) {
+                page = libspectrum_snap_pages(snap, pages_48k[p]);
+                if (page) {
+                    for (i = 0x0000; i < 0x4000; i++) {
+                        stb_phys(i + ((p + 1) << 14), page[i]);
+                    }
+                }
             }
         }
 
+        if (is_128k) {
+            if ((libspectrum_machine_capabilities(libspectrum_snap_machine(snap) &
+                 LIBSPECTRUM_MACHINE_CAPABILITY_128_MEMORY))) {
+                /* restore paging state */
+                pagebyte = libspectrum_snap_out_128_memoryport(snap);
+                page_tab[0] = 8 + !!(pagebyte & 0x10);
+                page_tab[3] = pagebyte & 0x7;
+            } else {
+                /* page in 48K ROM */
+                page_tab[0] = 9;
+                page_tab[3] = 0;
+            }
+        } else {
+            if ((libspectrum_machine_capabilities(libspectrum_snap_machine(snap) &
+                 LIBSPECTRUM_MACHINE_CAPABILITY_128_MEMORY))) {
+                fprintf(stderr, "qemu: can't load 128K snap under 48K machine\n");
+            }
+        }
+
+        /* set the border */
         zx_video_set_border(libspectrum_snap_out_ula(snap) & 0x7);
 
         /* restore registers */
@@ -228,15 +333,45 @@ static void zx_spectrum_init(ram_addr_t ram_size,
 #endif
 }
 
-static QEMUMachine zxspec_machine = {
-    .name = "zxspec",
-    .desc = "ZX Spectrum",
-    .init = zx_spectrum_init,
+static void zx_spectrum48_init(ram_addr_t ram_size,
+                               const char *boot_device,
+                               const char *kernel_filename,
+                               const char *kernel_cmdline,
+                               const char *initrd_filename,
+                               const char *cpu_model)
+{
+    zx_spectrum_common_init(ram_size, boot_device, kernel_filename,
+                            cpu_model, 0);
+}
+
+static void zx_spectrum128_init(ram_addr_t ram_size,
+                                const char *boot_device,
+                                const char *kernel_filename,
+                                const char *kernel_cmdline,
+                                const char *initrd_filename,
+                                const char *cpu_model)
+{
+    zx_spectrum_common_init(ram_size, boot_device, kernel_filename,
+                            cpu_model, 1);
+}
+
+static QEMUMachine zxspec48_machine = {
+    .name = "zxspec48",
+    .desc = "ZX Spectrum 48K",
+    .init = zx_spectrum48_init,
     .is_default = 1,
 };
 
+static QEMUMachine zxspec128_machine = {
+    .name = "zxspec128",
+    .desc = "ZX Spectrum 48K",
+    .init = zx_spectrum128_init,
+    .is_default = 0,
+};
+
 static void zxspec_machine_init(void) {
-    qemu_register_machine(&zxspec_machine);
+    qemu_register_machine(&zxspec48_machine);
+    qemu_register_machine(&zxspec128_machine);
 }
 
 machine_init(zxspec_machine_init);

@@ -298,6 +298,10 @@ static void zx_update_display(void *opaque)
         s->prevborder = -1;
     }
 
+    /* FIXME: need to allow for two screens, and to adjust for
+       video no longer being at physical address 0 */
+    dirty = 1;
+
     if (!dirty) {
         for (addr = 0; addr < 0x1b00; addr += TARGET_PAGE_SIZE) {
             if (cpu_physical_memory_get_dirty(addr, VGA_DIRTY_FLAG)) {
@@ -346,14 +350,19 @@ static void zx_invalidate_display(void *opaque)
     s->prevborder = -1;
 }
 
-void zx_video_init(ram_addr_t zx_vram_offset)
+void zx_video_init(ram_addr_t zx_vram_offset, int is_128k)
 {
     ZXVState *s = qemu_mallocz(sizeof(ZXVState));
     zxvstate = s;
     s->invalidate = 1;
     s->prevborder = -1;
     s->flashcount = 0;
-    s->vram_ptr = qemu_get_ram_ptr(zx_vram_offset);
+    if (is_128k) {
+        // TODO: implement video page switching
+        s->vram_ptr = qemu_get_ram_ptr(zx_vram_offset + (5 << 14));
+    } else {
+        s->vram_ptr = qemu_get_ram_ptr(zx_vram_offset);
+    }
 
     s->ds = graphic_console_init(zx_update_display, zx_invalidate_display,
                                  NULL, NULL, s);

@@ -190,6 +190,9 @@ int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
     prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
     page_size = TARGET_PAGE_SIZE;
 
+    if (env->mapaddr) {
+        addr = env->mapaddr(addr);
+    }
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
     paddr = (addr & TARGET_PAGE_MASK) + page_offset;
     vaddr = virt_addr + page_offset;
@@ -205,6 +208,9 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
     pte = addr;
     page_size = TARGET_PAGE_SIZE;
 
+    if (env->mapaddr) {
+        addr = env->mapaddr(addr);
+    }
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
     paddr = (pte & TARGET_PAGE_MASK) + page_offset;
     return paddr;

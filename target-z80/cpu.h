@@ -156,6 +156,8 @@ typedef struct CPUZ80State {
 
     int ir;
 
+    target_ulong (*mapaddr)(target_ulong addr);
+
     /* standard registers */
     target_ulong eflags; /* eflags register. During CPU emulation, CC
                         flags are set to zero because they are
