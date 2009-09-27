@@ -174,15 +174,16 @@ static void cpu_z80_flush_tlb(CPUZ80State *env, target_ulong addr)
    2  = soft MMU activation required for this block
 */
 int cpu_z80_handle_mmu_fault(CPUZ80State *env, target_ulong addr,
-                             int is_write1, int is_user, int is_softmmu)
+                             int is_write1, int mmu_idx, int is_softmmu)
 {
     int prot, page_size, ret, is_write;
     unsigned long paddr, page_offset;
     target_ulong vaddr, virt_addr;
+    int is_user = 0;
 
 #if defined(DEBUG_MMU)
     printf("MMU fault: addr=" TARGET_FMT_lx " w=%d u=%d pc=" TARGET_FMT_lx "\n",
-           addr, is_write1, is_user, env->pc);
+           addr, is_write1, mmu_idx, env->pc);
 #endif
     is_write = is_write1 & 1;
 
