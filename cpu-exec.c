@@ -318,6 +318,8 @@ int cpu_exec(CPUState *env1)
                     do_interrupt(env);
 #elif defined(TARGET_M68K)
                     do_interrupt(0);
+#elif defined(TARGET_Z80)
+                    do_interrupt(env);
 #endif
 #endif
                 }
