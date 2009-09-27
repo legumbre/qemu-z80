@@ -395,6 +395,8 @@ void monitor_disas(Monitor *mon, CPUState *env,
 #else
     print_insn = print_insn_little_mips;
 #endif
+#elif defined(TARGET_Z80)
+    print_insn = print_insn_z80;
 #else
     monitor_printf(mon, "0x" TARGET_FMT_lx
                    ": Asm output not supported on this arch\n", pc);
