@@ -60,8 +60,8 @@
 #define R_BCX   12
 #define R_DEX   13
 #define R_HLX   14
-
-#define CPU_NB_REGS 15
+#define R_PC    15 // LLL: this didn't exist in the original z80 qemu target
+#define CPU_NB_REGS 16
 
 /* flags masks */
 #define CC_C   	0x0001

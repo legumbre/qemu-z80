@@ -253,7 +253,7 @@ static int gdb_signal_to_target (int sig)
         return -1;
 }
 
-//#define DEBUG_GDB
+#define DEBUG_GDB
 
 typedef struct GDBRegisterState {
     int base_reg;
@@ -1296,6 +1296,59 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 
     return 8;
 }
+#elif defined (TARGET_Z80)
+
+#define NUM_CORE_REGS CPU_NB_REGS // 15 ver CPU_NB_REGS en cpu.h
+
+static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
+{
+#ifdef DEBUG_GDB
+  printf("LLL: cpu_gdb_read_register: %d\n", n);
+#endif
+  switch (n)
+    {
+    case R_A:
+    case R_F:
+    case R_I:
+    case R_R:
+    case R_AX:
+    case R_FX:
+      // printf("%d | getreg8\n", n);
+      GET_REG8(env->regs[n]);
+      return 1;
+    default:
+      // printf("%d | getreg16\n", n);
+      GET_REG16(env->regs[n]);
+      return 2; // es 2
+    }
+}
+
+static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
+{
+#ifdef DEBUG_GDB
+    printf("cpu_gdb_write_register: %d\n", n);
+#endif
+    uint32_t tmp;
+
+    tmp = ldl_p(mem_buf);
+
+    switch (n)
+      {
+      case R_A:
+      case R_F:
+      case R_I:
+      case R_R:
+      case R_AX:
+      case R_FX:
+        // printf("%d | getreg8\n", n);
+        env->regs[n]=tmp;
+        return 1;
+      default:
+        // printf("%d | getreg16\n", n);
+        env->regs[n]=tmp;
+        return 2; // es 2
+      }
+}
 #else
 
 #define NUM_CORE_REGS 0
@@ -1724,8 +1777,8 @@ static int gdb_handle_packet(GDBState *s, const char *line_buf)
         /* Older gdb are really dumb, and don't use 'g' if 'p' is avaialable.
            This works, but can be very slow.  Anything new enough to
            understand XML also knows how to use this properly.  */
-        if (!gdb_has_xml)
-            goto unknown_command;
+//LLL:         if (!gdb_has_xml)
+//LLL:             goto unknown_command;
         addr = strtoull(p, (char **)&p, 16);
         reg_size = gdb_read_register(s->g_cpu, mem_buf, addr);
         if (reg_size) {
