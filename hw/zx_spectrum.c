@@ -40,10 +40,24 @@
 
 static int page_tab[4];
 
+/* LLL -- IO port to pipe hack */
+#define IOPIPE_READ_PATH_DFL  "/tmp/qemu_z80_rd"
+#define IOPIPE_WRITE_PATH_DFL "/tmp/qemu_z80_wr"
+typedef struct IOPipe {
+    int rdfd;
+    int wrfd;
+    char *rd_path;
+    char *wr_path;
+} IOPipe;
+static IOPipe iopipe = {0, 0, IOPIPE_READ_PATH_DFL, IOPIPE_WRITE_PATH_DFL};
+static uint8_t iopipe_read(IOPipe *iop);
+static int iopipe_write(IOPipe *iop, uint8_t data);
+
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
     if ((addr & 1) == 0) {
-        return zx_keyboard_read(opaque, addr);
+        // return zx_keyboard_read(opaque, addr);
+        return iopipe_read(&iopipe);
     } else {
         return 0xff;
     }
@@ -52,7 +66,8 @@ static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 {
     if ((addr & 1) == 0) {
-        zx_video_set_border(data & 0x7);
+        // zx_video_set_border(data & 0x7);
+        iopipe_write(&iopipe, (uint8_t)data);
     }
 }
 
@@ -116,6 +131,56 @@ static const uint8_t halthack_oldip[16] =
     {253, 203, 1,110, 200, 58, 8, 92, 253, 203, 1, 174};
 static const uint8_t halthack_newip[16] =
     {33, 59, 92, 118, 203, 110, 200, 58, 8, 92, 203, 174};
+
+
+static uint8_t iopipe_read(IOPipe *iop)
+{
+    uint8_t val;
+    int ret = read(iop->rdfd, &val, 1); // read 1 byte from the pipe
+    if (ret > 0){
+        fprintf(stderr, "%s: read byte %02X from io pipe\n", __FUNCTION__, val);
+        return val;
+    }
+    else {
+        fprintf(stderr, "%s: error while reading from io pipe\n", __FUNCTION__);
+        return 0xff;
+    }
+}
+
+static int iopipe_write(IOPipe *iop, uint8_t data)
+{
+    int ret = write(iop->wrfd, &data, 1); // write 1 byte to the pipe
+    if (ret > 0){
+        fprintf(stderr, "%s: wrote byte %02X to io pipe\n", __FUNCTION__, data);
+        return 0;
+    }
+    else {
+        fprintf(stderr, "%s: error while writing to io pipe\n", __FUNCTION__);
+        return -1;
+    }
+}
+
+static int iopipe_init(IOPipe *iop)
+{
+    int rdfd, wrfd;
+
+    rdfd = open(iop->rd_path, O_RDONLY | O_NONBLOCK);
+    if (rdfd == -1){
+        fprintf(stderr, "%s: failed to open read pipe %s\n", __FUNCTION__, iop->rd_path);
+        return -1;
+    }
+    
+    wrfd = open(iop->wr_path, O_WRONLY | O_NONBLOCK);
+    if (wrfd == -1){
+        fprintf(stderr, "%s: failed to open write pipe %s\n", __FUNCTION__, iop->wr_path);
+        return -2;
+    }
+
+    iop->rdfd = rdfd;
+    iop->wrfd = wrfd;
+    return 0;
+}
+
 
 /* ZX Spectrum initialisation */
 static void zx_spectrum_common_init(ram_addr_t ram_size,
@@ -221,9 +286,10 @@ static void zx_spectrum_common_init(ram_addr_t ram_size,
     }
 
     zx_video_init(ram_offset, is_128k);
-
     zx_keyboard_init();
     zx_timer_init();
+
+    iopipe_init(&iopipe);
 
     if (is_128k) {
         page_tab[0] = 8;
