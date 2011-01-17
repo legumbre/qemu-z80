@@ -1303,30 +1303,34 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
 {
 #ifdef DEBUG_GDB
-  printf("LLL: cpu_gdb_read_register: %d\n", n);
+    // printf("LLL: cpu_gdb_read_register: %d\n", n);
 #endif
   switch (n)
-    {
-    case R_A:
-    case R_F:
-    case R_I:
-    case R_R:
-    case R_AX:
-    case R_FX:
-      // printf("%d | getreg8\n", n);
-      GET_REG8(env->regs[n]);
-      return 1;
-    default:
-      // printf("%d | getreg16\n", n);
-      GET_REG16(env->regs[n]);
-      return 2; // es 2
-    }
+      {
+      case R_A:
+      case R_F:
+      case R_I:
+      case R_R:
+      case R_AX:
+      case R_FX:
+          // printf("%d | getreg8\n", n);
+          GET_REG8(env->regs[n]);
+          return 1;
+      case R_PC:
+          printf("%s about to read PC: %x \n", __PRETTY_FUNCTION__, env->pc);
+          GET_REG16(env->pc);
+          return 2;
+      default:
+          // printf("%d | getreg16\n", n);
+          GET_REG16(env->regs[n]);
+          return 2; // es 2
+      }
 }
 
 static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 {
 #ifdef DEBUG_GDB
-    printf("cpu_gdb_write_register: %d\n", n);
+    // printf("cpu_gdb_write_register: %d\n", n);
 #endif
     uint32_t tmp;
 
@@ -1340,13 +1344,17 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
       case R_R:
       case R_AX:
       case R_FX:
-        // printf("%d | getreg8\n", n);
-        env->regs[n]=tmp;
-        return 1;
+          // printf("%d | writereg8\n", n);
+          env->regs[n]=tmp;
+          return 1;
+      case R_PC:
+          printf("%s about to change PC: %x -> %x \n", __PRETTY_FUNCTION__, env->pc, tmp);
+          env->pc=tmp;
+          return 2;
       default:
-        // printf("%d | getreg16\n", n);
-        env->regs[n]=tmp;
-        return 2; // es 2
+          // printf("%d | writereg16\n", n);
+          env->regs[n]=tmp;
+          return 2; // es 2
       }
 }
 #else
