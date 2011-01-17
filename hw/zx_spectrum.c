@@ -136,6 +136,8 @@ static const uint8_t halthack_newip[16] =
 static uint8_t iopipe_read(IOPipe *iop)
 {
     uint8_t val;
+    fprintf(stderr, "%s: about to read from pipe\n", __PRETTY_FUNCTION__);
+
     int ret = read(iop->rdfd, &val, 1); // read 1 byte from the pipe
     if (ret > 0){
         fprintf(stderr, "%s: read byte %02X from io pipe\n", __FUNCTION__, val);
@@ -166,13 +168,14 @@ static int iopipe_init(IOPipe *iop)
 
     rdfd = open(iop->rd_path, O_RDONLY | O_NONBLOCK);
     if (rdfd == -1){
-        fprintf(stderr, "%s: failed to open read pipe %s\n", __FUNCTION__, iop->rd_path);
+        fprintf(stderr, "%s: failed to open read pipe %s\n", __PRETTY_FUNCTION__, iop->rd_path);
         return -1;
     }
     
     wrfd = open(iop->wr_path, O_WRONLY | O_NONBLOCK);
     if (wrfd == -1){
-        fprintf(stderr, "%s: failed to open write pipe %s\n", __FUNCTION__, iop->wr_path);
+        fprintf(stderr, "%s: failed to open write pipe %s\n", __PRETTY_FUNCTION__, iop->wr_path);
+        perror(__PRETTY_FUNCTION__);
         return -2;
     }
 
