@@ -136,15 +136,28 @@ static const uint8_t halthack_newip[16] =
 static uint8_t iopipe_read(IOPipe *iop)
 {
     uint8_t val;
-    fprintf(stderr, "%s: about to read from pipe\n", __PRETTY_FUNCTION__);
+    // fprintf(stderr, "%s: about to read from pipe\n", __PRETTY_FUNCTION__);
 
-    int ret = read(iop->rdfd, &val, 1); // read 1 byte from the pipe
+    int ret; 
+    // read 1 byte from the pipe, we BLOCK if there's nothing to read.
+    while ((ret=read(iop->rdfd, &val, 1)) < 0)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                    // fprintf(stderr, "%s: read from pipe would block (ret=%d), waiting...\n", __PRETTY_FUNCTION__, ret);
+                    usleep(5*1000);
+                }
+            else
+                break;
+        }
+    
     if (ret > 0){
-        fprintf(stderr, "%s: read byte %02X from io pipe\n", __FUNCTION__, val);
+        // fprintf(stderr, "%s: read byte %02X from io pipe\n", __PRETTY_FUNCTION__, val);
         return val;
     }
     else {
-        fprintf(stderr, "%s: error while reading from io pipe\n", __FUNCTION__);
+        perror(__PRETTY_FUNCTION__);
+        fprintf(stderr, "%s: error while reading from io pipe\n", __PRETTY_FUNCTION__);
         return 0xff;
     }
 }
@@ -153,11 +166,11 @@ static int iopipe_write(IOPipe *iop, uint8_t data)
 {
     int ret = write(iop->wrfd, &data, 1); // write 1 byte to the pipe
     if (ret > 0){
-        fprintf(stderr, "%s: wrote byte %02X to io pipe\n", __FUNCTION__, data);
+        // fprintf(stderr, "%s: wrote byte %02X to io pipe\n", __PRETTY_FUNCTION__, data);
         return 0;
     }
     else {
-        fprintf(stderr, "%s: error while writing to io pipe\n", __FUNCTION__);
+        fprintf(stderr, "%s: error while writing to io pipe\n", __PRETTY_FUNCTION__);
         return -1;
     }
 }
