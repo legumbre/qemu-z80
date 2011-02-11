@@ -40,6 +40,7 @@
 
 static int page_tab[4];
 
+#ifdef IOPIPE_ENABLED
 /* LLL -- IO port to pipe hack */
 #define IOPIPE_READ_PATH_DFL  "/tmp/qemu_z80_rd"
 #define IOPIPE_WRITE_PATH_DFL "/tmp/qemu_z80_wr"
@@ -52,12 +53,16 @@ typedef struct IOPipe {
 static IOPipe iopipe = {0, 0, IOPIPE_READ_PATH_DFL, IOPIPE_WRITE_PATH_DFL};
 static uint8_t iopipe_read(IOPipe *iop);
 static int iopipe_write(IOPipe *iop, uint8_t data);
+#endif
 
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
     if ((addr & 1) == 0) {
-        // return zx_keyboard_read(opaque, addr);
+#ifdef IOPIPE_ENABLED
         return iopipe_read(&iopipe);
+#else
+        return zx_keyboard_read(opaque, addr);
+#endif
     } else {
         return 0xff;
     }
@@ -66,8 +71,11 @@ static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 static void io_spectrum_write(void *opaque, uint32_t addr, uint32_t data)
 {
     if ((addr & 1) == 0) {
-        // zx_video_set_border(data & 0x7);
+#ifdef IOPIPE_ENABLED
         iopipe_write(&iopipe, (uint8_t)data);
+#else
+        zx_video_set_border(data & 0x7);
+#endif
     }
 }
 
@@ -133,6 +141,7 @@ static const uint8_t halthack_newip[16] =
     {33, 59, 92, 118, 203, 110, 200, 58, 8, 92, 203, 174};
 
 
+#ifdef IOPIPE_ENABLED
 static uint8_t iopipe_read(IOPipe *iop)
 {
     uint8_t val;
@@ -196,6 +205,7 @@ static int iopipe_init(IOPipe *iop)
     iop->wrfd = wrfd;
     return 0;
 }
+#endif 
 
 
 /* ZX Spectrum initialisation */
@@ -305,7 +315,9 @@ static void zx_spectrum_common_init(ram_addr_t ram_size,
     zx_keyboard_init();
     zx_timer_init();
 
+#ifdef IOPIPE_ENABLED
     iopipe_init(&iopipe);
+#endif
 
     if (is_128k) {
         page_tab[0] = 8;
