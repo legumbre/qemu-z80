@@ -194,6 +194,8 @@ int main(int argc, char **argv)
 
 static const char *data_dir;
 const char *bios_name = NULL;
+const char *io_input_file = NULL;
+const char *io_output_file = NULL;
 static void *ioport_opaque[MAX_IOPORTS];
 static IOPortReadFunc *ioport_read_table[3][MAX_IOPORTS];
 static IOPortWriteFunc *ioport_write_table[3][MAX_IOPORTS];
@@ -5677,6 +5679,18 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_xen_attach:
                 xen_mode = XEN_ATTACH;
+                break;
+#endif
+#ifdef TARGET_Z80
+            case QEMU_OPTION_io_input_file:
+                io_input_file  = optarg;
+                fprintf(stderr,
+                        "io-input-file is %s\n", io_input_file);
+                break;
+            case QEMU_OPTION_io_output_file:
+                io_output_file = optarg;
+                fprintf(stderr,
+                        "io-output-file is %s\n", io_output_file);
                 break;
 #endif
             }

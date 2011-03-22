@@ -1575,3 +1575,11 @@ DEF("semihosting", 0, QEMU_OPTION_semihosting,
 DEF("old-param", 0, QEMU_OPTION_old_param,
     "-old-param      old param mode\n")
 #endif
+#if defined(TARGET_Z80)
+DEF("io-input-file", HAS_ARG, QEMU_OPTION_io_input_file,
+    "-io-input-file in_file\n"
+    "                use in_file's contents as data for IN instructions\n")
+DEF("io-output-file", HAS_ARG, QEMU_OPTION_io_output_file,
+    "-io-output-file out_file\n"
+    "                redirect OUT instructions output to out_file\n")
+#endif

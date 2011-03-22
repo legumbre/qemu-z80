@@ -40,6 +40,7 @@
 
 static int page_tab[4];
 
+// #define IOPIPE_ENABLED
 #ifdef IOPIPE_ENABLED
 /* LLL -- IO port to pipe hack */
 #define IOPIPE_READ_PATH_DFL  "/tmp/qemu_z80_rd"
@@ -54,6 +55,95 @@ static IOPipe iopipe = {0, 0, IOPIPE_READ_PATH_DFL, IOPIPE_WRITE_PATH_DFL};
 static uint8_t iopipe_read(IOPipe *iop);
 static int iopipe_write(IOPipe *iop, uint8_t data);
 #endif
+
+/* arrays with IO ports values. 
+  
+   io_in_ports will be loaded with the contents of 'io_in_file' which
+   specifies the port and value to be read anytime a IN instruction is executed.
+
+   io_out_ports will be written out to 'io_out_file' anytime an OUT instruction is executed.
+ */
+static uint8_t io_input_ports[256]={0};
+static uint8_t io_output_ports[256]={0};
+
+extern const char *io_input_file;
+extern const char *io_output_file;
+ 
+static uint32_t io_file_read(void *opaque, uint32_t addr)
+{
+    int p;
+
+    /* default value for unspecified input ports readings */
+    uint32_t deflt = 0x00; //TODO: maybe rand() % 256
+
+    for (p=0; p<256; p++) 
+        io_input_ports[p]=(uint8_t) deflt;
+
+    // fprintf(stderr, "%s: port %x value %x\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)deflt);
+    
+    FILE *input_file_fd;
+    input_file_fd = fopen(io_input_file, "r");
+
+    if (input_file_fd) {
+        char line[255];
+        int lineno = 0;
+        unsigned int port, value;
+
+        while (fgets(line, 255, input_file_fd)) {
+            lineno++;
+            if (sscanf(line, "0x%02X: 0x%02X \n", &port, &value) >= 2)
+                io_input_ports[(uint8_t)port]=(uint8_t)value;
+            else 
+                fprintf(stderr, "WARNING -- ignoring malformed input port specification line: %s (%s:%d).\n", line, io_input_file, lineno);
+
+
+        }
+    }
+    else {
+        fprintf(stderr, "ERROR at %s: failed to open file %s for reading.\n", __PRETTY_FUNCTION__, io_input_file);
+        perror(__PRETTY_FUNCTION__);
+    }
+
+    /* finally, close the file */
+    if (input_file_fd) {
+        fclose(input_file_fd);
+    }
+
+    /* return the value read */
+    return (uint32_t) io_input_ports[(uint8_t)addr];
+}
+
+
+static void io_file_write(void *opaque, uint32_t addr, uint32_t data)
+{
+    fprintf(stderr, "%s: about to write to io_output_file: %s\n", __PRETTY_FUNCTION__, io_output_file);
+    fprintf(stderr, "%s: port %x value %x\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)data);
+
+    uint8_t port = (uint8_t)addr;
+    io_output_ports[port] = (uint8_t)data;
+
+    FILE *output_file_fd;
+    output_file_fd = fopen(io_output_file, "w+");
+    
+    if (output_file_fd) {
+        int p;
+        const char *linefmt = "OUT Port 0x%02X:   0x%02X\n"; // ie: OUT Port 0x0A:\t 0xFF
+        for (p=0; p < 256; p++) {
+            fprintf(output_file_fd, linefmt, p, io_output_ports[p]);
+        }
+    }
+    else {
+        fprintf(stderr, "ERROR at %s: failed to open file %s for writing.\n", __PRETTY_FUNCTION__, io_output_file);
+        perror(__PRETTY_FUNCTION__);
+    }
+
+    /* finally, close the file */
+    if (output_file_fd) {
+        fclose(output_file_fd);
+    }
+
+}
+
 
 static uint32_t io_spectrum_read(void *opaque, uint32_t addr)
 {
@@ -222,7 +312,7 @@ static void zx_spectrum_common_init(ram_addr_t ram_size,
     int rom_size;
     int ram_base, rom_base;
     CPUState *env;
-    int port, pagebyte;
+    // int port, pagebyte;
     int haltaddr;
 
     /* init CPUs */
@@ -299,17 +389,16 @@ static void zx_spectrum_common_init(ram_addr_t ram_size,
     }
 
     /* map entire I/O space */
-    register_ioport_read(0, 0x10000, 1, io_spectrum_read, NULL);
-    for (port = 0; port < 0x10000; port++) {
-        if ((port & 1) == 0) {
-            register_ioport_write(port, 1, 1, io_spectrum_write, NULL);
-        }
-        if (is_128k) {
-            if ((port & 0x8002) == 0) {
-                register_ioport_write(port, 1, 1, io_page_write, env);
-            }
-        }
-    }
+    if (io_output_file) 
+        /* redirect OUTs to file if necessary*/
+        register_ioport_write(0, 0x10000, 1, io_file_write, NULL);
+    else 
+        register_ioport_write(0, 0x10000, 1, io_spectrum_write, NULL);
+
+    if (io_input_file)
+        register_ioport_read (0, 0x10000, 1, io_file_read,  NULL);
+    else
+        register_ioport_read (0, 0x10000, 1, io_spectrum_read, NULL);
 
     zx_video_init(ram_offset, is_128k);
     zx_keyboard_init();
