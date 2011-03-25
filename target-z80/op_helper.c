@@ -178,7 +178,8 @@ void HELPER(halt)(void)
 
 void HELPER(in_T0_im)(uint32_t val)
 {
-    T0 = cpu_inb(env, (A << 8) | val);
+    //    T0 = cpu_inb(env, (A << 8) | val);
+    T0 = cpu_inb(env, val);
 }
 
 void HELPER(in_T0_bc_cc)(void)
@@ -195,7 +196,8 @@ void HELPER(in_T0_bc_cc)(void)
 
 void HELPER(out_T0_im)(uint32_t val)
 {
-    cpu_outb(env, (A << 8) | val, T0);
+    // cpu_outb(env, (A << 8) | val, T0);
+    cpu_outb(env, val, T0);
 }
 
 void HELPER(out_T0_bc)(void)
