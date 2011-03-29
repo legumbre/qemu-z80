@@ -253,7 +253,7 @@ static int gdb_signal_to_target (int sig)
         return -1;
 }
 
-#define DEBUG_GDB
+// #define DEBUG_GDB
 
 typedef struct GDBRegisterState {
     int base_reg;
@@ -1317,7 +1317,7 @@ static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
           GET_REG8(env->regs[n]);
           return 1;
       case R_PC:
-          printf("%s about to read PC: %x \n", __PRETTY_FUNCTION__, env->pc);
+          // printf("%s about to read PC: %x \n", __PRETTY_FUNCTION__, env->pc);
           GET_REG16(env->pc);
           return 2;
       default:
@@ -1348,7 +1348,7 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
           env->regs[n]=tmp;
           return 1;
       case R_PC:
-          printf("%s about to change PC: %x -> %x \n", __PRETTY_FUNCTION__, env->pc, tmp);
+          // printf("%s about to change PC: %x -> %x \n", __PRETTY_FUNCTION__, env->pc, tmp);
           env->pc=tmp;
           return 2;
       default:

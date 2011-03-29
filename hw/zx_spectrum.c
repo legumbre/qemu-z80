@@ -275,8 +275,8 @@ static uint32_t io_file_read(void *opaque, uint32_t addr)
 
 static void io_file_write(void *opaque, uint32_t addr, uint32_t data)
 {
-    fprintf(stderr, "%s: about to write to io_output_file: %s\n", __PRETTY_FUNCTION__, io_output_file);
-    fprintf(stderr, "%s: port %x value %x\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)data);
+    // fprintf(stderr, "%s: about to write to io_output_file: %s\n", __PRETTY_FUNCTION__, io_output_file);
+    fprintf(stderr, "INFO -- %s: port 0x%02X value 0x%02X\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)data);
 
     uint8_t port = (uint8_t)addr;
     io_output_ports[port] = (uint8_t)data;
@@ -307,14 +307,13 @@ static void io_file_write(void *opaque, uint32_t addr, uint32_t data)
 	
 	/* first, open the log file if neeeded */
 	if (!io_output_log_fd) {
-	    fprintf(stderr, "%s: about to open io_output_log_file: %s\n",
-		    __PRETTY_FUNCTION__, 
-		    io_output_log_file);
+//	    fprintf(stderr, "%s: about to open io_output_log_file: %s\n",
+//		    __PRETTY_FUNCTION__, 
+//		    io_output_log_file);
 
 	    io_output_log_fd = fopen(io_output_log_file, "w");
 	    if (io_output_log_fd) {
-		// 
-
+		//TODO: log info
 	    }
 	    else {
 		fprintf(stderr, "ERROR at %s: failed to open file %s for writing.\n",
