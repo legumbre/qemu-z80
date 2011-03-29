@@ -276,7 +276,12 @@ static uint32_t io_file_read(void *opaque, uint32_t addr)
 static void io_file_write(void *opaque, uint32_t addr, uint32_t data)
 {
     // fprintf(stderr, "%s: about to write to io_output_file: %s\n", __PRETTY_FUNCTION__, io_output_file);
-    fprintf(stderr, "INFO -- %s: port 0x%02X value 0x%02X\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)data);
+    
+    /* get current PC from cpu state */
+    uint32_t pc = zx_env->pc;
+    //    fprintf(stderr, "INFO -- %s:    PC: 0x%04X  OUT port=0x%02X  value=0x%02X\n", __PRETTY_FUNCTION__, pc, (uint8_t)addr, (uint8_t)data);
+
+    fprintf(stderr, "INFO -- %s:    OUT port=0x%02X  value=0x%02X\n", __PRETTY_FUNCTION__, (uint8_t)addr, (uint8_t)data);
 
     uint8_t port = (uint8_t)addr;
     io_output_ports[port] = (uint8_t)data;
@@ -325,13 +330,12 @@ static void io_file_write(void *opaque, uint32_t addr, uint32_t data)
 
 	/* append to the output log file */
 	if (io_output_log_fd){             // sanity check
-	    const char *linefmt = "PC:0x%04X OUT(0x%02X):    0x%02X\r\n";
+	    const char *linefmt = "OUT(0x%02X):    0x%02X\r\n";
 
-	    /* get current PC from cpu state */
-	    uint32_t pc = zx_env->pc;
+
 	    
 	    /* write to the file */
-	    fprintf(io_output_log_fd, linefmt, pc, port, io_output_ports[port]);
+	    fprintf(io_output_log_fd, linefmt, port, io_output_ports[port]);
 	    fflush(io_output_log_fd);
 	}
 	else {

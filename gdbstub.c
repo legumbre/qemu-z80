@@ -1625,6 +1625,9 @@ static void gdb_set_cpu_pc(GDBState *s, target_ulong pc)
     s->c_cpu->pc = pc;
 #elif defined (TARGET_ALPHA)
     s->c_cpu->pc = pc;
+#elif defined (TARGET_Z80)
+    s->c_cpu->regs[R_PC] = pc;
+    s->c_cpu->pc = pc;
 #endif
 }
 
