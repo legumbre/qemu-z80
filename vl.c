@@ -196,6 +196,7 @@ static const char *data_dir;
 const char *bios_name = NULL;
 const char *io_input_file = NULL;
 const char *io_output_file = NULL;
+const char *io_output_log_file = NULL;
 static void *ioport_opaque[MAX_IOPORTS];
 static IOPortReadFunc *ioport_read_table[3][MAX_IOPORTS];
 static IOPortWriteFunc *ioport_write_table[3][MAX_IOPORTS];
@@ -5692,6 +5693,12 @@ int main(int argc, char **argv, char **envp)
                 fprintf(stderr,
                         "io-output-file is %s\n", io_output_file);
                 break;
+            case QEMU_OPTION_io_output_log_file:
+                io_output_log_file = optarg;
+                fprintf(stderr,
+                        "io-output-log-file is %s\n", io_output_log_file);
+                break;
+
 #endif
             }
         }

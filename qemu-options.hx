@@ -1582,4 +1582,7 @@ DEF("io-input-file", HAS_ARG, QEMU_OPTION_io_input_file,
 DEF("io-output-file", HAS_ARG, QEMU_OPTION_io_output_file,
     "-io-output-file out_file\n"
     "                redirect OUT instructions output to out_file\n")
+DEF("io-output-log-file", HAS_ARG, QEMU_OPTION_io_output_log_file,
+    "-io-output-log-file out_log_file\n"
+    "                write a log of all OUT instructions to out_log_file\n")
 #endif
