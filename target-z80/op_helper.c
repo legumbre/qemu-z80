@@ -238,7 +238,7 @@ void HELPER(djnz)(uint32_t pc1, uint32_t pc2)
     (!!((~(op1 ^ op2) & (op1 ^ res)) >> (size - 1)))
 
 #define signed_overflow_sub(op1, op2, res, size) \
-    (!!(((op1 ^ op2) & (op1 ^ res)) >> (size - 1)))
+    (!!((((1 << size) - 1) & ((op1 ^ op2) & (op1 ^ res))) >> (size - 1)))
 
 void HELPER(add_cc)(void)
 {
